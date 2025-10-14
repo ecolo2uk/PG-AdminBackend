@@ -36,19 +36,9 @@ const app = express();
 
 // Middleware
 app.use(bodyParser.json());
-app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://payorbit.co.in',
-    'https://www.payorbit.co.in'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
-}));
+app.use(cors());
 
 // MongoDB connection
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/your-pg-admin-db';
 
 connectDB();
 
