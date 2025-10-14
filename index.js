@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
 import bodyParser from 'body-parser';
+import connectDB from "./config/db.js"; // ✅ ही line add करा
 
 // Import routes
 import adminauthRoutes from "./routes/adminauthRoutes.js";
@@ -35,19 +36,21 @@ const app = express();
 
 // Middleware
 app.use(bodyParser.json());
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'https://payorbit.co.in',
+    'https://www.payorbit.co.in'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
 
 // MongoDB connection
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/your-pg-admin-db';
 
-mongoose.connect(MONGO_URI)
-    .then(() => {
-        console.log('Connected to MongoDB');
-    })
-    .catch((error) => {
-        console.error('MongoDB connection error:', error);
-        process.exit(1);
-    });
+connectDB();
 
 // Routes
 app.use('/api/admin/auth', adminauthRoutes);
