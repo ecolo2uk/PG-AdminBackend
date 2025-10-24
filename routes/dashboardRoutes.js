@@ -6,7 +6,8 @@ import {
   getAllMerchants,
   getTransactionsByMerchant,
   getTransactionsByMerchantStatus,
-  debugDataStructure
+  debugDataStructure,
+  getSalesReport 
 } from '../controllers/dashboardController.js';
 
 const router = express.Router();
@@ -18,4 +19,6 @@ router.get('/merchants', getAllMerchants);
 router.get('/transactions-by-merchant', getTransactionsByMerchantStatus);
 router.get('/debug-structure', debugDataStructure);
 router.get('/transactions-by-merchant', getTransactionsByMerchant);
+router.get('/sales-report', getSalesReport); // <--- ADD THIS ROUTE
+
 export default router;

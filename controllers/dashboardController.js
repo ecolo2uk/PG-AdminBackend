@@ -669,3 +669,116 @@ export const debugDataStructure = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// Add this to your dashboardController.js
+
+// Helper function to determine the grouping for aggregation based on timeFilter
+const getGroupingForSalesReport = (timeFilter) => {
+    switch (timeFilter) {
+        case 'today':
+        case 'yesterday':
+            // Group by hour for daily breakdown
+            return {
+                year: { $year: "$createdAt" },
+                month: { $month: "$createdAt" },
+                day: { $dayOfMonth: "$createdAt" },
+                hour: { $hour: "$createdAt" }
+            };
+        case 'this_week':
+        case 'last_week':
+        case 'this_month':
+        case 'last_month':
+            // Group by day of month
+            return {
+                year: { $year: "$createdAt" },
+                month: { $month: "$createdAt" },
+                day: { $dayOfMonth: "$createdAt" }
+            };
+        case 'this_year':
+        case 'last_year':
+        case 'custom': // If custom range spans months/years
+            // Group by month
+            return {
+                year: { $year: "$createdAt" },
+                month: { $month: "$createdAt" }
+            };
+        default:
+            // Default to grouping by day if no specific filter
+            return {
+                year: { $year: "$createdAt" },
+                month: { $month: "$createdAt" },
+                day: { $dayOfMonth: "$createdAt" }
+            };
+    }
+};
+
+// New function for Sales Report Data
+export const getSalesReport = async (req, res) => {
+    try {
+        const { merchantId, timeFilter = 'this_month', startDate, endDate } = req.query;
+        console.log('🟡 Fetching sales report with:', { merchantId, timeFilter, startDate, endDate });
+
+        let matchQuery = {};
+
+        // Merchant filter with ObjectId conversion
+        if (merchantId && merchantId !== 'all') {
+            matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+        }
+
+        // Date filter
+        const dateRange = getDateRange(timeFilter, startDate, endDate);
+        matchQuery = { ...matchQuery, ...dateRange };
+
+        // Define how to group the data based on the time filter
+        const groupById = getGroupingForSalesReport(timeFilter);
+
+        const salesReport = await Transaction.aggregate([
+            { $match: matchQuery },
+            {
+                $group: {
+                    _id: groupById, // Group by hour, day, or month
+                    totalIncome: {
+                        $sum: {
+                            $cond: [{ $in: ["$status", ["Success", "SUCCESS"]] }, "$amount", 0]
+                        }
+                    },
+                    totalCostOfSales: { // Assuming 'cost of sales' is represented by failed/refunded amounts for this dashboard context
+                        $sum: {
+                            $cond: [{ $in: ["$status", ["Failed", "FAILED", "Refund", "REFUND"]] }, "$amount", 0]
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    // Reconstruct date for sorting and display
+                    date: {
+                        $dateFromParts: {
+                            year: "$_id.year",
+                            month: "$_id.month",
+                            day: { $ifNull: ["$_id.day", 1] }, // Default to 1st if not grouping by day
+                            hour: { $ifNull: ["$_id.hour", 0] } // Default to 0 if not grouping by hour
+                        }
+                    },
+                    month: "$_id.month", // For month-based labels
+                    hour: "$_id.hour",   // For hour-based labels
+                    totalIncome: { $ifNull: ["$totalIncome", 0] },
+                    totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] }
+                }
+            },
+            { $sort: { date: 1 } } // Sort by date to ensure correct chart order
+        ]);
+
+        console.log(`✅ Sales report fetched: ${salesReport.length} entries`);
+        res.status(200).json(salesReport);
+
+    } catch (error) {
+        console.error('❌ Error fetching sales report:', error);
+        res.status(500).json({
+            message: 'Server Error',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+};
