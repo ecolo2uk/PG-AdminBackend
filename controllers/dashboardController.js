@@ -672,13 +672,16 @@ export const debugDataStructure = async (req, res) => {
 
 
 // Sale Report Data API
+// Sale Report Data API - Enhanced for Chart
 export const getSaleReportData = async (req, res) => {
   try {
     const { timeFilter = 'today', merchantId } = req.query;
 
     console.log('🟡 Fetching sale report data with:', { timeFilter, merchantId });
 
-    let matchQuery = {};
+    let matchQuery = {
+      status: { $in: ['Success', 'SUCCESS'] } // Only successful transactions
+    };
     
     // Merchant filter
     if (merchantId && merchantId !== 'all') {
@@ -693,49 +696,32 @@ export const getSaleReportData = async (req, res) => {
 
     console.log('🔍 Sale Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
-    // Get daily/weekly/monthly sales data for chart
-    const salesData = await Transaction.aggregate([
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: {
-            // Group by date based on time filter
-            $dateToString: {
-              format: timeFilter === 'year' ? '%Y-%m' : '%Y-%m-%d',
-              date: '$createdAt'
-            }
-          },
-          totalSales: {
-            $sum: {
-              $cond: [
-                { $in: ['$status', ['Success', 'SUCCESS']] },
-                '$amount',
-                0
-              ]
-            }
-          },
-          transactionCount: {
-            $sum: {
-              $cond: [
-                { $in: ['$status', ['Success', 'SUCCESS']] },
-                1,
-                0
-              ]
-            }
-          },
-          date: { $first: '$createdAt' }
-        }
-      },
-      { $sort: { date: 1 } },
-      {
-        $project: {
-          _id: 0,
-          date: '$_id',
-          totalSales: 1,
-          transactionCount: 1
-        }
-      }
-    ]);
+    // Determine grouping format based on time filter
+    let dateFormat, chartData;
+    
+    switch (timeFilter) {
+      case 'today':
+        // Hourly data for today
+        dateFormat = '%Y-%m-%d %H:00';
+        chartData = await getHourlySalesData(matchQuery);
+        break;
+      
+      case 'month':
+        // Daily data for month
+        dateFormat = '%Y-%m-%d';
+        chartData = await getDailySalesData(matchQuery);
+        break;
+      
+      case 'year':
+        // Monthly data for year
+        dateFormat = '%Y-%m';
+        chartData = await getMonthlySalesData(matchQuery);
+        break;
+      
+      default:
+        dateFormat = '%Y-%m-%d';
+        chartData = await getDailySalesData(matchQuery);
+    }
 
     // Get summary statistics
     const summary = await Transaction.aggregate([
@@ -743,49 +729,31 @@ export const getSaleReportData = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalSalesAmount: {
-            $sum: {
-              $cond: [
-                { $in: ['$status', ['Success', 'SUCCESS']] },
-                '$amount',
-                0
-              ]
-            }
-          },
-          totalTransactions: {
-            $sum: {
-              $cond: [
-                { $in: ['$status', ['Success', 'SUCCESS']] },
-                1,
-                0
-              ]
-            }
-          },
-          averageTransactionValue: {
-            $avg: {
-              $cond: [
-                { $in: ['$status', ['Success', 'SUCCESS']] },
-                '$amount',
-                null
-              ]
-            }
-          }
+          totalSalesAmount: { $sum: '$amount' },
+          totalTransactions: { $sum: 1 },
+          averageTransactionValue: { $avg: '$amount' },
+          maxTransaction: { $max: '$amount' },
+          minTransaction: { $min: '$amount' }
         }
       }
     ]);
 
     const result = {
-      salesData: salesData || [],
+      chartData: chartData || [],
       summary: summary.length > 0 ? summary[0] : {
         totalSalesAmount: 0,
         totalTransactions: 0,
-        averageTransactionValue: 0
-      }
+        averageTransactionValue: 0,
+        maxTransaction: 0,
+        minTransaction: 0
+      },
+      timeFilter: timeFilter
     };
 
     console.log('✅ Sale report data fetched:', {
-      dataPoints: result.salesData.length,
-      totalSales: result.summary.totalSalesAmount
+      dataPoints: result.chartData.length,
+      totalSales: result.summary.totalSalesAmount,
+      timeFilter: timeFilter
     });
 
     res.status(200).json(result);
@@ -797,4 +765,168 @@ export const getSaleReportData = async (req, res) => {
       error: error.message 
     });
   }
+};
+
+// Helper function for hourly data (Today)
+const getHourlySalesData = async (matchQuery) => {
+  const salesData = await Transaction.aggregate([
+    { $match: matchQuery },
+    {
+      $group: {
+        _id: {
+          $dateToString: {
+            format: '%Y-%m-%d %H:00',
+            date: '$createdAt'
+          }
+        },
+        totalSales: { $sum: '$amount' },
+        transactionCount: { $sum: 1 },
+        hour: { $first: { $hour: '$createdAt' } }
+      }
+    },
+    { $sort: { hour: 1 } },
+    {
+      $project: {
+        _id: 0,
+        date: '$_id',
+        hour: 1,
+        totalSales: 1,
+        transactionCount: 1,
+        label: { $concat: [ { $toString: '$hour' }, ':00' ] }
+      }
+    }
+  ]);
+
+  // Fill missing hours with zero values
+  return fillMissingHours(salesData);
+};
+
+// Helper function for daily data (This Month)
+const getDailySalesData = async (matchQuery) => {
+  const salesData = await Transaction.aggregate([
+    { $match: matchQuery },
+    {
+      $group: {
+        _id: {
+          $dateToString: {
+            format: '%Y-%m-%d',
+            date: '$createdAt'
+          }
+        },
+        totalSales: { $sum: '$amount' },
+        transactionCount: { $sum: 1 },
+        day: { $first: { $dayOfMonth: '$createdAt' } },
+        month: { $first: { $month: '$createdAt' } }
+      }
+    },
+    { $sort: { '_id': 1 } },
+    {
+      $project: {
+        _id: 0,
+        date: '$_id',
+        totalSales: 1,
+        transactionCount: 1,
+        label: { $concat: [ 'Day ', { $toString: '$day' } ] }
+      }
+    }
+  ]);
+
+  return salesData;
+};
+
+// Helper function for monthly data (This Year)
+const getMonthlySalesData = async (matchQuery) => {
+  const salesData = await Transaction.aggregate([
+    { $match: matchQuery },
+    {
+      $group: {
+        _id: {
+          $dateToString: {
+            format: '%Y-%m',
+            date: '$createdAt'
+          }
+        },
+        totalSales: { $sum: '$amount' },
+        transactionCount: { $sum: 1 },
+        month: { $first: { $month: '$createdAt' } }
+      }
+    },
+    { $sort: { month: 1 } },
+    {
+      $project: {
+        _id: 0,
+        date: '$_id',
+        totalSales: 1,
+        transactionCount: 1,
+        label: {
+          $switch: {
+            branches: [
+              { case: { $eq: ['$month', 1] }, then: 'Jan' },
+              { case: { $eq: ['$month', 2] }, then: 'Feb' },
+              { case: { $eq: ['$month', 3] }, then: 'Mar' },
+              { case: { $eq: ['$month', 4] }, then: 'Apr' },
+              { case: { $eq: ['$month', 5] }, then: 'May' },
+              { case: { $eq: ['$month', 6] }, then: 'Jun' },
+              { case: { $eq: ['$month', 7] }, then: 'Jul' },
+              { case: { $eq: ['$month', 8] }, then: 'Aug' },
+              { case: { $eq: ['$month', 9] }, then: 'Sep' },
+              { case: { $eq: ['$month', 10] }, then: 'Oct' },
+              { case: { $eq: ['$month', 11] }, then: 'Nov' },
+              { case: { $eq: ['$month', 12] }, then: 'Dec' }
+            ],
+            default: 'Unknown'
+          }
+        }
+      }
+    }
+  ]);
+
+  return fillMissingMonths(salesData);
+};
+
+// Fill missing hours with zero values
+const fillMissingHours = (data) => {
+  const filledData = [];
+  for (let hour = 0; hour < 24; hour++) {
+    const hourStr = hour.toString().padStart(2, '0') + ':00';
+    const existingData = data.find(item => item.hour === hour);
+    
+    if (existingData) {
+      filledData.push(existingData);
+    } else {
+      filledData.push({
+        date: `${new Date().toISOString().split('T')[0]} ${hourStr}`,
+        hour: hour,
+        totalSales: 0,
+        transactionCount: 0,
+        label: hourStr
+      });
+    }
+  }
+  return filledData;
+};
+
+// Fill missing months with zero values
+const fillMissingMonths = (data) => {
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const filledData = [];
+  
+  monthNames.forEach((monthName, index) => {
+    const monthNumber = index + 1;
+    const existingData = data.find(item => item.month === monthNumber);
+    
+    if (existingData) {
+      filledData.push(existingData);
+    } else {
+      filledData.push({
+        date: `${new Date().getFullYear()}-${monthNumber.toString().padStart(2, '0')}`,
+        month: monthNumber,
+        totalSales: 0,
+        transactionCount: 0,
+        label: monthName
+      });
+    }
+  });
+  
+  return filledData;
 };
