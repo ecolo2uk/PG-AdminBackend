@@ -669,3 +669,132 @@ export const debugDataStructure = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+
+// Sale Report Data API
+export const getSaleReportData = async (req, res) => {
+  try {
+    const { timeFilter = 'today', merchantId } = req.query;
+
+    console.log('🟡 Fetching sale report data with:', { timeFilter, merchantId });
+
+    let matchQuery = {};
+    
+    // Merchant filter
+    if (merchantId && merchantId !== 'all') {
+      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+    }
+
+    // Date filter
+    if (timeFilter !== 'all') {
+      const dateRange = getDateRange(timeFilter);
+      matchQuery = { ...matchQuery, ...dateRange };
+    }
+
+    console.log('🔍 Sale Report Match Query:', JSON.stringify(matchQuery, null, 2));
+
+    // Get daily/weekly/monthly sales data for chart
+    const salesData = await Transaction.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: {
+            // Group by date based on time filter
+            $dateToString: {
+              format: timeFilter === 'year' ? '%Y-%m' : '%Y-%m-%d',
+              date: '$createdAt'
+            }
+          },
+          totalSales: {
+            $sum: {
+              $cond: [
+                { $in: ['$status', ['Success', 'SUCCESS']] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          transactionCount: {
+            $sum: {
+              $cond: [
+                { $in: ['$status', ['Success', 'SUCCESS']] },
+                1,
+                0
+              ]
+            }
+          },
+          date: { $first: '$createdAt' }
+        }
+      },
+      { $sort: { date: 1 } },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id',
+          totalSales: 1,
+          transactionCount: 1
+        }
+      }
+    ]);
+
+    // Get summary statistics
+    const summary = await Transaction.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: null,
+          totalSalesAmount: {
+            $sum: {
+              $cond: [
+                { $in: ['$status', ['Success', 'SUCCESS']] },
+                '$amount',
+                0
+              ]
+            }
+          },
+          totalTransactions: {
+            $sum: {
+              $cond: [
+                { $in: ['$status', ['Success', 'SUCCESS']] },
+                1,
+                0
+              ]
+            }
+          },
+          averageTransactionValue: {
+            $avg: {
+              $cond: [
+                { $in: ['$status', ['Success', 'SUCCESS']] },
+                '$amount',
+                null
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    const result = {
+      salesData: salesData || [],
+      summary: summary.length > 0 ? summary[0] : {
+        totalSalesAmount: 0,
+        totalTransactions: 0,
+        averageTransactionValue: 0
+      }
+    };
+
+    console.log('✅ Sale report data fetched:', {
+      dataPoints: result.salesData.length,
+      totalSales: result.summary.totalSalesAmount
+    });
+
+    res.status(200).json(result);
+
+  } catch (error) {
+    console.error('❌ Error fetching sale report data:', error);
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: error.message 
+    });
+  }
+};
