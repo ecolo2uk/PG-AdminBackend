@@ -712,7 +712,7 @@ const getGroupingForSalesReport = (timeFilter) => {
     }
 };
 
-// New function for Sales Report Data
+// In your dashboardController.js - Update the getSalesReport function
 export const getSalesReport = async (req, res) => {
     try {
         const { merchantId, timeFilter = 'this_month', startDate, endDate } = req.query;
@@ -736,41 +736,54 @@ export const getSalesReport = async (req, res) => {
             { $match: matchQuery },
             {
                 $group: {
-                    _id: groupById, // Group by hour, day, or month
+                    _id: groupById,
+                    // Income from successful transactions
                     totalIncome: {
                         $sum: {
                             $cond: [{ $in: ["$status", ["Success", "SUCCESS"]] }, "$amount", 0]
                         }
                     },
-                    totalCostOfSales: { // Assuming 'cost of sales' is represented by failed/refunded amounts for this dashboard context
+                    // Cost of Sales from failed and refunded transactions
+                    totalCostOfSales: {
                         $sum: {
                             $cond: [{ $in: ["$status", ["Failed", "FAILED", "Refund", "REFUND"]] }, "$amount", 0]
                         }
-                    }
+                    },
+                    // Include pending transactions as potential income
+                    totalPendingAmount: {
+                        $sum: {
+                            $cond: [{ $in: ["$status", ["Pending", "PENDING"]] }, "$amount", 0]
+                        }
+                    },
+                    // Total transactions count for reference
+                    totalTransactions: { $sum: 1 }
                 }
             },
             {
                 $project: {
                     _id: 0,
-                    // Reconstruct date for sorting and display
                     date: {
                         $dateFromParts: {
                             year: "$_id.year",
                             month: "$_id.month",
-                            day: { $ifNull: ["$_id.day", 1] }, // Default to 1st if not grouping by day
-                            hour: { $ifNull: ["$_id.hour", 0] } // Default to 0 if not grouping by hour
+                            day: { $ifNull: ["$_id.day", 1] },
+                            hour: { $ifNull: ["$_id.hour", 0] }
                         }
                     },
-                    month: "$_id.month", // For month-based labels
-                    hour: "$_id.hour",   // For hour-based labels
+                    month: "$_id.month",
+                    hour: "$_id.hour",
                     totalIncome: { $ifNull: ["$totalIncome", 0] },
-                    totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] }
+                    totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] },
+                    totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
+                    totalTransactions: { $ifNull: ["$totalTransactions", 0] }
                 }
             },
-            { $sort: { date: 1 } } // Sort by date to ensure correct chart order
+            { $sort: { date: 1 } }
         ]);
 
         console.log(`✅ Sales report fetched: ${salesReport.length} entries`);
+        console.log('📊 Sales report sample:', salesReport[0]);
+        
         res.status(200).json(salesReport);
 
     } catch (error) {
