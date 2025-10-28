@@ -348,7 +348,7 @@ export const getMerchantTransactionSummary = async (req, res) => {
           },
           refundCount: { 
             $sum: { 
-              $cond: [{ $eq: ["$status", "REFUND"] }, 1, 0] 
+              $cond: [{ $eq: ["$status", ["Refund","REFUND"] ]}, 1, 0] 
             } 
           },
           totalAmount: { $sum: "$amount" }
