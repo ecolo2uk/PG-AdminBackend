@@ -1,7 +1,7 @@
 import Transaction from '../models/Transaction.js';
 import axios from 'axios';
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'https://pg-admin-backend.vercel.app';
 
 export const generatePaymentLink = async (req, res) => {
   try {

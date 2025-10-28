@@ -1,7 +1,6 @@
 import Transaction from '../models/Transaction.js';
 import User from '../models/User.js';
 import mongoose from 'mongoose';
-// Helper function to get date ranges - UPDATED WITH CUSTOM RANGE
 const getDateRange = (filter, startDate, endDate) => {
   const now = new Date();
   let start, end;
@@ -68,7 +67,6 @@ const getDateRange = (filter, startDate, endDate) => {
   };
 };
 
-// Get All Merchant Users for Filter
 export const getAllMerchants = async (req, res) => {
   try {
     const merchants = await User.find({ 
@@ -130,7 +128,7 @@ export const getDashboardAnalytics = async (req, res) => {
           },
           totalRefundAmount: {
             $sum: { 
-              $cond: [{ $eq: ["$status", "REFUND"] }, "$amount", 0] 
+              $cond: [{ $eq: ["$status",["Refund" ,"REFUND"]] }, "$amount", 0] 
             }
           },
           totalSuccessOrders: {
@@ -196,8 +194,7 @@ export const getDashboardAnalytics = async (req, res) => {
   }
 };
 
-// Get Transactions by Merchant - NEW ENDPOINT
-// Get Transactions by Merchant - NEW ENDPOINT
+
 export const getTransactionsByMerchant = async (req, res) => {
   try {
     const { merchantId, timeFilter = 'today', page = 1, limit = 10 } = req.query;
@@ -713,9 +710,10 @@ const getGroupingForSalesReport = (timeFilter) => {
 };
 
 // In your dashboardController.js - Update the getSalesReport function
+// In your dashboardController.js - Fix the getSalesReport function
 export const getSalesReport = async (req, res) => {
     try {
-        const { merchantId, timeFilter = 'this_month', startDate, endDate } = req.query;
+        const { merchantId, timeFilter = 'today', startDate, endDate } = req.query;
         console.log('🟡 Fetching sales report with:', { merchantId, timeFilter, startDate, endDate });
 
         let matchQuery = {};
@@ -728,6 +726,8 @@ export const getSalesReport = async (req, res) => {
         // Date filter
         const dateRange = getDateRange(timeFilter, startDate, endDate);
         matchQuery = { ...matchQuery, ...dateRange };
+
+        console.log('🔍 Sales Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
         // Define how to group the data based on the time filter
         const groupById = getGroupingForSalesReport(timeFilter);
@@ -749,14 +749,27 @@ export const getSalesReport = async (req, res) => {
                             $cond: [{ $in: ["$status", ["Failed", "FAILED", "Refund", "REFUND"]] }, "$amount", 0]
                         }
                     },
-                    // Include pending transactions as potential income
+                    // Pending transactions
                     totalPendingAmount: {
                         $sum: {
                             $cond: [{ $in: ["$status", ["Pending", "PENDING"]] }, "$amount", 0]
                         }
                     },
-                    // Total transactions count for reference
-                    totalTransactions: { $sum: 1 }
+                    // Total amount for all transactions (for verification)
+                    totalAmount: { $sum: "$amount" },
+                    // Count transactions by status for debugging
+                    successCount: {
+                        $sum: { $cond: [{ $in: ["$status", ["Success", "SUCCESS"]] }, 1, 0] }
+                    },
+                    failedCount: {
+                        $sum: { $cond: [{ $in: ["$status", ["Failed", "FAILED"]] }, 1, 0] }
+                    },
+                    pendingCount: {
+                        $sum: { $cond: [{ $in: ["$status", ["Pending", "PENDING"]] }, 1, 0] }
+                    },
+                    refundCount: {
+                        $sum: { $cond: [{ $in: ["$status", ["Refund", "REFUND"]] }, 1, 0] }
+                    }
                 }
             },
             {
@@ -775,14 +788,30 @@ export const getSalesReport = async (req, res) => {
                     totalIncome: { $ifNull: ["$totalIncome", 0] },
                     totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] },
                     totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
-                    totalTransactions: { $ifNull: ["$totalTransactions", 0] }
+                    totalAmount: { $ifNull: ["$totalAmount", 0] },
+                    successCount: 1,
+                    failedCount: 1,
+                    pendingCount: 1,
+                    refundCount: 1
                 }
             },
             { $sort: { date: 1 } }
         ]);
 
         console.log(`✅ Sales report fetched: ${salesReport.length} entries`);
-        console.log('📊 Sales report sample:', salesReport[0]);
+        
+        if (salesReport.length > 0) {
+            console.log('📊 Sales report details:', {
+                firstEntry: salesReport[0],
+                totalEntries: salesReport.length,
+                totalIncome: salesReport.reduce((sum, item) => sum + item.totalIncome, 0),
+                totalPending: salesReport.reduce((sum, item) => sum + item.totalPendingAmount, 0),
+                totalCost: salesReport.reduce((sum, item) => sum + item.totalCostOfSales, 0),
+                totalAmount: salesReport.reduce((sum, item) => sum + item.totalAmount, 0)
+            });
+        } else {
+            console.log('📊 No sales report data found for the given filters');
+        }
         
         res.status(200).json(salesReport);
 
@@ -795,3 +824,5 @@ export const getSalesReport = async (req, res) => {
         });
     }
 };
+
+

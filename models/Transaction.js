@@ -32,7 +32,7 @@ const transactionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['Pending', 'SUCCESS', 'FAILED', 'CANCELLED'],
+     enum: ["Pending", "Success", "Failed", "Cancelled", "Refund"],
     default: 'Pending'
   },
   upiId: {
