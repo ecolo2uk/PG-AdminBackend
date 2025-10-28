@@ -95,17 +95,16 @@ export const getDashboardAnalytics = async (req, res) => {
 
     let matchQuery = {};
     
-    // Merchant filter with ObjectId conversion
     if (merchantId && merchantId !== 'all') {
       matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
     }
 
-    // Date filter
     if (timeFilter !== 'all') {
       const dateRange = getDateRange(timeFilter, startDate, endDate);
       matchQuery = { ...matchQuery, ...dateRange };
     }
 
+    // ✅ FIXED: Consistent status matching for all statuses
     const analytics = await Transaction.aggregate([
       { $match: matchQuery },
       {
@@ -126,9 +125,10 @@ export const getDashboardAnalytics = async (req, res) => {
               $cond: [{ $in: ["$status", ["Pending", "PENDING"]] }, "$amount", 0] 
             }
           },
+          // ✅ FIXED: Refund status matching
           totalRefundAmount: {
             $sum: { 
-              $cond: [{ $eq: ["$status",["Refund" ,"REFUND"]] }, "$amount", 0] 
+              $cond: [{ $in: ["$status", ["Refund", "REFUND"]] }, "$amount", 0] 
             }
           },
           totalSuccessOrders: {
@@ -146,9 +146,10 @@ export const getDashboardAnalytics = async (req, res) => {
               $cond: [{ $in: ["$status", ["Pending", "PENDING"]] }, 1, 0] 
             }
           },
+          // ✅ FIXED: Refund orders count
           totalRefundOrders: {
             $sum: { 
-              $cond: [{ $eq: ["$status", "REFUND"] }, 1, 0] 
+              $cond: [{ $in: ["$status", ["Refund", "REFUND"]] }, 1, 0] 
             }
           },
           totalTransactions: { $sum: 1 }
@@ -193,7 +194,6 @@ export const getDashboardAnalytics = async (req, res) => {
     });
   }
 };
-
 
 export const getTransactionsByMerchant = async (req, res) => {
   try {
@@ -709,8 +709,6 @@ const getGroupingForSalesReport = (timeFilter) => {
     }
 };
 
-// In your dashboardController.js - Update the getSalesReport function
-// In your dashboardController.js - Fix the getSalesReport function
 export const getSalesReport = async (req, res) => {
     try {
         const { merchantId, timeFilter = 'today', startDate, endDate } = req.query;
@@ -718,18 +716,15 @@ export const getSalesReport = async (req, res) => {
 
         let matchQuery = {};
 
-        // Merchant filter with ObjectId conversion
         if (merchantId && merchantId !== 'all') {
             matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
         }
 
-        // Date filter
         const dateRange = getDateRange(timeFilter, startDate, endDate);
         matchQuery = { ...matchQuery, ...dateRange };
 
         console.log('🔍 Sales Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
-        // Define how to group the data based on the time filter
         const groupById = getGroupingForSalesReport(timeFilter);
 
         const salesReport = await Transaction.aggregate([
@@ -743,10 +738,16 @@ export const getSalesReport = async (req, res) => {
                             $cond: [{ $in: ["$status", ["Success", "SUCCESS"]] }, "$amount", 0]
                         }
                     },
-                    // Cost of Sales from failed and refunded transactions
+                    // Cost of Sales from failed transactions
                     totalCostOfSales: {
                         $sum: {
-                            $cond: [{ $in: ["$status", ["Failed", "FAILED", "Refund", "REFUND"]] }, "$amount", 0]
+                            $cond: [{ $in: ["$status", ["Failed", "FAILED"]] }, "$amount", 0]
+                        }
+                    },
+                    // ✅ ADDED: Refund amount separately
+                    totalRefundAmount: {
+                        $sum: {
+                            $cond: [{ $in: ["$status", ["Refund", "REFUND"]] }, "$amount", 0]
                         }
                     },
                     // Pending transactions
@@ -787,6 +788,7 @@ export const getSalesReport = async (req, res) => {
                     hour: "$_id.hour",
                     totalIncome: { $ifNull: ["$totalIncome", 0] },
                     totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] },
+                    totalRefundAmount: { $ifNull: ["$totalRefundAmount", 0] }, // ✅ ADDED
                     totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
                     totalAmount: { $ifNull: ["$totalAmount", 0] },
                     successCount: 1,
@@ -807,6 +809,7 @@ export const getSalesReport = async (req, res) => {
                 totalIncome: salesReport.reduce((sum, item) => sum + item.totalIncome, 0),
                 totalPending: salesReport.reduce((sum, item) => sum + item.totalPendingAmount, 0),
                 totalCost: salesReport.reduce((sum, item) => sum + item.totalCostOfSales, 0),
+                totalRefund: salesReport.reduce((sum, item) => sum + item.totalRefundAmount, 0), // ✅ ADDED
                 totalAmount: salesReport.reduce((sum, item) => sum + item.totalAmount, 0)
             });
         } else {
