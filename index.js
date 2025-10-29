@@ -28,7 +28,9 @@ import paymentOptionRoutes from './routes/paymentOptionRoutes.js'; // Add this l
 import pluginRoutes from './routes/pluginRoutes.js'; // Add this line
 import solutionRoutes from './routes/solutionRoutes.js'; // Add this line
 import requiredFieldRoutes from './routes/requiredFieldRoutes.js'; // ADD THIS LINE
-import dashboardRoutes from './routes/dashboardRoutes.js'; // Add this line
+import dashboardRoutes from './routes/dashboardRoutes.js'; // Add this line4
+import riskManagementRoutes from './routes/riskManagementRoutes.js';
+
 
 dotenv.config();
 
@@ -66,6 +68,7 @@ app.use('/api/plugins', pluginRoutes); // Add this line
 app.use('/api/solutions', solutionRoutes); // Add this line for your new routes
 app.use('/api/required-fields', requiredFieldRoutes); // ADD THIS LINE
 app.use('/api/dashboard', dashboardRoutes); // Add this line
+app.use('/api/risk-management', riskManagementRoutes);
 
 // Basic root route
 app.get('/', (req, res) => {
