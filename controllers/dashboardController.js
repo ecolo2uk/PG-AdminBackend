@@ -3,7 +3,6 @@ import Transaction from '../models/Transaction.js';
 import User from '../models/User.js'; // Assuming User model contains merchant info
 import mongoose from 'mongoose';
 
-// Date range function fix करा
 const getDateRange = (filter, startDate, endDate) => {
   const now = new Date();
   let start, end;
@@ -15,10 +14,32 @@ const getDateRange = (filter, startDate, endDate) => {
       end = new Date(now);
       end.setHours(23, 59, 59, 999);
       break;
+    case 'yesterday':
+      start = new Date(now);
+      start.setDate(now.getDate() - 1);
+      start.setHours(0, 0, 0, 0);
+      end = new Date(now);
+      end.setDate(now.getDate() - 1);
+      end.setHours(23, 59, 59, 999);
+      break;
+    case 'this_week':
+      start = new Date(now);
+      start.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
+      start.setHours(0, 0, 0, 0);
+      end = new Date(now);
+      end.setDate(now.getDate() + (6 - now.getDay())); // End of current week (Saturday)
+      end.setHours(23, 59, 59, 999);
+      break;
     case 'this_month':
       start = new Date(now.getFullYear(), now.getMonth(), 1);
       start.setHours(0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+      end.setHours(23, 59, 59, 999);
+      break;
+    case 'last_month':
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      start.setHours(0, 0, 0, 0);
+      end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of previous month
       end.setHours(23, 59, 59, 999);
       break;
     case 'custom':
@@ -28,18 +49,19 @@ const getDateRange = (filter, startDate, endDate) => {
         start.setHours(0, 0, 0, 0);
         end.setHours(23, 59, 59, 999);
       } else {
-        return {}; // No date filter
+        return {};
       }
       break;
     default:
-      return {}; // No date filter for 'all' or unknown
+      return {};
   }
 
-  console.log(`📅 DEBUG: Date Range for ${filter}:`, {
+  console.log(`📅 Date Range for ${filter}:`, {
     start: start.toISOString(),
     end: end.toISOString()
   });
 
+  // Use 'createdAt' for filtering since 'timestamps: true' adds it
   return {
     createdAt: {
       $gte: start,
@@ -60,44 +82,30 @@ const getUnifiedStatusMatch = (status) => {
   return statusMappings[status.toUpperCase()] || [status]; // Default to original status if no mapping
 };
 
-
-// Helper functions fix करा
-const getTransactionStatusField = {
-  $cond: {
-    if: { $ne: ["$status", undefined] },
-    then: "$status",
-    else: { 
-      $ifNull: [
-        "$Transaction Status", 
-        { $ifNull: ["$transactionStatus", "Unknown"] }
-      ]
-    }
-  }
-};
-
+// Helper to get transaction amount regardless of schema
 const getTransactionAmountField = {
   $cond: {
     if: { $ne: ["$amount", undefined] },
     then: "$amount",
-    else: { 
-      $ifNull: [
-        "$Amount", 
-        { $ifNull: ["$transactionAmount", 0] }
-      ]
-    }
+    else: { $ifNull: ["$Amount", 0] } // Fallback to old 'Amount' field
   }
 };
 
-const getMerchantNameField = {
+// Helper to get transaction status regardless of schema
+const getTransactionStatusField = {
   $cond: {
-    if: { $ne: ["$merchantName", undefined] },
-    then: "$merchantName",
-    else: { 
-      $ifNull: [
-        "$Merchant Name", 
-        { $ifNull: ["$merchantname", "Unknown Merchant"] }
-      ]
-    }
+    if: { $ne: ["$status", undefined] },
+    then: "$status",
+    else: { $ifNull: ["$Transaction Status", "Unknown"] } // Fallback to old 'Transaction Status'
+  }
+};
+
+// Helper to get transaction ID regardless of schema
+const getTransactionIdField = {
+  $cond: {
+    if: { $ne: ["$transactionId", undefined] },
+    then: "$transactionId",
+    else: { $ifNull: ["$Transaction Reference ID", "N/A"] }
   }
 };
 
@@ -110,6 +118,14 @@ const getMerchantOrderIdField = {
   }
 };
 
+// Helper to get merchantName regardless of schema
+const getMerchantNameField = {
+  $cond: {
+    if: { $ne: ["$merchantName", undefined] },
+    then: "$merchantName",
+    else: { $ifNull: ["$Merchant Name", "Unknown Merchant"] }
+  }
+};
 
 // Helper to get createdAt regardless of schema
 const getCreatedAtField = {
@@ -157,44 +173,43 @@ export const getDashboardAnalytics = async (req, res) => {
       endDate
     } = req.query;
 
-    console.log('🟡 DEBUG: Fetching analytics with:', {
+    console.log('🟡 Fetching analytics with:', {
       merchantId,
       timeFilter,
       startDate,
       endDate
     });
 
-    // DEBUG: Total documents count
-    const totalCount = await Transaction.countDocuments({});
-    console.log('📊 DEBUG: Total transactions in database:', totalCount);
-
     let matchQuery = {};
 
-    if (merchantId && merchantId !== 'all' && merchantId !== 'null' && mongoose.Types.ObjectId.isValid(merchantId)) {
-        matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
-    } else if (merchantId === 'null') {
-        matchQuery.merchantId = null;
+    if (merchantId && merchantId !== 'all') {
+      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery, ...dateRange };
+    // Use the unified createdAt field for date filtering
+    matchQuery = { ...matchQuery, ...dateRange
+    };
 
-    console.log('🔍 DEBUG: Final match query:', JSON.stringify(matchQuery, null, 2));
-
-    // DEBUG: Check how many documents match the query
-    const matchedCount = await Transaction.countDocuments(matchQuery);
-    console.log('🔍 DEBUG: Documents matching query:', matchedCount);
 
     const analytics = await Transaction.aggregate([
+      // First, normalize status and amount fields
       {
         $addFields: {
           unifiedStatus: getTransactionStatusField,
           unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField
+          unifiedCreatedAt: getCreatedAtField // Add unified createdAt for matching
         }
       },
+      // Now match using the unified fields
       {
-        $match: matchQuery
+        $match: {
+          ...matchQuery,
+          // Ensure date range also applies to the unifiedCreatedAt
+          ...(matchQuery.createdAt && {
+            unifiedCreatedAt: matchQuery.createdAt
+          })
+        }
       },
       {
         $group: {
@@ -255,12 +270,44 @@ export const getDashboardAnalytics = async (req, res) => {
               }, 1, 0]
             }
           },
-          totalTransactions: { $sum: 1 }
+          totalTransactions: {
+            $sum: 1
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalSuccessAmount: {
+            $ifNull: ["$totalSuccessAmount", 0]
+          },
+          totalFailedAmount: {
+            $ifNull: ["$totalFailedAmount", 0]
+          },
+          totalPendingAmount: {
+            $ifNull: ["$totalPendingAmount", 0]
+          },
+          totalRefundAmount: {
+            $ifNull: ["$totalRefundAmount", 0]
+          },
+          totalSuccessOrders: {
+            $ifNull: ["$totalSuccessOrders", 0]
+          },
+          totalFailedOrders: {
+            $ifNull: ["$totalFailedOrders", 0]
+          },
+          totalPendingOrders: {
+            $ifNull: ["$totalPendingOrders", 0]
+          },
+          totalRefundOrders: {
+            $ifNull: ["$totalRefundOrders", 0]
+          },
+          totalTransactions: {
+            $ifNull: ["$totalTransactions", 0]
+          }
         }
       }
     ]);
-
-    console.log('🔍 DEBUG: Raw aggregation result:', analytics);
 
     const result = analytics.length > 0 ? analytics[0] : {
       totalSuccessAmount: 0,
@@ -274,11 +321,11 @@ export const getDashboardAnalytics = async (req, res) => {
       totalTransactions: 0
     };
 
-    console.log('✅ DEBUG: Final analytics result:', result);
+    console.log('✅ Analytics result:', result);
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('❌ DEBUG: Error in getDashboardAnalytics:', error);
+    console.error('❌ Error fetching dashboard analytics:', error);
     res.status(500).json({
       message: 'Server Error',
       error: error.message
@@ -465,6 +512,7 @@ export const getTransactionsByMerchantStatus = async (req, res) => {
   }
 };
 
+
 export const getMerchantTransactionSummary = async (req, res) => {
   try {
     const {
@@ -483,58 +531,27 @@ export const getMerchantTransactionSummary = async (req, res) => {
 
     let matchQuery = {};
 
-    // Handle merchantId filter
-    if (merchantId && merchantId !== 'all' && merchantId !== 'null') {
-      if (mongoose.Types.ObjectId.isValid(merchantId)) {
-        matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
-      }
-    } else if (merchantId === 'null') {
-      matchQuery.merchantId = null;
+    if (merchantId && merchantId !== 'all') {
+      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery, ...dateRange };
+    matchQuery = { ...matchQuery,
+      ...(dateRange.createdAt && {
+        unifiedCreatedAt: dateRange.createdAt
+      })
+    };
+
 
     console.log('🔍 Match Query:', JSON.stringify(matchQuery, null, 2));
 
     const merchantSummary = await Transaction.aggregate([
-      // Add unified fields for both old and new schema
+      // First, normalize status, amount, and ID fields
       {
         $addFields: {
-          unifiedStatus: {
-            $cond: {
-              if: { $ne: ["$status", undefined] },
-              then: "$status",
-              else: { $ifNull: ["$Transaction Status", "Unknown"] }
-            }
-          },
-          unifiedAmount: {
-            $cond: {
-              if: { $ne: ["$amount", undefined] },
-              then: "$amount",
-              else: { $ifNull: ["$Amount", 0] }
-            }
-          },
-          unifiedCreatedAt: {
-            $cond: {
-              if: { $ne: ["$createdAt", undefined] },
-              then: "$createdAt",
-              else: { 
-                $cond: {
-                  if: { $ne: ["$Transaction Date", undefined] },
-                  then: { $dateFromString: { dateString: "$Transaction Date" } },
-                  else: new Date()
-                }
-              }
-            }
-          },
-          unifiedMerchantId: {
-            $cond: {
-              if: { $ne: ["$merchantId", undefined] },
-              then: "$merchantId",
-              else: null
-            }
-          }
+          unifiedStatus: getTransactionStatusField,
+          unifiedAmount: getTransactionAmountField,
+          unifiedCreatedAt: getCreatedAtField
         }
       },
       {
@@ -542,42 +559,46 @@ export const getMerchantTransactionSummary = async (req, res) => {
       },
       {
         $group: {
-          _id: "$unifiedMerchantId",
-          totalTransactions: { $sum: 1 },
+          _id: "$merchantId", // Group by the actual merchantId field (ObjectId)
+          totalTransactions: {
+            $sum: 1
+          },
           successCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", ["Success", "SUCCESS"]]
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
               }, 1, 0]
             }
           },
           pendingCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", ["Pending", "PENDING"]]
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
               }, 1, 0]
             }
           },
           failedCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", ["Failed", "FAILED"]]
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
               }, 1, 0]
             }
           },
           refundCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", ["Refund", "REFUND"]]
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
               }, 1, 0]
             }
           },
-          totalAmount: { $sum: "$unifiedAmount" }
+          totalAmount: {
+            $sum: "$unifiedAmount"
+          }
         }
       },
       {
         $lookup: {
-          from: 'users',
+          from: 'users', // Assuming your User model is in 'users' collection
           localField: '_id',
           foreignField: '_id',
           as: 'merchantInfo'
@@ -595,21 +616,15 @@ export const getMerchantTransactionSummary = async (req, res) => {
           merchantName: {
             $cond: {
               if: {
-                $and: [
-                  "$merchantInfo", 
-                  "$merchantInfo.company", 
-                  { $ne: ["$merchantInfo.company", ""] }
-                ]
+                $and: ["$merchantInfo", "$merchantInfo.company", {
+                  $ne: ["$merchantInfo.company", ""]
+                }]
               },
               then: "$merchantInfo.company",
               else: {
                 $cond: {
                   if: {
-                    $and: [
-                      "$merchantInfo", 
-                      "$merchantInfo.firstname", 
-                      "$merchantInfo.lastname"
-                    ]
+                    $and: ["$merchantInfo", "$merchantInfo.firstname", "$merchantInfo.lastname"]
                   },
                   then: {
                     $concat: ["$merchantInfo.firstname", " ", "$merchantInfo.lastname"]
@@ -619,8 +634,12 @@ export const getMerchantTransactionSummary = async (req, res) => {
               }
             }
           },
-          merchantEmail: { $ifNull: ["$merchantInfo.email", "N/A"] },
-          merchantContact: { $ifNull: ["$merchantInfo.contact", "N/A"] },
+          merchantEmail: {
+            $ifNull: ["$merchantInfo.email", "N/A"]
+          },
+          merchantContact: {
+            $ifNull: ["$merchantInfo.contact", "N/A"]
+          },
           totalTransactions: 1,
           successCount: 1,
           pendingCount: 1,
@@ -630,20 +649,29 @@ export const getMerchantTransactionSummary = async (req, res) => {
         }
       },
       {
-        $sort: { totalAmount: -1 }
+        $sort: {
+          totalAmount: -1
+        }
       }
     ]);
 
     console.log('✅ Merchant summary fetched:', merchantSummary.length, 'merchants');
+    if (merchantSummary.length > 0) {
+      console.log('📊 Sample merchant data:', merchantSummary[0]);
+    }
+
+
     res.status(200).json(merchantSummary);
   } catch (error) {
     console.error('❌ Error fetching merchant transaction summary:', error);
     res.status(500).json({
       message: 'Server Error',
-      error: error.message
+      error: error.message,
+      stack: error.stack
     });
   }
 };
+
 
 // New endpoint for ALL transactions
 export const getAllTransactions = async (req, res) => {
