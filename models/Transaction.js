@@ -141,7 +141,7 @@ const transactionSchema = new mongoose.Schema({
   // createdAt and updatedAt are handled by timestamps: true
 
   // Old schema fields (to be un-set after migration, but can exist initially)
-  "Transaction Reference ID": { type: String },
+  
   "Vendor Ref ID": { type: String },
   "Vendor Txn ID": { type: String },
   "Transaction Status": { type: String },
