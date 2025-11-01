@@ -515,6 +515,8 @@ export const getTransactionsByMerchantStatus = async (req, res) => {
 };
 
 
+// In your dashboardController.js, update the getMerchantTransactionSummary function:
+
 export const getMerchantTransactionSummary = async (req, res) => {
   try {
     const {
@@ -533,27 +535,58 @@ export const getMerchantTransactionSummary = async (req, res) => {
 
     let matchQuery = {};
 
-    if (merchantId && merchantId !== 'all') {
-      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+    // Handle merchantId filter
+    if (merchantId && merchantId !== 'all' && merchantId !== 'null') {
+      if (mongoose.Types.ObjectId.isValid(merchantId)) {
+        matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+      }
+    } else if (merchantId === 'null') {
+      matchQuery.merchantId = null;
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery,
-      ...(dateRange.createdAt && {
-        unifiedCreatedAt: dateRange.createdAt
-      })
-    };
-
+    matchQuery = { ...matchQuery, ...dateRange };
 
     console.log('🔍 Match Query:', JSON.stringify(matchQuery, null, 2));
 
     const merchantSummary = await Transaction.aggregate([
-      // First, normalize status, amount, and ID fields
+      // Add unified fields for both old and new schema
       {
         $addFields: {
-          unifiedStatus: getTransactionStatusField,
-          unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField
+          unifiedStatus: {
+            $cond: {
+              if: { $ne: ["$status", undefined] },
+              then: "$status",
+              else: { $ifNull: ["$Transaction Status", "Unknown"] }
+            }
+          },
+          unifiedAmount: {
+            $cond: {
+              if: { $ne: ["$amount", undefined] },
+              then: "$amount",
+              else: { $ifNull: ["$Amount", 0] }
+            }
+          },
+          unifiedCreatedAt: {
+            $cond: {
+              if: { $ne: ["$createdAt", undefined] },
+              then: "$createdAt",
+              else: { 
+                $cond: {
+                  if: { $ne: ["$Transaction Date", undefined] },
+                  then: { $dateFromString: { dateString: "$Transaction Date" } },
+                  else: new Date()
+                }
+              }
+            }
+          },
+          unifiedMerchantId: {
+            $cond: {
+              if: { $ne: ["$merchantId", undefined] },
+              then: "$merchantId",
+              else: null
+            }
+          }
         }
       },
       {
@@ -561,46 +594,42 @@ export const getMerchantTransactionSummary = async (req, res) => {
       },
       {
         $group: {
-          _id: "$merchantId", // Group by the actual merchantId field (ObjectId)
-          totalTransactions: {
-            $sum: 1
-          },
+          _id: "$unifiedMerchantId",
+          totalTransactions: { $sum: 1 },
           successCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
+                $in: ["$unifiedStatus", ["Success", "SUCCESS"]]
               }, 1, 0]
             }
           },
           pendingCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
+                $in: ["$unifiedStatus", ["Pending", "PENDING"]]
               }, 1, 0]
             }
           },
           failedCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
+                $in: ["$unifiedStatus", ["Failed", "FAILED"]]
               }, 1, 0]
             }
           },
           refundCount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
+                $in: ["$unifiedStatus", ["Refund", "REFUND"]]
               }, 1, 0]
             }
           },
-          totalAmount: {
-            $sum: "$unifiedAmount"
-          }
+          totalAmount: { $sum: "$unifiedAmount" }
         }
       },
       {
         $lookup: {
-          from: 'users', // Assuming your User model is in 'users' collection
+          from: 'users',
           localField: '_id',
           foreignField: '_id',
           as: 'merchantInfo'
@@ -618,15 +647,21 @@ export const getMerchantTransactionSummary = async (req, res) => {
           merchantName: {
             $cond: {
               if: {
-                $and: ["$merchantInfo", "$merchantInfo.company", {
-                  $ne: ["$merchantInfo.company", ""]
-                }]
+                $and: [
+                  "$merchantInfo", 
+                  "$merchantInfo.company", 
+                  { $ne: ["$merchantInfo.company", ""] }
+                ]
               },
               then: "$merchantInfo.company",
               else: {
                 $cond: {
                   if: {
-                    $and: ["$merchantInfo", "$merchantInfo.firstname", "$merchantInfo.lastname"]
+                    $and: [
+                      "$merchantInfo", 
+                      "$merchantInfo.firstname", 
+                      "$merchantInfo.lastname"
+                    ]
                   },
                   then: {
                     $concat: ["$merchantInfo.firstname", " ", "$merchantInfo.lastname"]
@@ -636,12 +671,8 @@ export const getMerchantTransactionSummary = async (req, res) => {
               }
             }
           },
-          merchantEmail: {
-            $ifNull: ["$merchantInfo.email", "N/A"]
-          },
-          merchantContact: {
-            $ifNull: ["$merchantInfo.contact", "N/A"]
-          },
+          merchantEmail: { $ifNull: ["$merchantInfo.email", "N/A"] },
+          merchantContact: { $ifNull: ["$merchantInfo.contact", "N/A"] },
           totalTransactions: 1,
           successCount: 1,
           pendingCount: 1,
@@ -651,29 +682,20 @@ export const getMerchantTransactionSummary = async (req, res) => {
         }
       },
       {
-        $sort: {
-          totalAmount: -1
-        }
+        $sort: { totalAmount: -1 }
       }
     ]);
 
     console.log('✅ Merchant summary fetched:', merchantSummary.length, 'merchants');
-    if (merchantSummary.length > 0) {
-      console.log('📊 Sample merchant data:', merchantSummary[0]);
-    }
-
-
     res.status(200).json(merchantSummary);
   } catch (error) {
     console.error('❌ Error fetching merchant transaction summary:', error);
     res.status(500).json({
       message: 'Server Error',
-      error: error.message,
-      stack: error.stack
+      error: error.message
     });
   }
 };
-
 
 // New endpoint for ALL transactions
 export const getAllTransactions = async (req, res) => {
