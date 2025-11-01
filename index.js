@@ -30,7 +30,7 @@ import solutionRoutes from './routes/solutionRoutes.js'; // Add this line
 import requiredFieldRoutes from './routes/requiredFieldRoutes.js'; // ADD THIS LINE
 import dashboardRoutes from './routes/dashboardRoutes.js'; // Add this line4
 import riskManagementRoutes from './routes/riskManagementRoutes.js';
-
+import payoutSettlementRoutes from './routes/payoutSettlementRoutes.js';
 
 dotenv.config();
 
@@ -69,6 +69,7 @@ app.use('/api/solutions', solutionRoutes); // Add this line for your new routes
 app.use('/api/required-fields', requiredFieldRoutes); // ADD THIS LINE
 app.use('/api/dashboard', dashboardRoutes); // Add this line
 app.use('/api/risk-management', riskManagementRoutes);
+app.use('/api/payout-settlements', payoutSettlementRoutes); // ADD THIS LINE
 
 // Basic root route
 app.get('/', (req, res) => {

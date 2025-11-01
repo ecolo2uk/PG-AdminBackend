@@ -26,7 +26,12 @@ const UserSchema = new mongoose.Schema(
         documentType: { type: String },
         fileUrl: { type: String },
       },
+      
     ],
+    unsettleBalance: { // <--- ADDED: New field for merchant's unsettle balance
+        type: Number,
+        default: 0,
+    },
   },
   { timestamps: true }
 );
