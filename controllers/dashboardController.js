@@ -513,7 +513,6 @@ export const getTransactionsByMerchantStatus = async (req, res) => {
 };
 
 
-// Fix for getMerchantTransactionSummary to handle date filters properly
 export const getMerchantTransactionSummary = async (req, res) => {
   try {
     const {
@@ -537,9 +536,14 @@ export const getMerchantTransactionSummary = async (req, res) => {
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery, ...dateRange };
+    matchQuery = { ...matchQuery,
+      ...(dateRange.createdAt && {
+        unifiedCreatedAt: dateRange.createdAt
+      })
+    };
 
-    console.log('🔍 Merchant Summary Match Query:', JSON.stringify(matchQuery, null, 2));
+
+    console.log('🔍 Match Query:', JSON.stringify(matchQuery, null, 2));
 
     const merchantSummary = await Transaction.aggregate([
       // First, normalize status, amount, and ID fields
@@ -555,8 +559,10 @@ export const getMerchantTransactionSummary = async (req, res) => {
       },
       {
         $group: {
-          _id: "$merchantId",
-          totalTransactions: { $sum: 1 },
+          _id: "$merchantId", // Group by the actual merchantId field (ObjectId)
+          totalTransactions: {
+            $sum: 1
+          },
           successCount: {
             $sum: {
               $cond: [{
@@ -585,12 +591,14 @@ export const getMerchantTransactionSummary = async (req, res) => {
               }, 1, 0]
             }
           },
-          totalAmount: { $sum: "$unifiedAmount" }
+          totalAmount: {
+            $sum: "$unifiedAmount"
+          }
         }
       },
       {
         $lookup: {
-          from: 'users',
+          from: 'users', // Assuming your User model is in 'users' collection
           localField: '_id',
           foreignField: '_id',
           as: 'merchantInfo'
@@ -608,21 +616,15 @@ export const getMerchantTransactionSummary = async (req, res) => {
           merchantName: {
             $cond: {
               if: {
-                $and: [
-                  "$merchantInfo", 
-                  "$merchantInfo.company", 
-                  { $ne: ["$merchantInfo.company", ""] }
-                ]
+                $and: ["$merchantInfo", "$merchantInfo.company", {
+                  $ne: ["$merchantInfo.company", ""]
+                }]
               },
               then: "$merchantInfo.company",
               else: {
                 $cond: {
                   if: {
-                    $and: [
-                      "$merchantInfo", 
-                      "$merchantInfo.firstname", 
-                      "$merchantInfo.lastname"
-                    ]
+                    $and: ["$merchantInfo", "$merchantInfo.firstname", "$merchantInfo.lastname"]
                   },
                   then: {
                     $concat: ["$merchantInfo.firstname", " ", "$merchantInfo.lastname"]
@@ -632,8 +634,12 @@ export const getMerchantTransactionSummary = async (req, res) => {
               }
             }
           },
-          merchantEmail: { $ifNull: ["$merchantInfo.email", "N/A"] },
-          merchantContact: { $ifNull: ["$merchantInfo.contact", "N/A"] },
+          merchantEmail: {
+            $ifNull: ["$merchantInfo.email", "N/A"]
+          },
+          merchantContact: {
+            $ifNull: ["$merchantInfo.contact", "N/A"]
+          },
           totalTransactions: 1,
           successCount: 1,
           pendingCount: 1,
@@ -643,55 +649,19 @@ export const getMerchantTransactionSummary = async (req, res) => {
         }
       },
       {
-        $sort: { totalAmount: -1 }
+        $sort: {
+          totalAmount: -1
+        }
       }
     ]);
 
     console.log('✅ Merchant summary fetched:', merchantSummary.length, 'merchants');
-    
-    // If no merchant filter applied, return all merchants with their counts
-    if (!merchantId || merchantId === 'all') {
-      // Get all active merchants to ensure we show all even if they have 0 transactions
-      const allActiveMerchants = await User.find({
-        role: "merchant",
-        status: "Active"
-      }).select('_id firstname lastname company email contact');
-
-      // Create a map of merchant summaries by ID for easy lookup
-      const summaryMap = new Map();
-      merchantSummary.forEach(merchant => {
-        summaryMap.set(merchant.merchantId.toString(), merchant);
-      });
-
-      // Combine all merchants with their transaction data
-      const combinedResults = allActiveMerchants.map(merchant => {
-        const existingSummary = summaryMap.get(merchant._id.toString());
-        
-        if (existingSummary) {
-          return existingSummary;
-        } else {
-          // Return merchant with zero transactions
-          return {
-            merchantId: merchant._id,
-            merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-            merchantEmail: merchant.email || "N/A",
-            merchantContact: merchant.contact || "N/A",
-            totalTransactions: 0,
-            successCount: 0,
-            pendingCount: 0,
-            failedCount: 0,
-            refundCount: 0,
-            totalAmount: 0
-          };
-        }
-      });
-
-      console.log('✅ Combined merchant results:', combinedResults.length);
-      res.status(200).json(combinedResults);
-    } else {
-      res.status(200).json(merchantSummary);
+    if (merchantSummary.length > 0) {
+      console.log('📊 Sample merchant data:', merchantSummary[0]);
     }
 
+
+    res.status(200).json(merchantSummary);
   } catch (error) {
     console.error('❌ Error fetching merchant transaction summary:', error);
     res.status(500).json({
