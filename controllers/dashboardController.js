@@ -182,8 +182,10 @@ export const getDashboardAnalytics = async (req, res) => {
 
     let matchQuery = {};
 
-    if (merchantId && merchantId !== 'all') {
-      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+    if (merchantId && merchantId !== 'all' && merchantId !== 'null' && mongoose.Types.ObjectId.isValid(merchantId)) {
+        matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+    } else if (merchantId === 'null') {
+        matchQuery.merchantId = null;
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
@@ -355,10 +357,11 @@ export const getTransactionsByMerchantStatus = async (req, res) => {
 
     let matchQuery = {};
 
-    if (merchantId && merchantId !== 'all') {
-      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
-    }
-
+    if (merchantId && merchantId !== 'all' && merchantId !== 'null' && mongoose.Types.ObjectId.isValid(merchantId)) {
+    matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+  } else if (merchantId === 'null') { // Handle explicit 'null' string for unknown merchant
+    matchQuery.merchantId = null; 
+  }
     if (status && status !== 'all') {
       matchQuery.unifiedStatus = {
         $in: getUnifiedStatusMatch(status)
