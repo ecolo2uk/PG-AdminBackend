@@ -5,6 +5,9 @@ import {
   createPayoutTransaction,
   updatePayoutTransactionStatus,
   getMerchantsForPayout,
+  getConnectorsForPayout,
+  getConnectorAccountsForPayout,
+  exportToExcel,
   getPayoutStatistics
 } from "../controllers/payoutTransactionController.js";
 
@@ -24,6 +27,15 @@ router.patch("/:id/status", updatePayoutTransactionStatus);
 
 // Get merchants for payout dropdown
 router.get("/merchants/list", getMerchantsForPayout);
+
+// Get connectors for payout dropdown
+router.get("/connectors/list", getConnectorsForPayout);
+
+// Get connector accounts for specific connector
+router.get("/connector-accounts/:connectorId", getConnectorAccountsForPayout);
+
+// Export to Excel
+router.get("/export/excel", exportToExcel);
 
 // Get payout statistics
 router.get("/stats/summary", getPayoutStatistics);
