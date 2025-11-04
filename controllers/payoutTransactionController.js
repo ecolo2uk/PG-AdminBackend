@@ -17,10 +17,12 @@ const generateUTR = () => {
   return Math.floor(100000000000 + Math.random() * 900000000000).toString();
 };
 
-// 🆕 Get merchant transactions and balance
+// 🆕 Get merchant transactions and balance - FIXED VERSION
 export const getMerchantTransactions = async (req, res) => {
   try {
     const { merchantId } = req.params;
+
+    console.log("Fetching transactions for merchant ID:", merchantId);
 
     if (!merchantId) {
       return res.status(400).json({
@@ -29,8 +31,18 @@ export const getMerchantTransactions = async (req, res) => {
       });
     }
 
+    // Validate merchant ID format
+    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid merchant ID format"
+      });
+    }
+
     // Get merchant details
     const merchant = await User.findById(merchantId);
+    console.log("Found merchant:", merchant);
+    
     if (!merchant) {
       return res.status(404).json({
         success: false,
@@ -43,20 +55,21 @@ export const getMerchantTransactions = async (req, res) => {
       .sort({ createdAt: -1 })
       .select('transactionId amount status type transactionType createdAt remark');
 
-    // Calculate current balance from transactions
-    let currentBalance = merchant.unsettleBalance || 0;
-    
-    // If you want to calculate balance from transactions history:
-    const balanceFromTransactions = transactions.reduce((balance, transaction) => {
-      if (transaction.status === "Success") {
-        if (transaction.transactionType === "Debit") {
-          return balance - transaction.amount;
-        } else if (transaction.transactionType === "Credit") {
-          return balance + transaction.amount;
-        }
-      }
-      return balance;
-    }, merchant.unsettleBalance);
+    console.log("Found transactions:", transactions.length);
+
+    // Calculate summary
+    const summary = {
+      totalTransactions: transactions.length,
+      successfulTransactions: transactions.filter(t => t.status === "Success").length,
+      pendingTransactions: transactions.filter(t => t.status === "Pending").length,
+      failedTransactions: transactions.filter(t => t.status === "Failed").length,
+      totalDebit: transactions
+        .filter(t => t.transactionType === "Debit" && t.status === "Success")
+        .reduce((sum, t) => sum + t.amount, 0),
+      totalCredit: transactions
+        .filter(t => t.transactionType === "Credit" && t.status === "Success")
+        .reduce((sum, t) => sum + t.amount, 0)
+    };
 
     res.status(200).json({
       success: true,
@@ -66,21 +79,10 @@ export const getMerchantTransactions = async (req, res) => {
           name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
           email: merchant.email,
           initialBalance: merchant.unsettleBalance || 0,
-          currentBalance: balanceFromTransactions
+          currentBalance: merchant.unsettleBalance || 0
         },
         transactions: transactions,
-        summary: {
-          totalTransactions: transactions.length,
-          successfulTransactions: transactions.filter(t => t.status === "Success").length,
-          pendingTransactions: transactions.filter(t => t.status === "Pending").length,
-          failedTransactions: transactions.filter(t => t.status === "Failed").length,
-          totalDebit: transactions
-            .filter(t => t.transactionType === "Debit" && t.status === "Success")
-            .reduce((sum, t) => sum + t.amount, 0),
-          totalCredit: transactions
-            .filter(t => t.transactionType === "Credit" && t.status === "Success")
-            .reduce((sum, t) => sum + t.amount, 0)
-        }
+        summary: summary
       }
     });
   } catch (error) {
@@ -109,8 +111,10 @@ export const createPayoutTransaction = async (req, res) => {
       remark = "",
       feeApplied = false,
       feeAmount = 0,
-      transactionType = "Debit" // 🆕 ADDED: Debit/Credit
+      transactionType = "Debit"
     } = req.body;
+
+    console.log("Creating payout transaction with data:", req.body);
 
     // Validate required fields
     if (!merchantId || !amount || !accountNumber || !connector) {
@@ -119,6 +123,16 @@ export const createPayoutTransaction = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Merchant, amount, account number, and connector are required"
+      });
+    }
+
+    // Validate merchant ID format
+    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid merchant ID format"
       });
     }
 
@@ -153,14 +167,14 @@ export const createPayoutTransaction = async (req, res) => {
       transactionId,
       orderId,
       utr,
-      status: "Pending",
+      status: transactionType === "Credit" ? "Success" : "Pending",
       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
       accountNumber,
       connector,
       amount: parseFloat(amount),
       paymentMode,
       type,
-      transactionType, // 🆕 ADDED
+      transactionType,
       remark,
       feeApplied: Boolean(feeApplied),
       feeAmount: parseFloat(feeAmount) || 0,
@@ -200,46 +214,34 @@ export const createPayoutTransaction = async (req, res) => {
   }
 };
 
-// Get merchants for dropdown (Updated)
+// Get merchants for dropdown (Updated) - FIXED VERSION
 export const getMerchantsForPayout = async (req, res) => {
   try {
+    console.log("Fetching merchants for payout...");
+    
     const merchants = await User.find(
       { role: "merchant", status: "Active" },
       "firstname lastname company email unsettleBalance createdAt"
     ).sort({ company: 1 });
 
-    // 🆕 Get transaction summary for each merchant
-    const merchantsWithDetails = await Promise.all(
-      merchants.map(async (merchant) => {
-        const transactions = await PayoutTransaction.find({ 
-          merchantId: merchant._id,
-          status: "Success"
-        });
-        
-        const totalDebit = transactions
-          .filter(t => t.transactionType === "Debit")
-          .reduce((sum, t) => sum + t.amount, 0);
-          
-        const totalCredit = transactions
-          .filter(t => t.transactionType === "Credit")
-          .reduce((sum, t) => sum + t.amount, 0);
+    console.log("Found merchants in DB:", merchants.length);
 
-        return {
-          _id: merchant._id,
-          name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-          email: merchant.email,
-          balance: merchant.unsettleBalance || 0,
-          totalTransactions: transactions.length,
-          totalDebit,
-          totalCredit,
-          availableBalance: merchant.unsettleBalance || 0
-        };
-      })
-    );
+    // Format merchants data
+    const formattedMerchants = merchants.map(merchant => ({
+      _id: merchant._id,
+      name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      email: merchant.email,
+      balance: merchant.unsettleBalance || 0,
+      firstname: merchant.firstname,
+      lastname: merchant.lastname,
+      company: merchant.company
+    }));
+
+    console.log("Formatted merchants:", formattedMerchants);
 
     res.status(200).json({
       success: true,
-      data: merchantsWithDetails
+      data: formattedMerchants
     });
   } catch (error) {
     console.error("Get merchants for payout error:", error);
@@ -292,7 +294,7 @@ export const createCreditTransaction = async (req, res) => {
       transactionId,
       orderId,
       utr,
-      status: "Success", // Credit transactions are immediately successful
+      status: "Success",
       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
       accountNumber: "SYSTEM_CREDIT",
       connector: "SYSTEM",
@@ -441,106 +443,6 @@ export const getPayoutTransactionById = async (req, res) => {
   }
 };
 
-// Create new payout transaction
-// export const createPayoutTransaction = async (req, res) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
-
-//   try {
-//     const {
-//       merchantId,
-//       amount,
-//       accountNumber,
-//       connector,
-//       paymentMode = "IMPS",
-//       type = "Manual",
-//       remark = "",
-//       feeApplied = false,
-//       feeAmount = 0
-//     } = req.body;
-
-//     // Validate required fields
-//     if (!merchantId || !amount || !accountNumber || !connector) {
-//       await session.abortTransaction();
-//       session.endSession();
-//       return res.status(400).json({
-//         success: false,
-//         message: "Merchant, amount, account number, and connector are required"
-//       });
-//     }
-
-//     // Check if merchant exists
-//     const merchant = await User.findById(merchantId).session(session);
-//     if (!merchant || merchant.role !== "merchant") {
-//       await session.abortTransaction();
-//       session.endSession();
-//       return res.status(404).json({
-//         success: false,
-//         message: "Merchant not found"
-//       });
-//     }
-
-//     // Check merchant balance
-//     if (merchant.unsettleBalance < parseFloat(amount)) {
-//       await session.abortTransaction();
-//       session.endSession();
-//       return res.status(400).json({
-//         success: false,
-//         message: "Insufficient balance"
-//       });
-//     }
-
-//     // Generate unique IDs
-//     const transactionId = generateTransactionId();
-//     const orderId = Date.now().toString();
-//     const utr = generateUTR();
-
-//     // Create payout transaction
-//     const payoutTransaction = new PayoutTransaction({
-//       transactionId,
-//       orderId,
-//       utr,
-//       status: "Pending",
-//       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-//       accountNumber,
-//       connector,
-//       amount: parseFloat(amount),
-//       paymentMode,
-//       type,
-//       remark,
-//       feeApplied: Boolean(feeApplied),
-//       feeAmount: parseFloat(feeAmount) || 0,
-//       merchantId,
-//       webhook: "0 / 0"
-//     });
-
-//     await payoutTransaction.save({ session });
-
-//     // Update merchant balance
-//     merchant.unsettleBalance -= parseFloat(amount);
-//     await merchant.save({ session });
-
-//     await session.commitTransaction();
-//     session.endSession();
-
-//     res.status(201).json({
-//       success: true,
-//       message: "Payout transaction created successfully",
-//       data: payoutTransaction
-//     });
-
-//   } catch (error) {
-//     await session.abortTransaction();
-//     session.endSession();
-//     console.error("Create payout transaction error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error creating payout transaction",
-//       error: error.message
-//     });
-//   }
-// };
-
 // Update payout transaction status
 export const updatePayoutTransactionStatus = async (req, res) => {
   try {
@@ -582,42 +484,17 @@ export const updatePayoutTransactionStatus = async (req, res) => {
   }
 };
 
-// Get merchants for dropdown
-// export const getMerchantsForPayout = async (req, res) => {
-//   try {
-//     const merchants = await User.find(
-//       { role: "merchant", status: "Active" },
-//       "firstname lastname company email unsettleBalance"
-//     ).sort({ company: 1 });
-
-//     const formattedMerchants = merchants.map(merchant => ({
-//       _id: merchant._id,
-//       name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-//       email: merchant.email,
-//       balance: merchant.unsettleBalance || 0
-//     }));
-
-//     res.status(200).json({
-//       success: true,
-//       data: formattedMerchants
-//     });
-//   } catch (error) {
-//     console.error("Get merchants for payout error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error fetching merchants",
-//       error: error.message
-//     });
-//   }
-// };
-
 // Get connectors for dropdown
 export const getConnectorsForPayout = async (req, res) => {
   try {
+    console.log("Fetching connectors for payout...");
+    
     const connectors = await Connector.find(
       { status: "Active", isPayoutSupport: true },
       "name className"
     ).sort({ name: 1 });
+
+    console.log("Found connectors:", connectors.length);
 
     res.status(200).json({
       success: true,

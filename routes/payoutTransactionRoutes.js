@@ -1,4 +1,3 @@
-// routes/payoutTransactionRoutes.js
 import express from "express";
 import {
   getPayoutTransactions,
@@ -10,8 +9,8 @@ import {
   getConnectorAccountsForPayout,
   exportToExcel,
   getPayoutStatistics,
-  getMerchantTransactions, // 🆕 ADDED
-  createCreditTransaction // 🆕 ADDED
+  getMerchantTransactions,
+  createCreditTransaction
 } from "../controllers/payoutTransactionController.js";
 
 const router = express.Router();
