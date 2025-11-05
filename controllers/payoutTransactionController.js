@@ -33,9 +33,9 @@ export const createPayoutToMerchant = async (req, res) => {
     if (!merchantId || !amount || !bankName || !accountNumber || !ifscCode || !accountHolderName) {
       await session.abortTransaction();
       return res.status(400).json({ 
-        success: false,
-        message: "Missing required fields: merchantId, amount, bankName, accountNumber, ifscCode, accountHolderName" 
-      });
+  success: false,
+  message: `Insufficient balance. Available: ₹${initiatingMerchant.balance}, Required: ₹${payoutAmount}` 
+});
     }
 
     // Validate initiating merchant
