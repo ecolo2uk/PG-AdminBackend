@@ -67,6 +67,16 @@ router.get('/debug/database', async (req, res) => {
   }
 }); 
 
+// Add this to your payoutTransactionRoutes.js
+router.post('/test-create', (req, res) => {
+  console.log("🧪 Test POST received:", req.body);
+  res.json({ 
+    success: true, 
+    message: 'POST endpoint is working!',
+    receivedData: req.body,
+    timestamp: new Date().toISOString()
+  });
+});
 
 
 // Your existing routes
