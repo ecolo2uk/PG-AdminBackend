@@ -1,639 +1,278 @@
-import PayoutTransaction from "../models/PayoutTransaction.js";
-import User from "../models/User.js";
-import Connector from "../models/Connector.js";
-import ConnectorAccount from "../models/ConnectorAccount.js";
-import mongoose from "mongoose";
+import PayoutTransaction from '../models/PayoutTransaction.js';
+import User from '../models/User.js';
+import Connector from '../models/Connector.js';
+import csv from 'csv-express';
 
-// Generate unique transaction ID
-const generateTransactionId = () => {
-  const prefix = "O";
-  const randomChars = Math.random().toString(36).substring(2, 10).toUpperCase();
-  const timestamp = Date.now().toString().substring(7);
-  return prefix + randomChars + timestamp;
+const generateUniqueId = (prefix) => {
+  return `${prefix}${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 };
 
-// Generate unique UTR
-const generateUTR = () => {
-  return Math.floor(100000000000 + Math.random() * 900000000000).toString();
-};
-
-// 🆕 Get merchant transactions and balance - FIXED VERSION
-export const getMerchantTransactions = async (req, res) => {
-  try {
-    const { merchantId } = req.params;
-
-    console.log("Fetching transactions for merchant ID:", merchantId);
-
-    if (!merchantId) {
-      return res.status(400).json({
-        success: false,
-        message: "Merchant ID is required"
-      });
-    }
-
-    // Validate merchant ID format
-    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid merchant ID format"
-      });
-    }
-
-    // Get merchant details
-    const merchant = await User.findById(merchantId);
-    console.log("Found merchant:", merchant);
-    
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found"
-      });
-    }
-
-    // Get all transactions for this merchant
-    const transactions = await PayoutTransaction.find({ merchantId })
-      .sort({ createdAt: -1 })
-      .select('transactionId amount status type transactionType createdAt remark');
-
-    console.log("Found transactions:", transactions.length);
-
-    // Calculate summary
-    const summary = {
-      totalTransactions: transactions.length,
-      successfulTransactions: transactions.filter(t => t.status === "Success").length,
-      pendingTransactions: transactions.filter(t => t.status === "Pending").length,
-      failedTransactions: transactions.filter(t => t.status === "Failed").length,
-      totalDebit: transactions
-        .filter(t => t.transactionType === "Debit" && t.status === "Success")
-        .reduce((sum, t) => sum + t.amount, 0),
-      totalCredit: transactions
-        .filter(t => t.transactionType === "Credit" && t.status === "Success")
-        .reduce((sum, t) => sum + t.amount, 0)
-    };
-
-    res.status(200).json({
-      success: true,
-      data: {
-        merchant: {
-          _id: merchant._id,
-          name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-          email: merchant.email,
-          initialBalance: merchant.unsettleBalance || 0,
-          currentBalance: merchant.unsettleBalance || 0
-        },
-        transactions: transactions,
-        summary: summary
-      }
-    });
-  } catch (error) {
-    console.error("Get merchant transactions error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching merchant transactions",
-      error: error.message
-    });
-  }
-};
-
-// Create new payout transaction (Updated)
-export const createPayoutTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const {
-      merchantId,
-      amount,
-      accountNumber,
-      connector,
-      paymentMode = "IMPS",
-      type = "Manual",
-      remark = "",
-      feeApplied = false,
-      feeAmount = 0,
-      transactionType = "Debit"
-    } = req.body;
-
-    console.log("Creating payout transaction with data:", req.body);
-
-    // Validate required fields
-    if (!merchantId || !amount || !accountNumber || !connector) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Merchant, amount, account number, and connector are required"
-      });
-    }
-
-    // Validate merchant ID format
-    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid merchant ID format"
-      });
-    }
-
-    // Check if merchant exists
-    const merchant = await User.findById(merchantId).session(session);
-    if (!merchant || merchant.role !== "merchant") {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found"
-      });
-    }
-
-    // Check merchant balance for Debit transactions
-    if (transactionType === "Debit" && merchant.unsettleBalance < parseFloat(amount)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance"
-      });
-    }
-
-    // Generate unique IDs
-    const transactionId = generateTransactionId();
-    const orderId = Date.now().toString();
-    const utr = generateUTR();
-
-    // Create payout transaction
-    const payoutTransaction = new PayoutTransaction({
-      transactionId,
-      orderId,
-      utr,
-      status: transactionType === "Credit" ? "Success" : "Pending",
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      accountNumber,
-      connector,
-      amount: parseFloat(amount),
-      paymentMode,
-      type,
-      transactionType,
-      remark,
-      feeApplied: Boolean(feeApplied),
-      feeAmount: parseFloat(feeAmount) || 0,
-      merchantId,
-      webhook: "0 / 0"
-    });
-
-    await payoutTransaction.save({ session });
-
-    // Update merchant balance based on transaction type
-    if (transactionType === "Debit") {
-      merchant.unsettleBalance -= parseFloat(amount);
-    } else if (transactionType === "Credit") {
-      merchant.unsettleBalance += parseFloat(amount);
-    }
-    
-    await merchant.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    res.status(201).json({
-      success: true,
-      message: `Payout transaction created successfully (${transactionType})`,
-      data: payoutTransaction
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error("Create payout transaction error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error creating payout transaction",
-      error: error.message
-    });
-  }
-};
-
-// Get merchants for dropdown (Updated) - FIXED VERSION
-export const getMerchantsForPayout = async (req, res) => {
-  try {
-    console.log("Fetching merchants for payout...");
-    
-    const merchants = await User.find(
-      { role: "merchant", status: "Active" },
-      "firstname lastname company email unsettleBalance createdAt"
-    ).sort({ company: 1 });
-
-    console.log("Found merchants in DB:", merchants.length);
-
-    // Format merchants data
-    const formattedMerchants = merchants.map(merchant => ({
-      _id: merchant._id,
-      name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      email: merchant.email,
-      balance: merchant.unsettleBalance || 0,
-      firstname: merchant.firstname,
-      lastname: merchant.lastname,
-      company: merchant.company
-    }));
-
-    console.log("Formatted merchants:", formattedMerchants);
-
-    res.status(200).json({
-      success: true,
-      data: formattedMerchants
-    });
-  } catch (error) {
-    console.error("Get merchants for payout error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching merchants",
-      error: error.message
-    });
-  }
-};
-
-// 🆕 Create Credit Transaction (Add funds to merchant)
-export const createCreditTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const {
-      merchantId,
-      amount,
-      remark = "Manual credit"
-    } = req.body;
-
-    if (!merchantId || !amount) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Merchant and amount are required"
-      });
-    }
-
-    const merchant = await User.findById(merchantId).session(session);
-    if (!merchant) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found"
-      });
-    }
-
-    // Generate unique IDs for credit transaction
-    const transactionId = generateTransactionId();
-    const orderId = Date.now().toString();
-    const utr = generateUTR();
-
-    // Create credit transaction
-    const creditTransaction = new PayoutTransaction({
-      transactionId,
-      orderId,
-      utr,
-      status: "Success",
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      accountNumber: "SYSTEM_CREDIT",
-      connector: "SYSTEM",
-      amount: parseFloat(amount),
-      paymentMode: "SYSTEM",
-      type: "Manual",
-      transactionType: "Credit",
-      remark,
-      feeApplied: false,
-      feeAmount: 0,
-      merchantId,
-      webhook: "0 / 0"
-    });
-
-    await creditTransaction.save({ session });
-
-    // Update merchant balance (Add funds)
-    merchant.unsettleBalance += parseFloat(amount);
-    await merchant.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    res.status(201).json({
-      success: true,
-      message: "Credit transaction completed successfully",
-      data: creditTransaction
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error("Create credit transaction error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error creating credit transaction",
-      error: error.message
-    });
-  }
-};
-
-// Get all payout transactions with filters
 export const getPayoutTransactions = async (req, res) => {
   try {
     const {
-      page = 1,
-      limit = 10,
-      merchantId,
-      connector,
-      status,
-      utr,
-      accountNumber,
-      transactionId,
-      orderId,
-      startDate,
-      endDate,
-      type
+      merchant, connector, status, utr, accountNumber,
+      transactionId, orderId, startDate, endDate, type,
+      limit = 10, page = 1
     } = req.query;
 
-    const filter = {};
+    const query = {};
 
-    // Build filter object
-    if (merchantId) filter.merchantId = merchantId;
-    if (connector && connector !== "-- Select Connector --") filter.connector = new RegExp(connector, "i");
-    if (status && status !== "-- Select Status --") filter.status = status;
-    if (utr) filter.utr = new RegExp(utr, "i");
-    if (accountNumber) filter.accountNumber = new RegExp(accountNumber, "i");
-    if (transactionId) filter.transactionId = new RegExp(transactionId, "i");
-    if (orderId) filter.orderId = new RegExp(orderId, "i");
-    if (type && type !== "Select Transaction Type") filter.type = type;
+    if (merchant) query.merchantId = merchant;
+    if (connector) query.connector = connector;
+    if (status) query.status = status;
+    if (utr) query.utr = { $regex: utr, $options: 'i' };
+    if (accountNumber) query.accountNumber = { $regex: accountNumber, $options: 'i' };
+    if (transactionId) query.transactionId = { $regex: transactionId, $options: 'i' };
+    if (orderId) query.orderId = { $regex: orderId, $options: 'i' };
+    if (type) query.type = type;
 
-    // Date filter
     if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        filter.createdAt.$gte = start;
-      }
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = end;
+        query.createdAt.$lte = end;
       }
     }
 
     const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sort: { createdAt: -1 }
+      limit: parseInt(limit, 10),
+      skip: (parseInt(page, 10) - 1) * parseInt(limit, 10),
+      sort: { createdAt: -1 },
     };
 
-    const transactions = await PayoutTransaction.find(filter)
-      .sort(options.sort)
-      .limit(options.limit * 1)
-      .skip((options.page - 1) * options.limit)
-      .populate('merchantId', 'firstname lastname company email');
-
-    const total = await PayoutTransaction.countDocuments(filter);
+    const transactions = await PayoutTransaction.find(query, null, options)
+      .populate('merchantId', 'company email')
+      .lean();
+      
+    const totalTransactions = await PayoutTransaction.countDocuments(query);
 
     res.status(200).json({
       success: true,
       data: transactions,
-      pagination: {
-        currentPage: options.page,
-        totalPages: Math.ceil(total / options.limit),
-        totalItems: total,
-        itemsPerPage: options.limit
-      }
+      currentPage: parseInt(page, 10),
+      totalPages: Math.ceil(totalTransactions / limit),
+      totalTransactions,
     });
   } catch (error) {
-    console.error("Get payout transactions error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching payout transactions",
-      error: error.message
-    });
+    console.error("Error fetching payout transactions:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };
 
-// Get payout transaction by ID
-export const getPayoutTransactionById = async (req, res) => {
+export const getMerchantList = async (req, res) => {
   try {
-    const { id } = req.params;
+    const merchants = await User.find({ role: 'merchant', status: 'Active' }, '_id company email balance').lean();
+    const formattedMerchants = merchants.map(m => ({
+      _id: m._id,
+      name: m.company || m.email,
+      balance: m.balance || 0,
+      email: m.email
+    }));
+    res.status(200).json({ success: true, data: formattedMerchants });
+  } catch (error) {
+    console.error("Error fetching merchants list:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
 
-    const transaction = await PayoutTransaction.findById(id).populate("merchantId");
+export const getConnectorList = async (req, res) => {
+  try {
+    const connectors = await Connector.find({ isPayoutSupport: true, status: 'Active' }, '_id name').lean();
+    res.status(200).json({ success: true, data: connectors });
+  } catch (error) {
+    console.error("Error fetching connectors list:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
 
-    if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: "Payout transaction not found"
-      });
+export const createPayoutTransaction = async (req, res) => {
+  const {
+    merchantId, amount, accountNumber, connector, paymentMode, type,
+    transactionType, remark, feeApplied, feeAmount
+  } = req.body;
+
+  try {
+    const merchant = await User.findById(merchantId);
+    if (!merchant || merchant.role !== 'merchant') {
+      return res.status(404).json({ success: false, message: "Merchant not found or not a valid merchant." });
     }
 
-    res.status(200).json({
-      success: true,
-      data: transaction
+    const connectorConfig = await Connector.findOne({ name: connector, isPayoutSupport: true, status: 'Active' });
+    if (!connectorConfig) {
+      return res.status(404).json({ success: false, message: "Connector not found or does not support payouts." });
+    }
+
+    const finalAmount = parseFloat(amount);
+    const finalFeeAmount = feeApplied ? parseFloat(feeAmount) : 0;
+    const netAmount = finalAmount - finalFeeAmount;
+
+    if (isNaN(finalAmount) || finalAmount <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid amount. Amount must be a positive number." });
+    }
+    if (feeApplied && (isNaN(finalFeeAmount) || finalFeeAmount < 0)) {
+        return res.status(400).json({ success: false, message: "Invalid fee amount. Fee must be a non-negative number." });
+    }
+    if (netAmount < 0) {
+        return res.status(400).json({ success: false, message: "Net amount cannot be negative. Adjust amount or fee." });
+    }
+
+    if (transactionType === 'Debit' && merchant.balance < finalAmount) {
+      return res.status(400).json({ success: false, message: `Insufficient merchant balance. Current balance: ₹${merchant.balance.toFixed(2)}` });
+    }
+
+    const utr = generateUniqueId('UTR');
+    const transactionId = generateUniqueId('TXN');
+    const orderId = generateUniqueId('ORD');
+
+    const newPayoutTransaction = new PayoutTransaction({
+      merchantId,
+      merchantName: merchant.company || merchant.email,
+      amount: finalAmount,
+      accountNumber,
+      connector,
+      paymentMode,
+      type: type || "Manual",
+      transactionType,
+      remark,
+      feeApplied,
+      feeAmount: finalFeeAmount,
+      netAmount,
+      utr,
+      transactionId,
+      orderId,
+      status: "Pending",
+    });
+
+    await newPayoutTransaction.save();
+
+    if (transactionType === 'Debit') {
+      merchant.balance -= finalAmount;
+    } else {
+      merchant.balance += finalAmount;
+    }
+    await merchant.save();
+
+    res.status(201).json({ 
+      success: true, 
+      message: `${transactionType} payout transaction created successfully.`, 
+      data: newPayoutTransaction 
     });
   } catch (error) {
-    console.error("Get payout transaction by ID error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching payout transaction",
-      error: error.message
-    });
+    console.error("Error creating payout transaction:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };
 
-// Update payout transaction status
+export const getMerchantTransactionsSummary = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    const transactions = await PayoutTransaction.find({ merchantId })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    const totalDebit = transactions.filter(t => t.transactionType === 'Debit').reduce((sum, t) => sum + t.amount, 0);
+    const totalCredit = transactions.filter(t => t.transactionType === 'Credit').reduce((sum, t) => sum + t.amount, 0);
+
+    const summary = {
+      totalTransactions: transactions.length,
+      totalDebit,
+      totalCredit,
+    };
+
+    res.status(200).json({ success: true, data: { transactions, summary } });
+  } catch (error) {
+    console.error("Error fetching merchant transactions:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+export const exportPayoutTransactions = async (req, res) => {
+  try {
+    const {
+      merchant, connector, status, utr, accountNumber,
+      transactionId, orderId, startDate, endDate, type,
+    } = req.query;
+
+    const query = {};
+
+    if (merchant) query.merchantId = merchant;
+    if (connector) query.connector = connector;
+    if (status) query.status = status;
+    if (utr) query.utr = { $regex: utr, $options: 'i' };
+    if (accountNumber) query.accountNumber = { $regex: accountNumber, $options: 'i' };
+    if (transactionId) query.transactionId = { $regex: transactionId, $options: 'i' };
+    if (orderId) query.orderId = { $regex: orderId, $options: 'i' };
+    if (type) query.type = type;
+
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+
+    const transactions = await PayoutTransaction.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const csvData = transactions.map(t => ({
+      'Transaction ID': t.transactionId,
+      'Order ID': t.orderId,
+      'UTR': t.utr,
+      'Status': t.status,
+      'Merchant Name': t.merchantName,
+      'Account Number': t.accountNumber,
+      'Connector': t.connector,
+      'Amount (INR)': t.amount,
+      'Payment Mode': t.paymentMode,
+      'Type': t.type,
+      'Transaction Type': t.transactionType,
+      'Fee Applied': t.feeApplied ? 'Yes' : 'No',
+      'Fee Amount': t.feeAmount,
+      'Net Amount': t.netAmount,
+      'Remark': t.remark,
+      'Webhook Status': t.webhook,
+      'Created At': new Date(t.createdAt).toLocaleString(),
+    }));
+
+    res.csv(csvData, true, { 
+      'Content-Disposition': `attachment; filename="payouts_${new Date().toISOString().split('T')[0]}.csv"` 
+    });
+
+  } catch (error) {
+    console.error("Error exporting payout transactions:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 export const updatePayoutTransactionStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!["Success", "Pending", "Failed", "Processing"].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid status"
-      });
+    const validStatuses = ["Success", "Pending", "Failed", "Processing", "Refund"];
+    if (!validStatuses.includes(status)) {
+        return res.status(400).json({ success: false, message: "Invalid status provided." });
     }
 
-    const transaction = await PayoutTransaction.findByIdAndUpdate(
-      id,
-      { status },
-      { new: true, runValidators: true }
-    ).populate("merchantId");
-
+    const transaction = await PayoutTransaction.findById(id);
     if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: "Payout transaction not found"
-      });
+      return res.status(404).json({ success: false, message: "Transaction not found." });
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Payout transaction status updated successfully",
-      data: transaction
-    });
+    transaction.status = status;
+    await transaction.save();
+
+    res.status(200).json({ success: true, message: "Transaction status updated successfully.", data: transaction });
   } catch (error) {
-    console.error("Update payout transaction status error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error updating payout transaction status",
-      error: error.message
-    });
-  }
-};
-
-// Get connectors for dropdown
-export const getConnectorsForPayout = async (req, res) => {
-  try {
-    console.log("Fetching connectors for payout...");
-    
-    const connectors = await Connector.find(
-      { status: "Active", isPayoutSupport: true },
-      "name className"
-    ).sort({ name: 1 });
-
-    console.log("Found connectors:", connectors.length);
-
-    res.status(200).json({
-      success: true,
-      data: connectors
-    });
-  } catch (error) {
-    console.error("Get connectors for payout error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching connectors",
-      error: error.message
-    });
-  }
-};
-
-// Get connector accounts for dropdown
-export const getConnectorAccountsForPayout = async (req, res) => {
-  try {
-    const { connectorId } = req.params;
-    
-    const connectorAccounts = await ConnectorAccount.find(
-      { connectorId, status: "Active" },
-      "name currency"
-    ).sort({ name: 1 });
-
-    res.status(200).json({
-      success: true,
-      data: connectorAccounts
-    });
-  } catch (error) {
-    console.error("Get connector accounts for payout error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching connector accounts",
-      error: error.message
-    });
-  }
-};
-
-// Export to Excel
-export const exportToExcel = async (req, res) => {
-  try {
-    const {
-      merchantId,
-      connector,
-      status,
-      utr,
-      accountNumber,
-      startDate,
-      endDate
-    } = req.query;
-
-    const filter = {};
-
-    if (merchantId) filter.merchantId = merchantId;
-    if (connector) filter.connector = new RegExp(connector, "i");
-    if (status) filter.status = status;
-    if (utr) filter.utr = new RegExp(utr, "i");
-    if (accountNumber) filter.accountNumber = new RegExp(accountNumber, "i");
-
-    if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        filter.createdAt.$gte = start;
-      }
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = end;
-      }
-    }
-
-    const transactions = await PayoutTransaction.find(filter)
-      .sort({ createdAt: -1 })
-      .populate('merchantId', 'company firstname lastname');
-
-    // Convert to CSV format
-    const csvData = transactions.map(transaction => ({
-      'Transaction ID': transaction.transactionId,
-      'Order ID': transaction.orderId,
-      'UTR': transaction.utr,
-      'Status': transaction.status,
-      'Merchant Name': transaction.merchantName,
-      'Account Number': transaction.accountNumber,
-      'Connector': transaction.connector,
-      'Amount': transaction.amount,
-      'Payment Mode': transaction.paymentMode,
-      'Type': transaction.type,
-      'Webhook': transaction.webhook,
-      'Created At': transaction.createdAt.toISOString(),
-      'Remark': transaction.remark
-    }));
-
-    res.status(200).json({
-      success: true,
-      data: csvData,
-      filename: `payouts_${new Date().toISOString().split('T')[0]}.csv`
-    });
-  } catch (error) {
-    console.error("Export to Excel error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error exporting data",
-      error: error.message
-    });
-  }
-};
-
-// Get payout statistics
-export const getPayoutStatistics = async (req, res) => {
-  try {
-    const totalPayouts = await PayoutTransaction.countDocuments();
-    const successPayouts = await PayoutTransaction.countDocuments({ status: "Success" });
-    const pendingPayouts = await PayoutTransaction.countDocuments({ status: "Pending" });
-    const failedPayouts = await PayoutTransaction.countDocuments({ status: "Failed" });
-    
-    const totalAmount = await PayoutTransaction.aggregate([
-      { $match: { status: "Success" } },
-      { $group: { _id: null, total: { $sum: "$amount" } } }
-    ]);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        totalPayouts,
-        successPayouts,
-        pendingPayouts,
-        failedPayouts,
-        totalAmount: totalAmount[0]?.total || 0
-      }
-    });
-  } catch (error) {
-    console.error("Get payout statistics error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching payout statistics",
-      error: error.message
-    });
+    console.error("Error updating transaction status:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };

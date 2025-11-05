@@ -9,15 +9,15 @@ const payoutTransactionSchema = new mongoose.Schema(
     },
     orderId: {
       type: String,
-      required: true
     },
     utr: {
       type: String,
-      required: true
+      required: true,
+      unique: true
     },
     status: {
       type: String,
-      enum: ["Success", "Pending", "Failed", "Processing"],
+      enum: ["Success", "Pending", "Failed", "Processing", "Refund"],
       default: "Pending"
     },
     merchantName: {
@@ -44,7 +44,7 @@ const payoutTransactionSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: ["API", "Manual"],
-      default: "API"
+      default: "Manual"
     },
     webhook: {
       type: String,
@@ -74,18 +74,32 @@ const payoutTransactionSchema = new mongoose.Schema(
     netAmount: {
       type: Number,
       default: 0
+    },
+    transactionType: {
+      type: String,
+      enum: ["Debit", "Credit"],
+      required: true,
+      default: "Debit"
     }
   },
   { timestamps: true }
 );
 
-// Pre-save middleware to calculate net amount
-payoutTransactionSchema.pre("save", function(next) {
-  if (this.feeApplied && this.amount) {
-    this.netAmount = this.amount - this.feeAmount;
-  } else {
-    this.netAmount = this.amount;
+payoutTransactionSchema.pre("save", async function(next) {
+  if (this.isModified('amount') || this.isModified('feeAmount') || this.isNew) {
+    this.netAmount = this.amount - (this.feeApplied ? this.feeAmount : 0);
   }
+
+  if (this.isNew && !this.utr) {
+    this.utr = `UTR${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+  }
+  if (this.isNew && !this.transactionId) {
+    this.transactionId = `TXN${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+  }
+  if (this.isNew && !this.orderId) {
+    this.orderId = `ORD${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+  }
+
   next();
 });
 
