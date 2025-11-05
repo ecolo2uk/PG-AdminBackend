@@ -29,6 +29,15 @@ export const createPayoutToMerchant = async (req, res) => {
 
     console.log('📦 Creating payout to merchant with data:', req.body);
 
+    // Validate required fields
+    if (!merchantId || !amount || !bankName || !accountNumber || !ifscCode || !accountHolderName) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        message: "Missing required fields: merchantId, amount, bankName, accountNumber, ifscCode, accountHolderName" 
+      });
+    }
+
     // Validate initiating merchant
     const initiatingMerchant = await User.findById(merchantId).session(session);
     if (!initiatingMerchant || initiatingMerchant.role !== 'merchant') {
@@ -39,16 +48,20 @@ export const createPayoutToMerchant = async (req, res) => {
       });
     }
     
-    if (initiatingMerchant.balance < amount) {
+    // Check balance
+    const payoutAmount = parseFloat(amount);
+    if (initiatingMerchant.balance < payoutAmount) {
       await session.abortTransaction();
       return res.status(400).json({ 
         success: false,
-        message: "Insufficient balance for payout." 
+        message: `Insufficient balance. Available: ₹${initiatingMerchant.balance}, Required: ₹${payoutAmount}` 
       });
     }
 
+    console.log(`💰 Merchant balance: ${initiatingMerchant.balance}, Payout amount: ${payoutAmount}`);
+
     // Deduct amount from initiating merchant's balance
-    initiatingMerchant.balance -= parseFloat(amount);
+    initiatingMerchant.balance -= payoutAmount;
     await initiatingMerchant.save({ session });
 
     // Create Payout Transaction
@@ -59,10 +72,10 @@ export const createPayoutToMerchant = async (req, res) => {
       recipientAccountNumber: accountNumber,
       recipientIfscCode: ifscCode,
       recipientAccountHolderName: accountHolderName,
-      recipientAccountType: accountType,
-      amount: parseFloat(amount),
+      recipientAccountType: accountType || 'Saving',
+      amount: payoutAmount,
       currency: 'INR',
-      paymentMode,
+      paymentMode: paymentMode || 'IMPS',
       transactionType: 'Debit',
       status: 'Success',
       customerEmail,
@@ -81,6 +94,7 @@ export const createPayoutToMerchant = async (req, res) => {
       success: true,
       message: "Payout initiated successfully",
       payoutTransaction: savedPayout,
+      newBalance: initiatingMerchant.balance
     });
 
   } catch (error) {
@@ -88,7 +102,8 @@ export const createPayoutToMerchant = async (req, res) => {
     console.error("❌ Error creating payout to merchant:", error);
     res.status(500).json({ 
       success: false,
-      message: "Server error during payout creation." 
+      message: "Server error during payout creation.",
+      error: error.message 
     });
   } finally {
     session.endSession();
