@@ -81,12 +81,33 @@ export const getMerchantList = async (req, res) => {
     const dbState = mongoose.connection.readyState;
     console.log(`📊 Database connection state: ${dbState} (0=disconnected, 1=connected, 2=connecting, 3=disconnecting)`);
     
+    if (dbState !== 1) {
+      return res.status(500).json({
+        success: false,
+        message: "Database not connected. Please check MongoDB connection.",
+        dbState: dbState
+      });
+    }
+
+    // Test database query
+    const testQuery = await User.findOne({ role: 'merchant' }).limit(1);
+    console.log("📊 Test query result:", testQuery ? "Success" : "No merchants found");
+
     const merchants = await User.find({ 
       role: 'merchant', 
       status: 'Active' 
     }).select('_id firstname lastname company email balance contact mid').lean();
 
     console.log(`✅ Found ${merchants.length} merchants in database`);
+
+    if (merchants.length === 0) {
+      console.log("⚠️ No active merchants found in database");
+      return res.status(200).json({
+        success: true,
+        data: [],
+        message: "No active merchants found"
+      });
+    }
 
     const formattedMerchants = merchants.map(merchant => {
       const merchantName = merchant.company || 
@@ -121,7 +142,6 @@ export const getMerchantList = async (req, res) => {
     });
   }
 };
-
 // @desc    Get connectors list
 // @route   GET /api/payout-transactions/connectors/list
 export const getConnectorList = async (req, res) => {
