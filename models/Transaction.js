@@ -1,163 +1,69 @@
-// import mongoose from 'mongoose';
-
-// const transactionSchema = new mongoose.Schema({
-//   transactionId: {
-//     type: String,
-//     required: true,
-//     unique: true
-//   },
-//   merchantOrderId: {
-//     type: String,
-//     required: true
-//   },
-//   merchantHashId: {
-//     type: String,
-//     required: true
-//   },
-//   merchantId: {
-//     type: String, // Changed to String to match your static merchant IDs
-//     required: true
-//   },
-//   merchantName: {
-//     type: String,
-//     required: true
-//   },
-//   amount: {
-//     type: Number,
-//     required: true
-//   },
-//   currency: {
-//     type: String,
-//     default: 'INR'
-//   },
-//   status: {
-//     type: String,
-//      enum: ["Pending", "Success", "Failed", "Cancelled", "Refund"],
-//     default: 'Pending'
-//   },
-//   upiId: {
-//     type: String,
-//     default: ''
-//   },
-//   qrCode: {
-//     type: String,
-//     default: ''
-//   },
-//   paymentUrl: {
-//     type: String,
-//     default: ''
-//   },
-//   txnNote: {
-//     type: String,
-//     default: ''
-//   },
-//   txnRefId: {
-//     type: String,
-//     default: ''
-//   },
-//   merchantVpa: {
-//     type: String,
-//     default: ''
-//   },
-//   paymentMethod: {
-//     type: String,
-//     default: 'UPI'
-//   },
-//   paymentOption: {
-//     type: String,
-//     default: ''
-//   },
-//   enpayTxnId: {
-//     type: String,
-//     default: ''
-//   },
-//   source: {
-//     type: String,
-//     default: 'enpay'
-//   },
-//   isMock: {
-//     type: Boolean,
-//     default: false
-//   }
-// }, { 
-//   timestamps: true 
-// });
-
-// const Transaction = mongoose.model('Transaction', transactionSchema);
-// export default Transaction;
-
-
-
-// models/Transaction.js
+// backend/models/Transaction.js (Already provided, just confirming changes)
 import mongoose from 'mongoose';
 
 const transactionSchema = new mongoose.Schema({
-  // New unified fields
   transactionId: {
     type: String,
-    // Note: If you have duplicate IDs from different sources,
-    // 'unique' constraint might cause issues during migration.
-    // Consider if you really need it, or handle duplicates during unification.
-    // For now, removing 'unique' to allow for initial data flexibility if needed.
+    unique: true, // Added unique constraint back, important for idempotency
+    sparse: true,
   },
-  merchantOrderId: {
-    type: String,
+  merchantOrderId: { type: String },
+  merchantHashId: { type: String },
+  merchantId: { // MUST be ObjectId to reference User model
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true, // A transaction must belong to a merchant
   },
-  merchantHashId: {
-    type: String,
-  },
-  merchantId: { // This needs to be consistent: either String or ObjectId
-    type: mongoose.Schema.Types.ObjectId, // Assuming merchants are stored with ObjectId
-    ref: 'User', // Reference to the User model (assuming User is your merchant model)
-  },
-  merchantName: { // This field will store the merchant's company/name for easy access
-    type: String,
-  },
-  amount: {
-    type: Number,
-  },
-  currency: {
-    type: String,
-    default: 'INR'
-  },
+  merchantName: { type: String }, // Denormalized
+  amount: { type: Number, required: true },
+  currency: { type: String, default: 'INR' },
   status: {
     type: String,
-    enum: ["Pending", "Success", "Failed", "Cancelled", "Refund", "SUCCESS", "FAILED", "PENDING", "REFUND", "INITIATED"], // Include all possible statuses from both schemas
+    enum: ["Pending", "Success", "Failed", "Cancelled", "Refund", "SUCCESS", "FAILED", "PENDING", "REFUND", "INITIATED"],
     default: 'Pending'
   },
-  // Fields from the first image example (if not already covered)
-  commissionAmount: { type: Number },
+  commissionAmount: { type: Number, default: 0 },
   customerName: { type: String },
   customerVPA: { type: String },
-  customerContact: { type: String }, // Assuming this is directly a string
-
-  // Fields from the second image example (if not already covered)
+  customerContact: { type: String },
   upiId: { type: String },
   qrCode: { type: String },
   paymentUrl: { type: String },
   txnNote: { type: String },
-  txnRefId: { type: String },
+  txnRefId: { type: String }, // Our internal reference
   merchantVpa: { type: String },
-  // createdAt and updatedAt are handled by timestamps: true
+  paymentMethod: { type: String },
+  paymentOption: { type: String },
+  enpayTxnId: { type: String }, // Could be a general `connectorTxnId`
+  source: { type: String, default: 'enpay' },
+  isMock: { type: Boolean, default: false },
 
-  // Old schema fields (to be un-set after migration, but can exist initially)
-  
-  "Vendor Ref ID": { type: String },
-  "Vendor Txn ID": { type: String },
-  "Transaction Status": { type: String },
-  "Settlement Status": { type: String },
-  "Transaction Date": { type: String }, // Store as string to parse
-  "Amount": { type: Number },
-  "Commission Amount": { type: Number },
-  "Customer Name": { type: String },
-  "Customer VPA": { type: String },
-  "Customer Contact No": { type: String }, // Old contact field
-  "Merchant Name": { type: String }, // Old merchant name field
+  // Fields from the first image example (if not already covered)
+  // These seem to be covered by commissionAmount, customerName, customerVPA, customerContact
 
+  // Fields from the second image example (if not already covered)
+  // These seem to be covered by upiId, qrCode, paymentUrl, txnNote, txnRefId, merchantVpa
 
+  // If you need to map old fields during migration:
+  "Vendor Ref ID": { type: String }, // Potentially map to connectorTxnId
+  "Vendor Txn ID": { type: String }, // Potentially map to connectorTxnId
+  "Transaction Status": { type: String }, // Map to status
+  "Settlement Status": { type: String }, // Needs a separate settlement model/field if distinct
+  "Transaction Date": { type: Date }, // Convert to Date type
+  "Amount": { type: Number }, // Map to amount
+  "Commission Amount": { type: Number }, // Map to commissionAmount
+  "Customer Name": { type: String }, // Map to customerName
+  "Customer VPA": { type: String }, // Map to customerVPA
+  "Customer Contact No": { type: String }, // Map to customerContact
+  "Merchant Name": { type: String }, // Map to merchantName
 }, {
   timestamps: true // Automatically adds createdAt and updatedAt
 });
+
+// Index for faster lookups
+transactionSchema.index({ merchantId: 1, createdAt: -1 });
+transactionSchema.index({ transactionId: 1 });
+transactionSchema.index({ merchantOrderId: 1 });
 
 const Transaction = mongoose.model('Transaction', transactionSchema);
 export default Transaction;

@@ -1,3 +1,4 @@
+// backend/models/User.js
 import mongoose from "mongoose";
 
 const UserSchema = new mongoose.Schema(
@@ -18,8 +19,8 @@ const UserSchema = new mongoose.Schema(
       default: "Active",
     },
     contact: { type: String },
-    mid: { type: String, unique: true, sparse: true },
-    pspId: { type: String, unique: true, sparse: true },
+    mid: { type: String, unique: true, sparse: true }, // Merchant ID
+    pspId: { type: String, unique: true, sparse: true }, // Payment Service Provider ID
     documents: [
       {
         documentName: { type: String },
@@ -27,14 +28,22 @@ const UserSchema = new mongoose.Schema(
         fileUrl: { type: String },
       },
     ],
-    // ADDED: balance field for merchants
-    balance: {
+    // ADDED: balance field for merchants (already present, good!)
+    balance: { // Available balance for payouts
         type: Number,
         default: 0,
     },
-    unsettleBalance: {
+    unsettleBalance: { // Balance that hasn't been settled yet
         type: Number,
         default: 0,
+    },
+    // Payout specific details for a merchant if they are a recipient
+    bankDetails: {
+      bankName: { type: String },
+      accountNumber: { type: String },
+      ifscCode: { type: String },
+      accountHolderName: { type: String },
+      accountType: { type: String, enum: ['Saving', 'Current'] },
     },
   },
   { timestamps: true }
