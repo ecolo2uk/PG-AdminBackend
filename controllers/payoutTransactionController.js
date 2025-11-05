@@ -313,20 +313,51 @@ export const getMerchantBankDetails = async (req, res) => {
 // --- Fetch all Merchants ---
 export const getAllMerchantsForPayout = async (req, res) => {
   try {
-    const merchants = await User.find({ role: 'merchant', status: 'Active' })
-      .select('_id company firstname lastname mid balance bankDetails');
+    console.log('🔄 getAllMerchantsForPayout function called');
     
-    console.log(`✅ Found ${merchants.length} merchants`);
-    
+    // Database connection check
+    console.log('📊 MongoDB connection state:', mongoose.connection.readyState);
+    console.log('🏪 Database name:', mongoose.connection.name);
+
+    // First, let's see ALL users in database
+    const allUsers = await User.find({}).select('_id firstname lastname role status email').lean();
+    console.log('👥 TOTAL USERS IN DATABASE:', allUsers.length);
+    console.log('📋 All users:', JSON.stringify(allUsers, null, 2));
+
+    // Now find only merchants
+    const merchants = await User.find({ 
+      role: 'merchant',
+      status: 'Active'
+    })
+    .select('_id firstname lastname company email contact balance bankDetails mid')
+    .lean();
+
+    console.log('✅ MERCHANTS FOUND:', merchants.length);
+    console.log('📋 Merchant details:', JSON.stringify(merchants, null, 2));
+
+    if (merchants.length === 0) {
+      console.log('⚠️ No active merchants found with role="merchant"');
+      
+      // Check if there are users with merchant role but different status
+      const allMerchantsAnyStatus = await User.find({ role: 'merchant' })
+        .select('_id firstname lastname role status')
+        .lean();
+      console.log('🔍 All merchants (any status):', allMerchantsAnyStatus);
+    }
+
     res.status(200).json({
       success: true,
-      data: merchants
+      data: merchants,
+      total: merchants.length,
+      message: `Found ${merchants.length} active merchants`
     });
+
   } catch (error) {
-    console.error("❌ Error fetching merchants:", error);
+    console.error('❌ ERROR in getAllMerchantsForPayout:', error);
     res.status(500).json({ 
       success: false,
-      message: "Server error fetching merchants." 
+      message: "Database error",
+      error: error.message
     });
   }
 };
