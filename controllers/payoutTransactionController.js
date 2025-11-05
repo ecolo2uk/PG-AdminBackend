@@ -116,16 +116,125 @@ const newPayout = new PayoutTransaction({
 };
 
 // --- Get Payout Transactions ---
+export const createPayoutTransaction = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const {
+      merchantId,
+      transactionType,
+      amount,
+      remark,
+      feeApplied = false,
+      connector
+    } = req.body;
+
+    console.log('📦 Creating payout transaction:', req.body);
+
+    // Validate required fields
+    if (!merchantId || !transactionType || !amount) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        message: "Missing required fields: merchantId, transactionType, amount" 
+      });
+    }
+
+    // Validate merchant
+    const merchant = await User.findById(merchantId).session(session);
+    if (!merchant || merchant.role !== 'merchant') {
+      await session.abortTransaction();
+      return res.status(404).json({ 
+        success: false,
+        message: "Merchant not found." 
+      });
+    }
+    
+    // Check balance for debit transactions
+    const transactionAmount = parseFloat(amount);
+    if (transactionType === 'Debit' && merchant.balance < transactionAmount) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        message: `Insufficient balance. Available: ₹${merchant.balance}, Required: ₹${transactionAmount}` 
+      });
+    }
+
+    console.log(`💰 Merchant balance: ${merchant.balance}, Transaction amount: ${transactionAmount}`);
+
+    // Update merchant balance
+    if (transactionType === 'Debit') {
+      merchant.balance -= transactionAmount;
+    } else if (transactionType === 'Credit') {
+      merchant.balance += transactionAmount;
+    }
+    
+    await merchant.save({ session });
+
+    // Create Payout Transaction
+    const newPayout = new PayoutTransaction({
+      merchantId,
+      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      accountNumber: "N/A",
+      connector: connector || "Manual",
+      amount: transactionAmount,
+      paymentMode: 'Wallet Transfer',
+      transactionType,
+      status: 'Success',
+      webhook: 'N/A',
+      remark,
+      feeApplied: feeApplied,
+      feeAmount: feeApplied ? transactionAmount * 0.02 : 0,
+      utr: generateUtr(),
+      transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+    });
+    
+    const savedPayout = await newPayout.save({ session });
+    await session.commitTransaction();
+    
+    console.log('✅ Payout transaction created:', savedPayout._id);
+    
+    res.status(201).json({
+      success: true,
+      message: "Payout transaction created successfully",
+      payoutTransaction: savedPayout,
+      newBalance: merchant.balance
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("❌ Error creating payout transaction:", error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Duplicate transaction detected. Please try again."
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      message: "Server error during payout creation.",
+      error: error.message 
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// --- Get Payout Transactions ---
 export const getPayoutTransactions = async (req, res) => {
   try {
     const { 
-      merchantId, 
+      merchant, 
       status, 
-      paymentMode, 
-      transactionType, 
-      startDate, 
-      endDate, 
+      connector,
       utr,
+      accountNumber,
+      transactionId,
+      startDate, 
+      endDate,
       page = 1,
       limit = 10
     } = req.query;
@@ -135,13 +244,14 @@ export const getPayoutTransactions = async (req, res) => {
     let query = {};
     
     // Build query based on filters
-    if (merchantId && merchantId !== 'undefined') {
-      query.merchantId = merchantId;
+    if (merchant && merchant !== 'undefined') {
+      query.merchantId = merchant;
     }
     if (status && status !== 'undefined') query.status = status;
-    if (paymentMode && paymentMode !== 'undefined') query.paymentMode = paymentMode;
-    if (transactionType && transactionType !== 'undefined') query.transactionType = transactionType;
+    if (connector && connector !== 'undefined') query.connector = connector;
     if (utr && utr !== 'undefined') query.utr = { $regex: utr, $options: 'i' };
+    if (accountNumber && accountNumber !== 'undefined') query.accountNumber = { $regex: accountNumber, $options: 'i' };
+    if (transactionId && transactionId !== 'undefined') query.transactionId = { $regex: transactionId, $options: 'i' };
 
     // Date filtering
     if (startDate || endDate) {
@@ -150,14 +260,11 @@ export const getPayoutTransactions = async (req, res) => {
       if (endDate) query.createdAt.$lte = new Date(endDate);
     }
 
-    console.log('🔍 Final query:', query);
-
     const skip = (page - 1) * limit;
     
-    // Fetch transactions with population
+    // Fetch transactions
     const payouts = await PayoutTransaction.find(query)
-      .populate('merchantId', 'company firstname lastname email')
-      .populate('recipientMerchantId', 'company firstname lastname email')
+      .populate('merchantId', 'firstname lastname email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -386,6 +493,24 @@ export const getPayoutSupportedConnectors = async (req, res) => {
   try {
     const connectors = await Connector.find({ isPayoutSupport: true, status: 'Active' })
       .select('_id name');
+    
+    res.status(200).json({
+      success: true,
+      data: connectors
+    });
+  } catch (error) {
+    console.error("Error fetching connectors:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error fetching connectors." 
+    });
+  }
+};
+
+export const getConnectors = async (req, res) => {
+  try {
+    const connectors = await Connector.find({ status: 'Active' })
+      .select('_id name connectorType');
     
     res.status(200).json({
       success: true,
