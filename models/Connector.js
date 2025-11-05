@@ -1,10 +1,9 @@
-// backend/models/Connector.js
 import mongoose from 'mongoose';
 
 const connectorSchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
   className: { type: String, required: true },
-  connectorType: { type: String, required: true, enum: ['UPI', 'Card'] },
+  connectorType: { type: String, required: true, enum: ['UPI', 'Card', 'Bank'] },
   expireAfterMinutes: { type: Number, default: 60 },
   isPayoutSupport: { type: Boolean, default: false },
   isPayoutBulkUploadSupport: { type: Boolean, default: false },
@@ -12,19 +11,24 @@ const connectorSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
   
-  // Dynamic credentials - stored as an array of objects
+  // Payout specific settings
+  payoutModes: [{
+    type: String,
+    enum: ['IMPS', 'NEFT', 'RTGS', 'UPI']
+  }],
+  minPayoutAmount: { type: Number, default: 100 },
+  maxPayoutAmount: { type: Number, default: 100000 },
+  
   credentials: [{
     credentialTitle: { type: String, required: true },
     credentialName: { type: String, required: true },
   }],
   
-  // Dynamic start/end times
   times: [{
     startTime: { type: String },
     endTime: { type: String },
   }],
 
-  // Required Fields from checkboxes
   requiredFields: {
     firstName: { type: Boolean, default: false },
     lastName: { type: Boolean, default: false },
