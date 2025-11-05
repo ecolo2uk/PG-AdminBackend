@@ -1,4 +1,4 @@
-// Add to your backend routes file (payoutTransactionRoutes.js)
+// In payoutTransactionRoutes.js - ADD THIS AT THE TOP
 import express from 'express';
 import {
   getPayoutTransactions,
@@ -12,7 +12,34 @@ import {
 
 const router = express.Router();
 
-// Add test routes first
+// 🚨 ADD THIS DEBUG MIDDLEWARE FIRST
+router.use((req, res, next) => {
+  console.log('🛣️ PAYOUT ROUTES - Incoming request:', {
+    method: req.method,
+    url: req.originalUrl,
+    path: req.path,
+    baseUrl: req.baseUrl,
+    body: req.body
+  });
+  next();
+});
+
+// Test if the router is working
+router.get('/debug-router', (req, res) => {
+  console.log('✅ Router is working!');
+  res.json({
+    success: true,
+    message: 'Payout router is functioning',
+    routes: [
+      'POST /',
+      'GET /',
+      'GET /merchants/list',
+      'POST /test-create'
+    ]
+  });
+});
+
+// EXISTING TEST ROUTES
 router.get('/test', (req, res) => {
   res.json({ 
     success: true, 
@@ -29,45 +56,6 @@ router.get('/health', (req, res) => {
   });
 });
 
-
-// Add this test route to debug database issues
-router.get('/debug/database', async (req, res) => {
-  try {
-    console.log("🧪 Testing database connection...");
-    
-    const dbState = mongoose.connection.readyState;
-    const dbStats = {
-      state: dbState,
-      stateName: ['disconnected', 'connected', 'connecting', 'disconnecting'][dbState],
-      host: mongoose.connection.host,
-      name: mongoose.connection.name,
-      readyState: mongoose.connection.readyState
-    };
-
-    // Test User collection
-    const userCount = await User.countDocuments();
-    const merchantCount = await User.countDocuments({ role: 'merchant' });
-    
-    res.json({
-      success: true,
-      database: dbStats,
-      counts: {
-        totalUsers: userCount,
-        merchants: merchantCount
-      },
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error("❌ Database test failed:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-}); 
-
-// Add this to your payoutTransactionRoutes.js
 router.post('/test-create', (req, res) => {
   console.log("🧪 Test POST received:", req.body);
   res.json({ 
@@ -78,11 +66,15 @@ router.post('/test-create', (req, res) => {
   });
 });
 
+// 🚨 MAIN ROUTES - FIX THE ORDER
+router.post('/', (req, res, next) => {
+  console.log('🎯 MAIN POST ROUTE HIT!', req.body);
+  next();
+}, createPayoutTransaction);
 
-// Your existing routes
 router.get('/', getPayoutTransactions);
-router.post('/', createPayoutTransaction); // This is the missing route!
 
+// Other routes...
 router.patch('/:id/status', updatePayoutTransactionStatus);
 router.get('/merchants/list', getMerchantList);
 router.get('/connectors/list', getConnectorList);
