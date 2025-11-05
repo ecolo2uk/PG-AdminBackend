@@ -6,11 +6,11 @@ import {
     deleteMerchantConnectorAccount,
     getAvailableConnectors,
     setPrimaryAccount,
-    getAccountLimits, // New
-    updateAccountLimits, // New
-    getAccountRates, // New
-    updateAccountRates, // New
-    getAccountDetails // New
+    getAccountLimits,
+    updateAccountLimits,
+    getAccountRates,
+    updateAccountRates,
+    getAccountDetails
 } from '../controllers/merchantConnectorController.js';
 
 const router = express.Router();
@@ -24,10 +24,10 @@ router.delete('/connector-accounts/:accountId', deleteMerchantConnectorAccount);
 router.patch('/connector-accounts/:accountId/primary', setPrimaryAccount);
 
 // Actions specific to an account (Set Limits, Change Rates, Show Rates, View Detail)
-router.get('/connector-accounts/:accountId/limits', getAccountLimits); // For "Set Limits"
-router.put('/connector-accounts/:accountId/limits', updateAccountLimits); // For "Set Limits" update
-router.get('/connector-accounts/:accountId/rates', getAccountRates); // For "Change Rates" and "Show Rates"
-router.put('/connector-accounts/:accountId/rates', updateAccountRates); // For "Change Rates" update
-router.get('/connector-accounts/:accountId/details', getAccountDetails); // For "View Detail"
+router.get('/connector-accounts/:accountId/limits', getAccountLimits);
+router.put('/connector-accounts/:accountId/limits', updateAccountLimits);
+router.get('/connector-accounts/:accountId/rates', getAccountRates);
+router.put('/connector-accounts/:accountId/rates', updateAccountRates);
+router.get('/connector-accounts/:accountId/details', getAccountDetails);
 
 export default router;
