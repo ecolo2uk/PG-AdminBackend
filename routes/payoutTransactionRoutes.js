@@ -29,6 +29,46 @@ router.get('/health', (req, res) => {
   });
 });
 
+
+// Add this test route to debug database issues
+router.get('/debug/database', async (req, res) => {
+  try {
+    console.log("🧪 Testing database connection...");
+    
+    const dbState = mongoose.connection.readyState;
+    const dbStats = {
+      state: dbState,
+      stateName: ['disconnected', 'connected', 'connecting', 'disconnecting'][dbState],
+      host: mongoose.connection.host,
+      name: mongoose.connection.name,
+      readyState: mongoose.connection.readyState
+    };
+
+    // Test User collection
+    const userCount = await User.countDocuments();
+    const merchantCount = await User.countDocuments({ role: 'merchant' });
+    
+    res.json({
+      success: true,
+      database: dbStats,
+      counts: {
+        totalUsers: userCount,
+        merchants: merchantCount
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("❌ Database test failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}); 
+
+
+
 // Your existing routes
 router.get('/', getPayoutTransactions);
 router.post('/', createPayoutTransaction);

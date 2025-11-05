@@ -72,23 +72,31 @@ export const getPayoutTransactions = async (req, res) => {
 };
 
 // In your payoutTransactionController.js - update getMerchantList
+// In payoutTransactionController.js
 export const getMerchantList = async (req, res) => {
   try {
     console.log("🔍 Fetching merchants list from database...");
     
     // Check database connection
     const dbState = mongoose.connection.readyState;
-    console.log(`📊 Database connection state: ${dbState}`);
+    console.log(`📊 Database connection state: ${dbState} (0=disconnected, 1=connected, 2=connecting, 3=disconnecting)`);
     
     if (dbState !== 1) {
+      console.error("❌ Database is not connected");
       return res.status(500).json({
         success: false,
-        message: "Database not connected",
+        message: "Database connection failed",
         dbState: dbState
       });
     }
 
+    // Test with a simple query first
+    console.log("🔄 Testing database connection with simple query...");
+    const testResult = await User.findOne({}).limit(1);
+    console.log("✅ Database test query:", testResult ? "Success" : "No data");
+
     // Get all active merchants
+    console.log("🔄 Fetching merchants...");
     const merchants = await User.find({ 
       role: 'merchant', 
       status: 'Active' 
@@ -96,23 +104,16 @@ export const getMerchantList = async (req, res) => {
 
     console.log(`✅ Database query returned ${merchants.length} merchants`);
 
-    if (merchants.length === 0) {
-      return res.status(200).json({
-        success: true,
-        data: [],
-        message: "No active merchants found in database"
-      });
-    }
-
+    // Format the response
     const formattedMerchants = merchants.map(merchant => {
       const merchantName = merchant.company || 
                           `${merchant.firstname || ''} ${merchant.lastname || ''}`.trim() || 
                           merchant.email;
       
       return {
-        _id: merchant._id,
+        _id: merchant._id?.toString() || 'unknown',
         name: merchantName,
-        email: merchant.email,
+        email: merchant.email || 'No email',
         balance: merchant.balance || 0,
         company: merchant.company,
         firstname: merchant.firstname,
@@ -122,21 +123,34 @@ export const getMerchantList = async (req, res) => {
       };
     });
 
+    console.log(`✅ Sending ${formattedMerchants.length} merchants to client`);
+
     res.status(200).json({ 
       success: true, 
       data: formattedMerchants,
-      message: `Found ${formattedMerchants.length} merchants`
+      message: `Found ${formattedMerchants.length} merchants`,
+      timestamp: new Date().toISOString()
     });
+
   } catch (error) {
-    console.error("❌ Error fetching merchants list:", error);
+    console.error("❌ CRITICAL ERROR in getMerchantList:", error);
+    
+    // More detailed error logging
+    console.error("Error details:", {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+
     res.status(500).json({ 
       success: false, 
-      message: "Database error while fetching merchants", 
-      error: error.message
+      message: "Internal server error while fetching merchants",
+      error: process.env.NODE_ENV === 'production' ? 'Database error' : error.message,
+      timestamp: new Date().toISOString()
     });
   }
 };
-// In your payoutTransactionController.js - update getConnectorList
+
 export const getConnectorList = async (req, res) => {
   try {
     console.log("🔍 Fetching connectors list...");
