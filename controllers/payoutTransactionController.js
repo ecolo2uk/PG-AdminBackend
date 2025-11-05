@@ -14,7 +14,6 @@ export const createPayoutToMerchant = async (req, res) => {
   try {
     const {
       merchantId,
-      recipientMerchantId,
       bankName,
       accountNumber,
       ifscCode,
@@ -26,39 +25,34 @@ export const createPayoutToMerchant = async (req, res) => {
       customerPhoneNumber,
       remark,
       responseUrl,
-      webhookUrl,
     } = req.body;
 
     // 1. Validate initiating merchant and their balance
     const initiatingMerchant = await User.findById(merchantId).session(session);
     if (!initiatingMerchant || initiatingMerchant.role !== 'merchant') {
       await session.abortTransaction();
-      return res.status(404).json({ message: "Initiating merchant not found or not a merchant." });
+      return res.status(404).json({ 
+        success: false,
+        message: "Initiating merchant not found or not a merchant." 
+      });
     }
+    
     if (initiatingMerchant.balance < amount) {
       await session.abortTransaction();
-      return res.status(400).json({ message: "Insufficient balance for payout." });
+      return res.status(400).json({ 
+        success: false,
+        message: "Insufficient balance for payout." 
+      });
     }
 
-    // 2. Validate recipient merchant if internal
-    let recipientUser = null;
-    if (recipientMerchantId) {
-      recipientUser = await User.findById(recipientMerchantId).session(session);
-      if (!recipientUser || recipientUser.role !== 'merchant') {
-        await session.abortTransaction();
-        return res.status(404).json({ message: "Recipient merchant not found or not a merchant." });
-      }
-    }
-
-    // 3. Deduct amount from initiating merchant's balance
+    // 2. Deduct amount from initiating merchant's balance
     initiatingMerchant.balance -= parseFloat(amount);
     await initiatingMerchant.save({ session });
 
-    // 4. Create Payout Transaction record
+    // 3. Create Payout Transaction record
     const newPayout = new PayoutTransaction({
       merchantId,
       merchantName: initiatingMerchant.company || `${initiatingMerchant.firstname} ${initiatingMerchant.lastname}`,
-      recipientMerchantId,
       recipientBankName: bankName,
       recipientAccountNumber: accountNumber,
       recipientIfscCode: ifscCode,
@@ -73,12 +67,12 @@ export const createPayoutToMerchant = async (req, res) => {
       customerPhoneNumber,
       remark,
       responseUrl,
-      webhookUrl,
       utr: generateUtr(),
     });
+    
     await newPayout.save({ session });
-
     await session.commitTransaction();
+    
     res.status(201).json({
       success: true,
       message: "Payout initiated successfully",
@@ -172,9 +166,10 @@ export const createInternalPayoutTransaction = async (req, res) => {
       remark,
       utr: generateUtr(),
     });
+    
     await newPayout.save({ session });
-
     await session.commitTransaction();
+    
     res.status(201).json({
       success: true,
       message: `Merchant balance ${transactionType === 'Debit' ? 'debited' : 'credited'} successfully.`,
@@ -269,6 +264,7 @@ export const getPayoutTransactionById = async (req, res) => {
         message: "Payout transaction not found." 
       });
     }
+    
     res.status(200).json({
       success: true,
       data: payout
@@ -295,6 +291,7 @@ export const getMerchantBankDetails = async (req, res) => {
         message: "Merchant not found." 
       });
     }
+    
     res.status(200).json({
       success: true,
       data: {
@@ -333,8 +330,9 @@ export const updateMerchantBankDetails = async (req, res) => {
       accountHolderName,
       accountType,
     };
+    
     await merchant.save();
-
+    
     res.status(200).json({ 
       success: true,
       message: "Merchant bank details updated successfully.", 
@@ -355,6 +353,7 @@ export const getAllMerchantsForPayout = async (req, res) => {
   try {
     const merchants = await User.find({ role: 'merchant', status: 'Active' })
       .select('_id company firstname lastname mid balance bankDetails');
+    
     res.status(200).json({
       success: true,
       data: merchants
@@ -373,6 +372,7 @@ export const getPayoutSupportedConnectors = async (req, res) => {
   try {
     const connectors = await Connector.find({ isPayoutSupport: true, status: 'Active' })
       .select('_id name');
+    
     res.status(200).json({
       success: true,
       data: connectors
