@@ -6,10 +6,10 @@ const payoutTransactionSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
-    transactionId: {
+  transactionId: {
     type: String,
     unique: true,
-    sparse: true, // ✅ This allows multiple null values
+    sparse: true,
   },
   merchantId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -20,6 +20,26 @@ const payoutTransactionSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  
+  // ✅ ADDED: Fields for your UI
+  accountNumber: { 
+    type: String,
+    default: "N/A"
+  },
+  connector: { 
+    type: String,
+    default: "Manual"
+  },
+  webhook: { 
+    type: String,
+    default: "N/A"
+  },
+  feeApplied: {
+    type: Boolean,
+    default: false,
+  },
+  
+  // Existing fields
   recipientMerchantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
