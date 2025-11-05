@@ -29,14 +29,16 @@ export const createPayoutToMerchant = async (req, res) => {
 
     console.log('📦 Creating payout to merchant with data:', req.body);
 
-    // Validate required fields
+    // Validate required fields - FIXED THIS PART
     if (!merchantId || !amount || !bankName || !accountNumber || !ifscCode || !accountHolderName) {
       await session.abortTransaction();
       return res.status(400).json({ 
-  success: false,
-  message: `Insufficient balance. Available: ₹${initiatingMerchant.balance}, Required: ₹${payoutAmount}` 
-});
+        success: false,
+        message: "Missing required fields: merchantId, amount, bankName, accountNumber, ifscCode, accountHolderName" 
+      });
     }
+
+    // Rest of the code remains same...
 
     // Validate initiating merchant
     const initiatingMerchant = await User.findById(merchantId).session(session);
