@@ -71,7 +71,8 @@ router.get('/debug/database', async (req, res) => {
 
 // Your existing routes
 router.get('/', getPayoutTransactions);
-router.post('/', createPayoutTransaction);
+router.post('/', createPayoutTransaction); // This is the missing route!
+
 router.patch('/:id/status', updatePayoutTransactionStatus);
 router.get('/merchants/list', getMerchantList);
 router.get('/connectors/list', getConnectorList);
