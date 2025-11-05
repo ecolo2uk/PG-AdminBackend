@@ -6,6 +6,11 @@ const payoutTransactionSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
+    transactionId: {
+    type: String,
+    unique: true,
+    sparse: true, // ✅ This allows multiple null values
+  },
   merchantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

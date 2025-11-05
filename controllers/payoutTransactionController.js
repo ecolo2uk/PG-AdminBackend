@@ -67,25 +67,28 @@ export const createPayoutToMerchant = async (req, res) => {
     await initiatingMerchant.save({ session });
 
     // Create Payout Transaction
-    const newPayout = new PayoutTransaction({
-      merchantId,
-      merchantName: initiatingMerchant.company || `${initiatingMerchant.firstname} ${initiatingMerchant.lastname}`,
-      recipientBankName: bankName,
-      recipientAccountNumber: accountNumber,
-      recipientIfscCode: ifscCode,
-      recipientAccountHolderName: accountHolderName,
-      recipientAccountType: accountType || 'Saving',
-      amount: payoutAmount,
-      currency: 'INR',
-      paymentMode: paymentMode || 'IMPS',
-      transactionType: 'Debit',
-      status: 'Success',
-      customerEmail,
-      customerPhoneNumber,
-      remark,
-      responseUrl,
-      utr: generateUtr(),
-    });
+  // Create Payout Transaction - FIXED VERSION
+const newPayout = new PayoutTransaction({
+  merchantId,
+  merchantName: initiatingMerchant.company || `${initiatingMerchant.firstname} ${initiatingMerchant.lastname}`,
+  recipientBankName: bankName,
+  recipientAccountNumber: accountNumber,
+  recipientIfscCode: ifscCode,
+  recipientAccountHolderName: accountHolderName,
+  recipientAccountType: accountType || 'Saving',
+  amount: payoutAmount,
+  currency: 'INR',
+  paymentMode: paymentMode || 'IMPS',
+  transactionType: 'Debit',
+  status: 'Success',
+  customerEmail,
+  customerPhoneNumber,
+  remark,
+  responseUrl,
+  utr: generateUtr(),
+  // 🔥 ADD THIS: Generate unique transactionId
+  transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+});
     
     const savedPayout = await newPayout.save({ session });
     await session.commitTransaction();
