@@ -11,7 +11,7 @@ const generateUniqueId = (prefix) => {
 // @route   GET /api/payout-transactions
 export const getPayoutTransactions = async (req, res) => {
   try {
-    console.log("Fetching payout transactions with query:", req.query);
+    console.log("🔍 Fetching payout transactions...");
     
     const {
       merchant, connector, status, utr, accountNumber,
@@ -19,7 +19,6 @@ export const getPayoutTransactions = async (req, res) => {
       limit = 10, page = 1
     } = req.query;
 
-    // Build query object
     const query = {};
 
     if (merchant && merchant !== '') query.merchantId = merchant;
@@ -31,12 +30,9 @@ export const getPayoutTransactions = async (req, res) => {
     if (orderId && orderId !== '') query.orderId = { $regex: orderId, $options: 'i' };
     if (type && type !== '') query.type = type;
 
-    // Date range filter
     if (startDate || endDate) {
       query.createdAt = {};
-      if (startDate) {
-        query.createdAt.$gte = new Date(startDate);
-      }
+      if (startDate) query.createdAt.$gte = new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
@@ -50,13 +46,13 @@ export const getPayoutTransactions = async (req, res) => {
       sort: { createdAt: -1 },
     };
 
-    console.log("Final query:", JSON.stringify(query));
-
     const transactions = await PayoutTransaction.find(query)
-      .populate('merchantId', 'company email balance')
+      .populate('merchantId', 'firstname lastname company email balance')
       .lean();
 
     const totalTransactions = await PayoutTransaction.countDocuments(query);
+
+    console.log(`✅ Found ${transactions.length} transactions`);
 
     res.status(200).json({
       success: true,
@@ -66,7 +62,7 @@ export const getPayoutTransactions = async (req, res) => {
       totalTransactions,
     });
   } catch (error) {
-    console.error("Error fetching payout transactions:", error);
+    console.error("❌ Error fetching payout transactions:", error);
     res.status(500).json({ 
       success: false, 
       message: "Server error", 
@@ -79,33 +75,49 @@ export const getPayoutTransactions = async (req, res) => {
 // @route   GET /api/payout-transactions/merchants/list
 export const getMerchantList = async (req, res) => {
   try {
-    console.log("Fetching merchants list...");
+    console.log("🔍 Fetching merchants list...");
+    
+    // Check database connection
+    const dbState = mongoose.connection.readyState;
+    console.log(`📊 Database connection state: ${dbState} (0=disconnected, 1=connected, 2=connecting, 3=disconnecting)`);
     
     const merchants = await User.find({ 
       role: 'merchant', 
       status: 'Active' 
-    }).select('_id company email balance firstname lastname').lean();
+    }).select('_id firstname lastname company email balance contact mid').lean();
 
-    console.log("Found merchants:", merchants.length);
+    console.log(`✅ Found ${merchants.length} merchants in database`);
 
-    const formattedMerchants = merchants.map(merchant => ({
-      _id: merchant._id,
-      name: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      email: merchant.email,
-      balance: merchant.balance || 0,
-      company: merchant.company
-    }));
+    const formattedMerchants = merchants.map(merchant => {
+      const merchantName = merchant.company || 
+                          `${merchant.firstname || ''} ${merchant.lastname || ''}`.trim() || 
+                          merchant.email;
+      
+      return {
+        _id: merchant._id,
+        name: merchantName,
+        email: merchant.email,
+        balance: merchant.balance || 0,
+        company: merchant.company,
+        firstname: merchant.firstname,
+        lastname: merchant.lastname,
+        contact: merchant.contact,
+        mid: merchant.mid
+      };
+    });
 
     res.status(200).json({ 
       success: true, 
-      data: formattedMerchants 
+      data: formattedMerchants,
+      message: `Found ${formattedMerchants.length} merchants`
     });
   } catch (error) {
-    console.error("Error fetching merchants list:", error);
+    console.error("❌ Error fetching merchants list:", error);
     res.status(500).json({ 
       success: false, 
       message: "Server error", 
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
@@ -114,21 +126,22 @@ export const getMerchantList = async (req, res) => {
 // @route   GET /api/payout-transactions/connectors/list
 export const getConnectorList = async (req, res) => {
   try {
-    console.log("Fetching connectors list...");
+    console.log("🔍 Fetching connectors list...");
     
     const connectors = await Connector.find({ 
       isPayoutSupport: true, 
       status: 'Active' 
-    }).select('_id name connectorType payoutModes').lean();
+    }).select('_id name connectorType payoutModes minPayoutAmount maxPayoutAmount').lean();
 
-    console.log("Found connectors:", connectors.length);
+    console.log(`✅ Found ${connectors.length} connectors with payout support`);
 
     res.status(200).json({ 
       success: true, 
-      data: connectors 
+      data: connectors,
+      message: `Found ${connectors.length} connectors`
     });
   } catch (error) {
-    console.error("Error fetching connectors list:", error);
+    console.error("❌ Error fetching connectors list:", error);
     res.status(500).json({ 
       success: false, 
       message: "Server error", 
@@ -141,7 +154,7 @@ export const getConnectorList = async (req, res) => {
 // @route   POST /api/payout-transactions
 export const createPayoutTransaction = async (req, res) => {
   try {
-    console.log("Creating payout transaction:", req.body);
+    console.log("💰 Creating payout transaction:", req.body);
     
     const {
       merchantId, amount, accountNumber, connector, paymentMode, type,
@@ -164,6 +177,8 @@ export const createPayoutTransaction = async (req, res) => {
         message: "Merchant not found"
       });
     }
+
+    console.log(`📊 Merchant found: ${merchant.company || merchant.firstname}`);
 
     // Validate connector
     const connectorConfig = await Connector.findOne({ 
@@ -221,7 +236,7 @@ export const createPayoutTransaction = async (req, res) => {
     // Create payout transaction
     const newPayoutTransaction = new PayoutTransaction({
       merchantId,
-      merchantName: merchant.company || merchant.email,
+      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`.trim() || merchant.email,
       amount: finalAmount,
       accountNumber,
       connector,
@@ -250,7 +265,7 @@ export const createPayoutTransaction = async (req, res) => {
     
     await merchant.save();
 
-    console.log("Payout transaction created successfully:", newPayoutTransaction._id);
+    console.log("✅ Payout transaction created successfully:", newPayoutTransaction._id);
 
     res.status(201).json({
       success: true,
@@ -259,7 +274,7 @@ export const createPayoutTransaction = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error creating payout transaction:", error);
+    console.error("❌ Error creating payout transaction:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -274,7 +289,7 @@ export const getMerchantTransactionsSummary = async (req, res) => {
   try {
     const { merchantId } = req.params;
     
-    console.log("Fetching transactions for merchant:", merchantId);
+    console.log(`🔍 Fetching transactions for merchant: ${merchantId}`);
 
     const transactions = await PayoutTransaction.find({ merchantId })
       .sort({ createdAt: -1 })
@@ -296,6 +311,8 @@ export const getMerchantTransactionsSummary = async (req, res) => {
       netBalance: totalCredit - totalDebit
     };
 
+    console.log(`✅ Found ${transactions.length} transactions for merchant`);
+
     res.status(200).json({
       success: true,
       data: {
@@ -304,7 +321,7 @@ export const getMerchantTransactionsSummary = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Error fetching merchant transactions:", error);
+    console.error("❌ Error fetching merchant transactions:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -399,7 +416,7 @@ export const exportPayoutTransactions = async (req, res) => {
     res.send(csvContent);
 
   } catch (error) {
-    console.error("Error exporting payout transactions:", error);
+    console.error("❌ Error exporting payout transactions:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -440,7 +457,7 @@ export const updatePayoutTransactionStatus = async (req, res) => {
       data: transaction
     });
   } catch (error) {
-    console.error("Error updating transaction status:", error);
+    console.error("❌ Error updating transaction status:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
