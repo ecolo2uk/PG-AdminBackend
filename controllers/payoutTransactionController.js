@@ -71,41 +71,36 @@ export const getPayoutTransactions = async (req, res) => {
   }
 };
 
-// @desc    Get merchants list
-// @route   GET /api/payout-transactions/merchants/list
+// In your payoutTransactionController.js - update getMerchantList
 export const getMerchantList = async (req, res) => {
   try {
-    console.log("🔍 Fetching merchants list...");
+    console.log("🔍 Fetching merchants list from database...");
     
     // Check database connection
     const dbState = mongoose.connection.readyState;
-    console.log(`📊 Database connection state: ${dbState} (0=disconnected, 1=connected, 2=connecting, 3=disconnecting)`);
+    console.log(`📊 Database connection state: ${dbState}`);
     
     if (dbState !== 1) {
       return res.status(500).json({
         success: false,
-        message: "Database not connected. Please check MongoDB connection.",
+        message: "Database not connected",
         dbState: dbState
       });
     }
 
-    // Test database query
-    const testQuery = await User.findOne({ role: 'merchant' }).limit(1);
-    console.log("📊 Test query result:", testQuery ? "Success" : "No merchants found");
-
+    // Get all active merchants
     const merchants = await User.find({ 
       role: 'merchant', 
       status: 'Active' 
     }).select('_id firstname lastname company email balance contact mid').lean();
 
-    console.log(`✅ Found ${merchants.length} merchants in database`);
+    console.log(`✅ Database query returned ${merchants.length} merchants`);
 
     if (merchants.length === 0) {
-      console.log("⚠️ No active merchants found in database");
       return res.status(200).json({
         success: true,
         data: [],
-        message: "No active merchants found"
+        message: "No active merchants found in database"
       });
     }
 
@@ -136,24 +131,22 @@ export const getMerchantList = async (req, res) => {
     console.error("❌ Error fetching merchants list:", error);
     res.status(500).json({ 
       success: false, 
-      message: "Server error", 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: "Database error while fetching merchants", 
+      error: error.message
     });
   }
 };
-// @desc    Get connectors list
-// @route   GET /api/payout-transactions/connectors/list
+// In your payoutTransactionController.js - update getConnectorList
 export const getConnectorList = async (req, res) => {
   try {
     console.log("🔍 Fetching connectors list...");
     
+    // TEMPORARY: Get all active connectors, not just payout support
     const connectors = await Connector.find({ 
-      isPayoutSupport: true, 
       status: 'Active' 
-    }).select('_id name connectorType payoutModes minPayoutAmount maxPayoutAmount').lean();
+    }).select('_id name connectorType isPayoutSupport').lean();
 
-    console.log(`✅ Found ${connectors.length} connectors with payout support`);
+    console.log(`✅ Found ${connectors.length} connectors`);
 
     res.status(200).json({ 
       success: true, 
