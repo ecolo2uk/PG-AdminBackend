@@ -4,18 +4,18 @@ import {
   getMerchantUsers,
   createMerchantUser,
   updateMerchantUser,
-  deleteMerchantUser
+  deleteMerchantUser,
+  getMerchantById
 } from '../controllers/merchantController.js';
 
 const router = express.Router();
 
-// Get all merchants (simple list)
+// Merchant routes
 router.get('/', getAllMerchants);
-
-// Merchant users routes
 router.get('/users', getMerchantUsers);
 router.post('/users', createMerchantUser);
 router.put('/users/:id', updateMerchantUser);
 router.delete('/users/:id', deleteMerchantUser);
+router.get('/:id', getMerchantById);
 
 export default router;

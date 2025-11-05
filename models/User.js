@@ -26,9 +26,13 @@ const UserSchema = new mongoose.Schema(
         documentType: { type: String },
         fileUrl: { type: String },
       },
-      
     ],
-    unsettleBalance: { // <--- ADDED: New field for merchant's unsettle balance
+    // ADDED: balance field for merchants
+    balance: {
+        type: Number,
+        default: 0,
+    },
+    unsettleBalance: {
         type: Number,
         default: 0,
     },
