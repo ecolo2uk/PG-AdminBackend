@@ -1,3 +1,4 @@
+import mongoose from 'mongoose'; // ADD THIS LINE
 import PayoutTransaction from '../models/PayoutTransaction.js';
 import User from '../models/User.js';
 import Connector from '../models/Connector.js';
