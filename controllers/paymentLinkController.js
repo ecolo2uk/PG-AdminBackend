@@ -3,7 +3,7 @@ import axios from 'axios';
 import { encrypt } from '../utils/encryption.js'; // Import encrypt
 import crypto from 'crypto'; // Needed for a robust ENCRYPTION_KEY check
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000'; // Ensure this is correct
+const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://admin.payorbit.co.in'; // Ensure this is correct
 
 // Ensure ENCRYPTION_KEY is always defined and consistent
 const ENCRYPTION_KEY_RAW = process.env.PAYMENT_LINK_ENCRYPTION_KEY;
