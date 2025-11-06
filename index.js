@@ -15,7 +15,7 @@ import roleRoutes from './routes/roleRoutes.js';
 import permissionRoutes from './routes/permissionRoutes.js';
 import connectorRoutes from './routes/connectorRoutes.js';
 import connectorAccountRoutes from './routes/connectorAccountRoutes.js';
-// import paymentRoutes from './routes/paymentLink.js'; // <--- REMOVE OR COMMENT THIS LINE OUT
+import paymentRoutes from './routes/paymentRoutes.js'; // <--- REMOVE OR COMMENT THIS LINE OUT
 import transactionRoutes from './routes/transactionRoutes.js';
 import agreementRoutes from './routes/agreementRoutes.js';
 import businessSizeRoutes from './routes/businessSizeRoutes.js';
@@ -32,7 +32,6 @@ import dashboardRoutes from './routes/dashboardRoutes.js';
 import riskManagementRoutes from './routes/riskManagementRoutes.js';
 import payoutSettlementRoutes from './routes/payoutSettlementRoutes.js';
 import payoutTransactionRoutes from './routes/payoutTransactionRoutes.js';
-import paymentRoutes from './routes/paymentRoutes.js'; // <--- KEEP THIS ONE, as it contains your new short link logic
 
 dotenv.config();
 
@@ -72,7 +71,6 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/risk-management', riskManagementRoutes);
 app.use('/api/payout-settlements', payoutSettlementRoutes);
 app.use('/api/payout-transactions', payoutTransactionRoutes);
-app.use('/api/payment', paymentRoutes); // <--- THIS IS CRUCIAL
 // Basic root route
 app.get('/', (req, res) => {
     res.send('Welcome to the PG Admin API!');

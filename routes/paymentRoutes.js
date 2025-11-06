@@ -1,11 +1,35 @@
-// In your routes/paymentRoutes.js or similar
+// backend/routes/paymentRoutes.js (Consolidated file)
 import express from 'express';
+import { generatePaymentLink, handleSuccess, handleReturn, getMerchants, getPaymentMethods } from '../controllers/paymentLinkController.js';
 import { decrypt } from '../utils/encryption.js';
-import Transaction from '../models/Transaction.js';
+import Transaction from '../models/Transaction.js'; // Needed for the short link route
+import { encrypt } from '../utils/encryption.js'; // Ensure encrypt is also available if needed for short link generation logic
 
 const router = express.Router();
 
-// ... existing routes ...
+// Public API endpoints for the frontend to call
+router.get('/merchants', getMerchants);
+router.get('/methods', getPaymentMethods);
+router.post('/generate-link', generatePaymentLink);
+
+// Enpay callbacks (these are called by Enpay, not directly by your frontend)
+router.get('/success', handleSuccess);
+router.get('/return', handleReturn);
+
+// Decryption endpoint for frontend (used by PaymentProcessPage to get enpayLink)
+router.post('/decrypt-payload', (req, res) => {
+  try {
+    const { payload } = req.body;
+    if (!payload) {
+      return res.status(400).json({ success: false, message: 'Payload is required' });
+    }
+    const decryptedData = decrypt(payload);
+    res.json({ success: true, decryptedData });
+  } catch (error) {
+    console.error('Error decrypting payload:', error);
+    res.status(500).json({ success: false, message: 'Failed to decrypt payload', error: error.message });
+  }
+});
 
 router.get('/payments/process/:shortLinkId', async (req, res) => {
   try {
@@ -33,5 +57,6 @@ router.get('/payments/process/:shortLinkId', async (req, res) => {
     res.status(500).send('An error occurred while processing your payment link.');
   }
 });
+
 
 export default router;
