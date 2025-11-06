@@ -31,7 +31,7 @@ router.post('/decrypt-payload', (req, res) => {
   }
 });
 
-router.get('/payments/process/:shortLinkId', async (req, res) => {
+router.get('/process/:shortLinkId', async (req, res) => {
   try {
     const { shortLinkId } = req.params;
     console.log('⚡ Short link handler called for shortLinkId:', shortLinkId);
