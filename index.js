@@ -72,8 +72,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/risk-management', riskManagementRoutes);
 app.use('/api/payout-settlements', payoutSettlementRoutes);
 app.use('/api/payout-transactions', payoutTransactionRoutes);
-app.use('/', paymentRoutes); // This mounts the paymentRoutes for the short link handler /payments/process/:shortLinkId
-
+app.use('/api/payment', paymentRoutes); // <--- THIS IS CRUCIAL
 // Basic root route
 app.get('/', (req, res) => {
     res.send('Welcome to the PG Admin API!');

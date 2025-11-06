@@ -218,8 +218,7 @@ export const generatePaymentLink = async (req, res) => {
     );
 
     // The customPaymentLink will now use the shortLinkId
-    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`; // Example path
-
+const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
     console.log('🔗 Generated Custom (Short) Payment Link for frontend:', customPaymentLink);
 
     return res.json({
