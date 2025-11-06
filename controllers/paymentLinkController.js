@@ -1,13 +1,13 @@
+
 import Transaction from '../models/Transaction.js';
 import axios from 'axios';
-import { encrypt } from '../utils/encryption.js'; // Import encrypt
-import crypto from 'crypto'; // Needed for a robust ENCRYPTION_KEY check
+import { encrypt } from '../utils/encryption.js';
+import crypto from 'crypto';
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000'; // Ensure this is correct
+const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// Ensure ENCRYPTION_KEY is always defined and consistent
 const ENCRYPTION_KEY_RAW = process.env.PAYMENT_LINK_ENCRYPTION_KEY;
-if (!ENCRYPTION_KEY_RAW || ENCRYPTION_KEY_RAW.length !== 64) { // 32 bytes = 64 hex characters
+if (!ENCRYPTION_KEY_RAW || ENCRYPTION_KEY_RAW.length !== 64) {
     console.warn("⚠️ WARNING: PAYMENT_LINK_ENCRYPTION_KEY is missing or invalid in .env. Using a randomly generated key for this session. THIS IS UNSAFE FOR PRODUCTION!");
     process.env.PAYMENT_LINK_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
 }
@@ -83,17 +83,20 @@ export const generatePaymentLink = async (req, res) => {
       amount: amountNum,
       currency: currency,
       status: 'Pending',
-      "Commission Amount": 0, // Placeholder as per schema
-      "Settlement Status": 'Pending', // Placeholder as per schema
-      "Vendor Ref ID": `VENDOR_REF_${merchantTrnId}`, // Placeholder as per schema
-      upiId: merchant.vpa, // Default to merchant VPA for UPI
+      "Commission Amount": 0,
+      "Settlement Status": 'Pending',
+      "Vendor Ref ID": `VENDOR_REF_${merchantTrnId}`,
+      upiId: merchant.vpa,
       merchantVpa: merchant.vpa,
       txnRefId: txnRefId,
       txnNote: `Payment for Order ${merchantOrderId}`,
       paymentMethod: paymentMethod,
       paymentOption: paymentOption,
       source: 'enpay',
-      isMock: false, // Assume real initially
+      isMock: false,
+      // Add a field to store the original encrypted payload (for the short link)
+      encryptedPaymentPayload: null, // Will be set later
+      shortLinkId: null // Will store a short hash
     });
 
     try {
@@ -105,10 +108,9 @@ export const generatePaymentLink = async (req, res) => {
         success: false,
         message: 'Failed to save transaction to database',
         error: saveError.message,
-        validationErrors: saveError.errors // Mongoose validation errors will be here
+        validationErrors: saveError.errors
       });
     }
-
     // Enpay API request data
     const requestData = {
       "amount": formattedAmount,
@@ -139,9 +141,9 @@ export const generatePaymentLink = async (req, res) => {
     // Mask sensitive keys for logs
     console.log('🔑 Using Merchant Key:', process.env.ENPAY_MERCHANT_KEY ? '******' : 'YOUR_DEFAULT_ENPAY_KEY');
 
-    let finalPaymentLink = '';
+  let finalPaymentLink = '';
     let isMockPayment = false;
-    let enpayTxnId = merchantTrnId; // Default to our ID if Enpay doesn't provide one
+    let enpayTxnId = merchantTrnId;
 
     try {
       const response = await axios(options);
@@ -150,7 +152,6 @@ export const generatePaymentLink = async (req, res) => {
       const enpayResponse = response.data;
 
       if (enpayResponse.code === 200 || enpayResponse.status?.toLowerCase() === 'success') {
-        // Robustly extract the payment link
         if (enpayResponse.details && enpayResponse.details.includes('https://enpay.in')) {
             finalPaymentLink = enpayResponse.details;
         } else if (enpayResponse.data && enpayResponse.data.paymentLink) {
@@ -168,7 +169,7 @@ export const generatePaymentLink = async (req, res) => {
         console.log('🔗 Generated Real Enpay Payment Link:', finalPaymentLink);
 
       } else {
-        throw new new Error(enpayResponse.message || 'Enpay API returned non-success status');
+        throw new Error(enpayResponse.message || 'Enpay API returned non-success status');
       }
 
     } catch (apiError) {
@@ -179,19 +180,20 @@ export const generatePaymentLink = async (req, res) => {
     }
 
     // Update the transaction in DB with the actual link/mock link and status
+    // BEFORE creating the custom short link
     await Transaction.findOneAndUpdate(
       { transactionId: merchantTrnId },
       {
         enpayTxnId: enpayTxnId,
         paymentUrl: finalPaymentLink,
-        qrCode: finalPaymentLink, // Often QR code is generated from the payment URL
+        qrCode: finalPaymentLink,
         isMock: isMockPayment,
-        status: 'INITIATED' // Change status to initiated after getting a link
+        status: 'INITIATED'
       },
-      { new: true, runValidators: true } // Return updated doc, run schema validators
+      { new: true, runValidators: true }
     );
 
-    // --- CUSTOM LINK GENERATION (for frontend processing) ---
+    // --- CUSTOM SHORT LINK GENERATION ---
     // Data to encrypt: We need the actual payment link (Enpay or mock) and our internal transaction ID.
     const dataToEncrypt = JSON.stringify({
         enpayLink: finalPaymentLink, // The actual link to redirect to
@@ -199,13 +201,30 @@ export const generatePaymentLink = async (req, res) => {
     });
 
     const encryptedPayload = encrypt(dataToEncrypt);
-    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process?payload=${encodeURIComponent(encryptedPayload)}`;
 
-    console.log('🔗 Generated Custom (Encoded) Payment Link for frontend:', customPaymentLink);
+    // Generate a short, unique ID for this payload.
+    // We can use a hash of the encrypted payload or a simple base64 encoded transaction ID.
+    // For this example, let's use a short hash based on transactionId.
+    const shortLinkId = crypto.createHash('sha256').update(merchantTrnId).digest('base64url').substring(0, 10); // e.g., 10 characters
+
+    // Store the encrypted payload AND the shortLinkId in the transaction document
+    const updatedTransactionWithShortLink = await Transaction.findOneAndUpdate(
+        { transactionId: merchantTrnId },
+        {
+            encryptedPaymentPayload: encryptedPayload,
+            shortLinkId: shortLinkId
+        },
+        { new: true, runValidators: true }
+    );
+
+    // The customPaymentLink will now use the shortLinkId
+    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`; // Example path
+
+    console.log('🔗 Generated Custom (Short) Payment Link for frontend:', customPaymentLink);
 
     return res.json({
       success: true,
-      paymentLink: customPaymentLink, // Always return your custom wrapped link to the frontend
+      paymentLink: customPaymentLink, // Return the short link
       transactionRefId: merchantTrnId,
       merchantOrderId: merchantOrderId,
       isMock: isMockPayment,
