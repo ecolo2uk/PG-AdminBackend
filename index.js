@@ -54,7 +54,7 @@ app.use('/api/roles', roleRoutes);
 app.use('/api/permissions', permissionRoutes);
 app.use('/api/connectors', connectorRoutes);
 app.use('/api/connector-accounts', connectorAccountRoutes);
-app.use('/api', paymentRoutes); // This mounts the paymentRoutes for /api/payment/generate-link
+app.use('/api/payment', paymentRoutes); // This mounts the paymentRoutes for /api/payment/generate-link
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/agreements', agreementRoutes);
 app.use('/api/business-sizes', businessSizeRoutes);
