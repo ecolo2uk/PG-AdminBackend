@@ -31,7 +31,9 @@ router.post('/decrypt-payload', (req, res) => {
   }
 });
 
-router.get('/payments/process/:shortLinkId', async (req, res) => {
+// In backend/routes/paymentRoutes.js
+// This route now directly follows the /api/payment prefix set in app.js
+router.get('/process/:shortLinkId', async (req, res) => {
   try {
     const { shortLinkId } = req.params;
     console.log('⚡ Short link handler called for shortLinkId:', shortLinkId);
@@ -40,6 +42,7 @@ router.get('/payments/process/:shortLinkId', async (req, res) => {
 
     if (!transaction || !transaction.encryptedPaymentPayload) {
       console.error('❌ Short link ID not found or payload missing for:', shortLinkId);
+      // It's good practice to render a user-friendly page here, not just send text
       return res.status(404).send('Payment link not found or expired.');
     }
 
@@ -47,8 +50,6 @@ router.get('/payments/process/:shortLinkId', async (req, res) => {
     const { enpayLink, transactionId } = JSON.parse(decryptedData);
 
     console.log(`➡️ Redirecting user for transaction ${transactionId} to: ${enpayLink}`);
-    // You might want to do additional checks here before redirecting
-    // e.g., check if the transaction is still pending.
 
     res.redirect(enpayLink);
 
