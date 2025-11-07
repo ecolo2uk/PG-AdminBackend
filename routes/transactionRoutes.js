@@ -1,3 +1,4 @@
+// routes/transactionRoutes.js
 import express from 'express';
 import {
   createPaymentTransaction,
@@ -5,16 +6,15 @@ import {
   getAllPaymentTransactions,
   getPaymentTransactionById,
   getMerchantPayoutBalance,
-  getAllTransactionsSimple // ✅ ADD THIS
+  getAllTransactionsSimple
 } from '../controllers/transactionController.js';
 
 const router = express.Router();
 
-// Define all routes
 router.post('/', createPaymentTransaction);
 router.put('/:id', updateTransactionStatus);
 router.get('/', getAllPaymentTransactions);
-router.get('/simple', getAllTransactionsSimple); // ✅ ADD THIS ROUTE
+router.get('/simple', getAllTransactionsSimple);
 router.get('/:id', getPaymentTransactionById);
 router.get('/merchant-balance/:merchantId', getMerchantPayoutBalance);
 

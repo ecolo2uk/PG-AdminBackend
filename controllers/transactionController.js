@@ -469,17 +469,67 @@ export const syncAllMerchantTransactions = async (req, res) => {
   }
 };
 
-// Auto-sync when new transaction is created
-export const autoSyncTransaction = async (merchantUserId, transaction, type) => {
+
+// Helper function to generate unique transaction ID
+const generateUniqueTransactionId = async () => {
+  let transactionId;
+  let isUnique = false;
+  while (!isUnique) {
+    transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 10000)}`;
+    const existingTxn = await Transaction.findOne({ transactionId });
+    if (!existingTxn) {
+      isUnique = true;
+    }
+  }
+  return transactionId;
+};
+
+// Auto-sync function
+export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
   try {
     const merchant = await Merchant.findOne({ userId: merchantUserId });
     if (!merchant) return;
 
     if (type === 'payment') {
-      merchant.paymentTransactions.push(transaction._id);
+      if (!merchant.paymentTransactions.includes(transaction._id)) {
+        merchant.paymentTransactions.push(transaction._id);
+      }
     } else if (type === 'payout') {
-      merchant.payoutTransactions.push(transaction._id);
+      if (!merchant.payoutTransactions.includes(transaction._id)) {
+        merchant.payoutTransactions.push(transaction._id);
+      }
     }
+
+    // Add to recent transactions
+    const newTransaction = {
+      transactionId: transaction.transactionId,
+      type: type,
+      transactionType: 'Credit',
+      amount: transaction.amount,
+      status: transaction.status,
+      reference: transaction.merchantOrderId,
+      method: transaction.paymentMethod,
+      remark: 'Payment Received',
+      date: transaction.createdAt,
+      customer: transaction.customerName || 'N/A'
+    };
+
+    merchant.recentTransactions.unshift(newTransaction);
+    if (merchant.recentTransactions.length > 20) {
+      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+    }
+
+    // Update balance if successful
+    if (transaction.status === 'SUCCESS' || transaction.status === 'Success') {
+      merchant.availableBalance += transaction.amount;
+      merchant.totalCredits += transaction.amount;
+      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+    }
+
+    merchant.totalTransactions = merchant.paymentTransactions.length;
+    merchant.successfulTransactions = merchant.paymentTransactions.filter(
+      txn => txn.status === 'SUCCESS' || txn.status === 'Success'
+    ).length;
 
     await merchant.save();
     console.log(`✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`);
@@ -487,7 +537,8 @@ export const autoSyncTransaction = async (merchantUserId, transaction, type) => 
     console.error('❌ Error in auto-sync:', error);
   }
 };
-// Create Payment Transaction (WITH AUTO-SYNC)
+
+// Create Payment Transaction (WITH ENPAY INTEGRATION)
 export const createPaymentTransaction = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -498,15 +549,15 @@ export const createPaymentTransaction = async (req, res) => {
       merchantOrderId,
       amount,
       currency = 'INR',
-      status = 'Pending',
       customerName,
       customerVPA,
       customerContact,
-      paymentMethod,
-      paymentOption,
-      txnRefId,
-      enpayTxnId,
-      remark,
+      paymentMethod = 'UPI',
+      paymentOption = 'UPI_COLLECT',
+      txnNote = 'Payment for services',
+      merchantVpa,
+      returnURL,
+      successURL
     } = req.body;
 
     // Validate Merchant
@@ -521,7 +572,9 @@ export const createPaymentTransaction = async (req, res) => {
 
     // Generate transaction ID
     const transactionId = await generateUniqueTransactionId();
+    const merchantTrnId = `TRN${Date.now()}`;
 
+    // Create transaction with PENDING status initially
     const newTransaction = new Transaction({
       transactionId,
       merchantId: merchantUser._id,
@@ -529,27 +582,55 @@ export const createPaymentTransaction = async (req, res) => {
       merchantOrderId,
       amount: parseFloat(amount),
       currency,
-      status,
+      status: 'PENDING',
       customerName,
       customerVPA,
       customerContact,
       paymentMethod,
       paymentOption,
-      txnRefId,
-      enpayTxnId,
-      remark,
+      txnRefId: merchantTrnId,
+      txnNote,
+      merchantVpa,
+      source: 'enpay'
     });
 
     await newTransaction.save({ session });
 
+    // Call Enpay API to initiate collect request
+    try {
+      const enpayResponse = await initiateCollectRequest({
+        amount: amount.toString(),
+        merchantHashId: "MERCDSH51Y7CD4YJLFIZR8NF", // Use your actual hash ID
+        merchantOrderId,
+        merchantTrnId,
+        merchantVpa: merchantVpa || "enpay1.skypal@fino",
+        returnURL: returnURL || "https://yourdomain.com/return",
+        successURL: successURL || "https://yourdomain.com/success",
+        txnNote: txnNote || "Collect for Order"
+      });
+
+      // Update transaction with Enpay response
+      if (enpayResponse) {
+        if (enpayResponse.code === 200 || enpayResponse.success) {
+          newTransaction.status = 'INITIATED';
+          newTransaction.enpayTxnId = enpayResponse.data?.transactionId;
+          newTransaction.paymentUrl = enpayResponse.data?.paymentUrl;
+          newTransaction.qrCode = enpayResponse.data?.qrCode;
+        } else {
+          newTransaction.status = 'FAILED';
+          newTransaction.remark = enpayResponse.message || 'Enpay API call failed';
+        }
+        await newTransaction.save({ session });
+      }
+    } catch (enpayError) {
+      console.error('Enpay API error:', enpayError);
+      newTransaction.status = 'FAILED';
+      newTransaction.remark = enpayError.message;
+      await newTransaction.save({ session });
+    }
+
     // AUTO-SYNC TO MERCHANT TABLE
     await autoSyncToMerchant(merchantUser._id, newTransaction, 'payment');
-
-    // Update user balance if success
-    if (['Success', 'SUCCESS'].includes(status)) {
-      merchantUser.balance += parseFloat(amount);
-      await merchantUser.save({ session });
-    }
 
     await session.commitTransaction();
     
@@ -557,6 +638,7 @@ export const createPaymentTransaction = async (req, res) => {
       success: true,
       message: "Payment transaction created and synced to merchant.",
       data: newTransaction,
+      enpayResponse: enpayResponse || null
     });
 
   } catch (error) {
@@ -571,3 +653,6 @@ export const createPaymentTransaction = async (req, res) => {
     session.endSession();
   }
 };
+
+// Keep all your other existing functions (getAllTransactionsSimple, getAllPaymentTransactions, etc.)
+// ... [rest of your existing functions]
