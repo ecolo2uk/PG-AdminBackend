@@ -17,7 +17,7 @@ const merchantSchema = new mongoose.Schema({
   },
   company: {
     type: String,
-    default: '' // ✅ FIX: Remove required, add default
+    default: ''
   },
   email: {
     type: String,
@@ -89,7 +89,17 @@ const merchantSchema = new mongoose.Schema({
     default: 0
   },
   
-  // Transactions Array
+  // ✅ UPDATED: Transaction References for Auto-Sync
+  paymentTransactions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  }],
+  payoutTransactions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PayoutTransaction'
+  }],
+  
+  // Transactions Array for Recent Display
   recentTransactions: [{
     transactionId: {
       type: String,
@@ -143,15 +153,7 @@ const merchantSchema = new mongoose.Schema({
       debits: { type: Number, default: 0 },
       count: { type: Number, default: 0 }
     }
-  },
-   paymentTransactions: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Transaction'
-  }],
-  payoutTransactions: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'PayoutTransaction'
-  }],
+  }
 }, {
   timestamps: true
 });
@@ -161,6 +163,138 @@ merchantSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
+// ✅ NEW: Auto-update balances when saving
+merchantSchema.pre('save', function(next) {
+  // Auto-calculate net earnings
+  this.netEarnings = (this.totalCredits || 0) - (this.totalDebits || 0);
+  next();
+});
+
+// ✅ NEW: Virtual for total transaction count
+merchantSchema.virtual('totalTransactionCount').get(function() {
+  return (this.paymentTransactions?.length || 0) + (this.payoutTransactions?.length || 0);
+});
+
+// ✅ NEW: Method to sync transactions
+merchantSchema.methods.syncTransactions = async function() {
+  try {
+    const Transaction = mongoose.model('Transaction');
+    const PayoutTransaction = mongoose.model('PayoutTransaction');
+    
+    // Get all transactions for this merchant
+    const paymentTransactions = await Transaction.find({ merchantId: this.userId });
+    const payoutTransactions = await PayoutTransaction.find({ merchantId: this.userId });
+    
+    // Update references
+    this.paymentTransactions = paymentTransactions.map(txn => txn._id);
+    this.payoutTransactions = payoutTransactions.map(txn => txn._id);
+    
+    // Update recent transactions
+    const allTransactions = [
+      ...paymentTransactions.map(txn => ({
+        transactionId: txn.transactionId,
+        type: 'payment',
+        transactionType: 'Credit',
+        amount: txn.amount,
+        status: txn.status,
+        reference: txn.merchantOrderId,
+        method: txn.paymentMethod,
+        remark: 'Payment Received',
+        date: txn.createdAt,
+        customer: txn.customerName || 'N/A'
+      })),
+      ...payoutTransactions.map(txn => ({
+        transactionId: txn.transactionId || txn.utr,
+        type: 'payout',
+        transactionType: txn.transactionType,
+        amount: txn.amount,
+        status: txn.status,
+        reference: txn.utr,
+        method: txn.paymentMode,
+        remark: txn.remark || 'Payout Processed',
+        date: txn.createdAt,
+        customer: 'N/A'
+      }))
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    this.recentTransactions = allTransactions.slice(0, 20);
+    
+    // Update statistics
+    const successfulPayments = paymentTransactions.filter(
+      txn => txn.status === 'SUCCESS' || txn.status === 'Success'
+    );
+    
+    this.totalTransactions = paymentTransactions.length;
+    this.successfulTransactions = successfulPayments.length;
+    this.failedTransactions = paymentTransactions.length - successfulPayments.length;
+    
+    await this.save();
+    return { success: true, message: 'Transactions synced successfully' };
+  } catch (error) {
+    console.error('Error syncing transactions:', error);
+    return { success: false, message: error.message };
+  }
+};
+
+// ✅ NEW: Method to add transaction and update balance
+merchantSchema.methods.addTransaction = async function(transactionData, type) {
+  try {
+    const Transaction = mongoose.model('Transaction');
+    const PayoutTransaction = mongoose.model('PayoutTransaction');
+    
+    if (type === 'payment') {
+      // Add to payment transactions
+      const transaction = await Transaction.findById(transactionData._id);
+      if (transaction && !this.paymentTransactions.includes(transaction._id)) {
+        this.paymentTransactions.push(transaction._id);
+        
+        // Update balance if successful
+        if (transaction.status === 'SUCCESS' || transaction.status === 'Success') {
+          this.availableBalance += transaction.amount;
+          this.totalCredits += transaction.amount;
+        }
+      }
+    } else if (type === 'payout') {
+      // Add to payout transactions
+      const payout = await PayoutTransaction.findById(transactionData._id);
+      if (payout && !this.payoutTransactions.includes(payout._id)) {
+        this.payoutTransactions.push(payout._id);
+        
+        // Update balance if successful debit
+        if (payout.status === 'Success' && payout.transactionType === 'Debit') {
+          this.availableBalance -= payout.amount;
+          this.totalDebits += payout.amount;
+        }
+      }
+    }
+    
+    // Add to recent transactions
+    const newTransaction = {
+      transactionId: transactionData.transactionId,
+      type: type,
+      transactionType: type === 'payment' ? 'Credit' : transactionData.transactionType,
+      amount: transactionData.amount,
+      status: transactionData.status,
+      reference: type === 'payment' ? transactionData.merchantOrderId : transactionData.utr,
+      method: type === 'payment' ? transactionData.paymentMethod : transactionData.paymentMode,
+      remark: transactionData.remark || (type === 'payment' ? 'Payment Received' : 'Payout Processed'),
+      date: transactionData.createdAt || new Date(),
+      customer: transactionData.customerName || 'N/A'
+    };
+    
+    this.recentTransactions.unshift(newTransaction);
+    if (this.recentTransactions.length > 20) {
+      this.recentTransactions = this.recentTransactions.slice(0, 20);
+    }
+    
+    await this.save();
+    return { success: true, message: 'Transaction added successfully' };
+  } catch (error) {
+    console.error('Error adding transaction:', error);
+    return { success: false, message: error.message };
+  }
+};
 
 const Merchant = mongoose.model('Merchant', merchantSchema);
 export default Merchant;

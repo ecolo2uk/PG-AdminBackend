@@ -33,6 +33,6 @@ router.get('/:merchantId/balance-history', getMerchantBalanceHistory); // Get ba
 router.get('/:merchantId/transactions', getMerchantWithTransactions); // Get merchant with transactions
 router.get('/:merchantId/transaction-stats', getMerchantTransactionStats); // Get transaction stats
 router.get('/:merchantId/dashboard', getMerchantDashboard);
-router.post('/:merchantId/sync-transactions',syncAllMerchantTransactions);
+router.post('/:merchantId/sync-transactions', syncAllMerchantTransactions);
 
 export default router;
