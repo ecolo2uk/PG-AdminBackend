@@ -45,9 +45,11 @@ const UserSchema = new mongoose.Schema(
       accountHolderName: { type: String },
       accountType: { type: String, enum: ['Saving', 'Current'] },
     },
-  },
-  { timestamps: true }
-);
+merchantRef: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Merchant'
+  }
+}, { timestamps: true });
 
 const User = mongoose.model("User", UserSchema);
 export default User;

@@ -194,7 +194,8 @@ export const createPayoutTransaction = async (req, res) => {
     await session.commitTransaction();
     
     console.log('✅ Payout transaction created:', savedPayout._id);
-    
+    const { autoSyncTransaction } = await import('./transactionSyncController.js');
+  autoSyncTransaction(merchantId, savedPayout, 'payout'); 
     res.status(201).json({
       success: true,
       message: "Payout transaction created successfully",
