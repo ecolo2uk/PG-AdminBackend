@@ -11,7 +11,9 @@ import {
   updateMerchantBalance,
   getMerchantBalanceHistory,
   getMerchantWithTransactions,
-  getMerchantTransactionStats
+  getMerchantTransactionStats,
+  getMerchantDashboard,
+syncAllMerchantTransactions
 } from '../controllers/merchantController.js';
 
 const router = express.Router();
@@ -30,5 +32,7 @@ router.put('/:merchantId/balance', updateMerchantBalance); // Update merchant ba
 router.get('/:merchantId/balance-history', getMerchantBalanceHistory); // Get balance history
 router.get('/:merchantId/transactions', getMerchantWithTransactions); // Get merchant with transactions
 router.get('/:merchantId/transaction-stats', getMerchantTransactionStats); // Get transaction stats
+router.get('/:merchantId/dashboard', getMerchantDashboard);
+router.post('/:merchantId/sync-transactions',syncAllMerchantTransactions);
 
 export default router;

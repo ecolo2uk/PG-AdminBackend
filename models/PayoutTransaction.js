@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+import Merchant from './Merchant.js';
+import User from './User.js';
 
 const payoutTransactionSchema = new mongoose.Schema({
   utr: {
@@ -100,6 +102,61 @@ const payoutTransactionSchema = new mongoose.Schema({
   },
 }, {
   timestamps: true,
+});
+payoutTransactionSchema.post('save', async function(doc) {
+  try {
+    console.log(`🔄 Auto-syncing payout to merchant: ${doc.transactionId}`);
+    
+    const merchant = await Merchant.findOne({ userId: doc.merchantId });
+    
+    if (!merchant) {
+      console.log('❌ Merchant not found for payout auto-sync');
+      return;
+    }
+
+    // Add to payoutTransactions array
+    if (!merchant.payoutTransactions.includes(doc._id)) {
+      merchant.payoutTransactions.push(doc._id);
+    }
+
+    // Update recentTransactions
+    const newPayout = {
+      transactionId: doc.transactionId || doc.utr,
+      type: 'payout',
+      transactionType: doc.transactionType,
+      amount: doc.amount,
+      status: doc.status,
+      reference: doc.utr,
+      method: doc.paymentMode,
+      remark: doc.remark || 'Payout Processed',
+      date: doc.createdAt,
+      customer: 'N/A'
+    };
+
+    merchant.recentTransactions.unshift(newPayout);
+    
+    if (merchant.recentTransactions.length > 20) {
+      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+    }
+
+    // UPDATE BALANCE for successful debit transactions
+    if (doc.status === 'Success' && doc.transactionType === 'Debit') {
+      merchant.availableBalance -= doc.amount;
+      merchant.totalDebits += doc.amount;
+      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+      
+      // Also update user balance
+      await User.findByIdAndUpdate(doc.merchantId, {
+        $inc: { balance: -doc.amount }
+      });
+    }
+
+    await merchant.save();
+    console.log(`✅ Auto-synced payout for merchant: ${merchant.merchantName}`);
+
+  } catch (error) {
+    console.error('❌ Error in payout auto-sync:', error);
+  }
 });
 
 const PayoutTransaction = mongoose.model('PayoutTransaction', payoutTransactionSchema);

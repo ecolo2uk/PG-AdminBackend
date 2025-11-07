@@ -104,6 +104,73 @@ const transactionSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+
+transactionSchema.post('save', async function(doc) {
+  try {
+    console.log(`🔄 Auto-syncing transaction to merchant: ${doc.transactionId}`);
+    
+    // Find merchant via user
+    const merchant = await Merchant.findOne({ userId: doc.merchantId });
+    
+    if (!merchant) {
+      console.log('❌ Merchant not found for auto-sync');
+      return;
+    }
+
+    // Add to paymentTransactions array if not already present
+    if (!merchant.paymentTransactions.includes(doc._id)) {
+      merchant.paymentTransactions.push(doc._id);
+    }
+
+    // Update recentTransactions array
+    const newTransaction = {
+      transactionId: doc.transactionId,
+      type: 'payment',
+      transactionType: 'Credit',
+      amount: doc.amount,
+      status: doc.status,
+      reference: doc.merchantOrderId,
+      method: doc.paymentMethod,
+      remark: 'Payment Received',
+      date: doc.createdAt,
+      customer: doc.customerName || 'N/A'
+    };
+
+    // Add to beginning of array
+    merchant.recentTransactions.unshift(newTransaction);
+    
+    // Keep only last 20 transactions
+    if (merchant.recentTransactions.length > 20) {
+      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+    }
+
+    // UPDATE BALANCE if transaction is successful
+    if (doc.status === 'SUCCESS' || doc.status === 'Success') {
+      merchant.availableBalance += doc.amount;
+      merchant.totalCredits += doc.amount;
+      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+      
+      // Also update user balance
+      await User.findByIdAndUpdate(doc.merchantId, {
+        $inc: { balance: doc.amount }
+      });
+    }
+
+    // Update transaction counts
+    merchant.totalTransactions = merchant.paymentTransactions.length;
+    merchant.successfulTransactions = merchant.paymentTransactions.filter(
+      txnId => txnId.status === 'SUCCESS' || txnId.status === 'Success'
+    ).length;
+
+    await merchant.save();
+    console.log(`✅ Auto-synced transaction for merchant: ${merchant.merchantName}`);
+
+  } catch (error) {
+    console.error('❌ Error in transaction auto-sync:', error);
+  }
+});
+
+
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
 export default Transaction;

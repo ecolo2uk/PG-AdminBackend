@@ -1,6 +1,9 @@
 // controllers/merchantController.js
-import User from '../models/User.js';
 import Merchant from '../models/Merchant.js';
+import Transaction from '../models/Transaction.js';
+import PayoutTransaction from '../models/PayoutTransaction.js';
+import mongoose from 'mongoose';
+import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 
 // Helper to generate MID
@@ -8,298 +11,398 @@ const generateMid = () => {
   return 'M' + Date.now().toString() + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
 };
 
-// Create Merchant User (AUTO-CREATE IN BOTH TABLES)
-export const createMerchantUser = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const { firstname, lastname, company, email, password, contact } = req.body;
-
-    console.log("💰 Creating merchant user in BOTH tables:", req.body);
-
-    // Validation
-    if (!firstname || !lastname || !email || !password || !contact) {
-      await session.abortTransaction();
-      return res.status(400).json({ 
-        success: false,
-        message: 'Please enter all required fields.' 
-      });
+// Helper to generate unique transaction ID
+const generateUniqueTransactionId = async () => {
+  let transactionId;
+  let isUnique = false;
+  while (!isUnique) {
+    transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 10000)}`;
+    const existingTxn = await Transaction.findOne({ transactionId });
+    if (!existingTxn) {
+      isUnique = true;
     }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email }).session(session);
-    if (existingUser) {
-      await session.abortTransaction();
-      return res.status(400).json({ 
-        success: false,
-        message: 'User with this email already exists.' 
-      });
-    }
-
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Generate MID
-    const mid = generateMid();
-
-    // 1. FIRST CREATE USER
-    const user = new User({
-      firstname,
-      lastname,
-      company: company || '',
-      email,
-      password: hashedPassword,
-      role: 'merchant',
-      contact,
-      mid,
-      balance: 0,
-      unsettleBalance: 0
-    });
-
-    const savedUser = await user.save({ session });
-
-    // 2. THEN AUTOMATICALLY CREATE MERCHANT
-    const merchant = new Merchant({
-      userId: savedUser._id,
-      merchantName: company || `${firstname} ${lastname}`,
-      company: company || '',
-      email,
-      contact,
-      mid,
-      availableBalance: 0,
-      unsettledBalance: 0,
-      totalCredits: 0,
-      totalDebits: 0,
-      netEarnings: 0,
-      status: 'Active'
-    });
-
-    const savedMerchant = await merchant.save({ session });
-
-    // 3. UPDATE USER WITH MERCHANT REFERENCE
-    savedUser.merchantRef = savedMerchant._id;
-    await savedUser.save({ session });
-
-    await session.commitTransaction();
-
-    console.log("✅ Merchant user created in BOTH tables successfully");
-
-    const userResponse = savedUser.toObject();
-    delete userResponse.password;
-
-    res.status(201).json({
-      success: true,
-      message: 'Merchant user created successfully in both tables',
-      data: {
-        user: userResponse,
-        merchant: savedMerchant
-      }
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    console.error('❌ Error creating merchant user:', error);
-    
-    if (error.code === 11000) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'A user with this email or MID already exists.' 
-      });
-    }
-    
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error while creating merchant user.',
-      error: error.message 
-    });
-  } finally {
-    session.endSession();
   }
+  return transactionId;
 };
 
-// 2. Get All Merchants with Complete Details
-export const getAllMerchants = async (req, res) => {
+// Auto-sync when new transaction is created
+const autoSyncTransaction = async (merchantUserId, transaction, type) => {
   try {
-    const { page = 1, limit = 10, search = '' } = req.query;
+    const merchant = await Merchant.findOne({ userId: merchantUserId });
+    if (!merchant) return;
 
-    const query = {};
-    if (search) {
-      query.$or = [
-        { merchantName: { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { mid: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const skip = (page - 1) * limit;
-
-    const merchants = await Merchant.find(query)
-      .select('merchantName company email contact mid availableBalance unsettledBalance totalCredits totalDebits netEarnings status createdAt')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Merchant.countDocuments(query);
-
-    res.status(200).json({
-      success: true,
-      data: merchants,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: parseInt(limit)
+    if (type === 'payment') {
+      if (!merchant.paymentTransactions.includes(transaction._id)) {
+        merchant.paymentTransactions.push(transaction._id);
       }
-    });
-
-  } catch (error) {
-    console.error("Error fetching merchants:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching merchants",
-      error: error.message
-    });
-  }
-};
-
-// 3. Get Single Merchant with All Transactions
-export const getMerchantDetails = async (req, res) => {
-  try {
-    const { merchantId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Merchant ID"
-      });
+    } else if (type === 'payout') {
+      if (!merchant.payoutTransactions.includes(transaction._id)) {
+        merchant.payoutTransactions.push(transaction._id);
+      }
     }
-
-    // Get merchant basic info
-    const merchant = await Merchant.findById(merchantId);
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found"
-      });
-    }
-
-    // Get user reference
-    const user = await User.findById(merchant.userId).select('firstname lastname');
-
-    // Get payment transactions
-    const paymentTransactions = await Transaction.find({ merchantId: merchant.userId })
-      .select('transactionId merchantOrderId amount status paymentMethod createdAt txnRefId customerName')
-      .sort({ createdAt: -1 })
-      .limit(100);
-
-    // Get payout transactions
-    const payoutTransactions = await PayoutTransaction.find({ merchantId: merchant.userId })
-      .select('utr transactionId amount transactionType status paymentMode remark createdAt')
-      .sort({ createdAt: -1 })
-      .limit(100);
-
-    // Calculate real-time statistics
-    const totalCredits = paymentTransactions
-      .filter(txn => ['SUCCESS', 'Success'].includes(txn.status))
-      .reduce((sum, txn) => sum + txn.amount, 0);
-
-    const totalDebits = payoutTransactions
-      .filter(txn => txn.status === 'Success' && txn.transactionType === 'Debit')
-      .reduce((sum, txn) => sum + txn.amount, 0);
-
-    // Update merchant with latest calculations
-    merchant.totalCredits = totalCredits;
-    merchant.totalDebits = totalDebits;
-    merchant.netEarnings = totalCredits - totalDebits;
-    merchant.totalTransactions = paymentTransactions.length;
-    merchant.successfulTransactions = paymentTransactions.filter(txn => 
-      ['SUCCESS', 'Success'].includes(txn.status)
-    ).length;
-    merchant.failedTransactions = paymentTransactions.filter(txn => 
-      ['FAILED', 'Failed'].includes(txn.status)
-    ).length;
 
     await merchant.save();
-
-    // Combine transactions for timeline
-    const allTransactions = [
-      ...paymentTransactions.map(txn => ({
-        _id: txn._id,
-        type: 'payment',
-        transactionId: txn.transactionId,
-        reference: txn.merchantOrderId,
-        amount: txn.amount,
-        transactionType: 'Credit',
-        status: txn.status,
-        method: txn.paymentMethod,
-        date: txn.createdAt,
-        customer: txn.customerName,
-        remark: 'Payment Received'
-      })),
-      ...payoutTransactions.map(txn => ({
-        _id: txn._id,
-        type: 'payout',
-        transactionId: txn.transactionId || txn.utr,
-        reference: txn.utr,
-        amount: txn.amount,
-        transactionType: txn.transactionType,
-        status: txn.status,
-        method: txn.paymentMode,
-        date: txn.createdAt,
-        customer: '-',
-        remark: txn.remark || 'Payout Processed'
-      }))
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    res.status(200).json({
-      success: true,
-      data: {
-        merchantInfo: {
-          _id: merchant._id,
-          merchantName: merchant.merchantName,
-          company: merchant.company,
-          email: merchant.email,
-          contact: merchant.contact,
-          mid: merchant.mid,
-          status: merchant.status,
-          bankDetails: merchant.bankDetails,
-          userInfo: user
-        },
-        balanceSummary: {
-          availableBalance: merchant.availableBalance,
-          unsettledBalance: merchant.unsettledBalance,
-          totalCredits: merchant.totalCredits,
-          totalDebits: merchant.totalDebits,
-          netEarnings: merchant.netEarnings
-        },
-        transactionStats: {
-          totalTransactions: merchant.totalTransactions,
-          successfulTransactions: merchant.successfulTransactions,
-          failedTransactions: merchant.failedTransactions,
-          successRate: merchant.totalTransactions > 0 ? 
-            ((merchant.successfulTransactions / merchant.totalTransactions) * 100).toFixed(2) : 0
-        },
-        transactions: allTransactions,
-        transactionCount: {
-          payments: paymentTransactions.length,
-          payouts: payoutTransactions.length,
-          total: allTransactions.length
-        }
-      }
-    });
-
+    console.log(`✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`);
   } catch (error) {
-    console.error("Error fetching merchant details:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching merchant details",
-      error: error.message
-    });
+    console.error('❌ Error in auto-sync:', error);
   }
 };
+
+const autoSyncToMerchant = async (merchantUserId, transactionData, type) => {
+  try {
+    console.log(`🔄 Auto-syncing ${type} transaction to merchant table`);
+    
+    const merchant = await Merchant.findOne({ userId: merchantUserId });
+    if (!merchant) {
+      console.log('❌ Merchant not found for auto-sync');
+      return;
+    }
+
+    const newTransaction = {
+      transactionId: transactionData.transactionId,
+      type: type,
+      transactionType: type === 'payment' ? 'Credit' : 'Debit',
+      amount: transactionData.amount,
+      status: transactionData.status,
+      reference: type === 'payment' ? transactionData.merchantOrderId : transactionData.utr,
+      method: type === 'payment' ? transactionData.paymentMethod : transactionData.paymentMode,
+      remark: transactionData.remark || (type === 'payment' ? 'Payment Received' : 'Payout Processed'),
+      date: transactionData.createdAt || new Date(),
+      customer: transactionData.customerName || 'N/A'
+    };
+
+    // Add to recent transactions
+    merchant.recentTransactions.unshift(newTransaction);
+    if (merchant.recentTransactions.length > 20) {
+      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+    }
+
+    // Update balance if transaction is successful
+    if (transactionData.status === 'Success' || transactionData.status === 'SUCCESS') {
+      if (type === 'payment') {
+        merchant.availableBalance += transactionData.amount;
+        merchant.totalCredits += transactionData.amount;
+      } else if (type === 'payout') {
+        merchant.availableBalance -= transactionData.amount;
+        merchant.totalDebits += transactionData.amount;
+      }
+      
+      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+    }
+
+    // Update transaction summary
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (new Date(newTransaction.date) >= today) {
+      if (newTransaction.transactionType === 'Credit') {
+        merchant.transactionSummary.today.credits += newTransaction.amount;
+      } else {
+        merchant.transactionSummary.today.debits += newTransaction.amount;
+      }
+      merchant.transactionSummary.today.count += 1;
+    }
+
+    await merchant.save();
+    console.log(`✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`);
+
+  } catch (error) {
+    console.error('❌ Error in auto-sync to merchant:', error);
+  }
+};
+
+// Create Merchant User (AUTO-CREATE IN BOTH TABLES)
+// export const createMerchantUser = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const { firstname, lastname, company, email, password, contact } = req.body;
+
+//     console.log("💰 Creating merchant user in BOTH tables:", req.body);
+
+//     // Validation
+//     if (!firstname || !lastname || !email || !password || !contact) {
+//       await session.abortTransaction();
+//       return res.status(400).json({ 
+//         success: false,
+//         message: 'Please enter all required fields.' 
+//       });
+//     }
+
+//     // Check if user already exists
+//     const existingUser = await User.findOne({ email }).session(session);
+//     if (existingUser) {
+//       await session.abortTransaction();
+//       return res.status(400).json({ 
+//         success: false,
+//         message: 'User with this email already exists.' 
+//       });
+//     }
+
+//     // Hash password
+//     const salt = await bcrypt.genSalt(10);
+//     const hashedPassword = await bcrypt.hash(password, salt);
+
+//     // Generate MID
+//     const mid = generateMid();
+
+//     // 1. FIRST CREATE USER
+//     const user = new User({
+//       firstname,
+//       lastname,
+//       company: company || '',
+//       email,
+//       password: hashedPassword,
+//       role: 'merchant',
+//       contact,
+//       mid,
+//       balance: 0,
+//       unsettleBalance: 0
+//     });
+
+//     const savedUser = await user.save({ session });
+
+//     // 2. THEN AUTOMATICALLY CREATE MERCHANT
+//     const merchant = new Merchant({
+//       userId: savedUser._id,
+//       merchantName: company || `${firstname} ${lastname}`,
+//       company: company || '',
+//       email,
+//       contact,
+//       mid,
+//       availableBalance: 0,
+//       unsettledBalance: 0,
+//       totalCredits: 0,
+//       totalDebits: 0,
+//       netEarnings: 0,
+//       status: 'Active'
+//     });
+
+//     const savedMerchant = await merchant.save({ session });
+
+//     // 3. UPDATE USER WITH MERCHANT REFERENCE
+//     savedUser.merchantRef = savedMerchant._id;
+//     await savedUser.save({ session });
+
+//     await session.commitTransaction();
+
+//     console.log("✅ Merchant user created in BOTH tables successfully");
+
+//     const userResponse = savedUser.toObject();
+//     delete userResponse.password;
+
+//     res.status(201).json({
+//       success: true,
+//       message: 'Merchant user created successfully in both tables',
+//       data: {
+//         user: userResponse,
+//         merchant: savedMerchant
+//       }
+//     });
+
+//   } catch (error) {
+//     await session.abortTransaction();
+//     console.error('❌ Error creating merchant user:', error);
+    
+//     if (error.code === 11000) {
+//       return res.status(400).json({ 
+//         success: false,
+//         message: 'A user with this email or MID already exists.' 
+//       });
+//     }
+    
+//     res.status(500).json({ 
+//       success: false,
+//       message: 'Server error while creating merchant user.',
+//       error: error.message 
+//     });
+//   } finally {
+//     session.endSession();
+//   }
+// };
+
+// // 2. Get All Merchants with Complete Details
+// export const getAllMerchants = async (req, res) => {
+//   try {
+//     const { page = 1, limit = 10, search = '' } = req.query;
+
+//     const query = {};
+//     if (search) {
+//       query.$or = [
+//         { merchantName: { $regex: search, $options: 'i' } },
+//         { company: { $regex: search, $options: 'i' } },
+//         { email: { $regex: search, $options: 'i' } },
+//         { mid: { $regex: search, $options: 'i' } }
+//       ];
+//     }
+
+//     const skip = (page - 1) * limit;
+
+//     const merchants = await Merchant.find(query)
+//       .select('merchantName company email contact mid availableBalance unsettledBalance totalCredits totalDebits netEarnings status createdAt')
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(parseInt(limit));
+
+//     const total = await Merchant.countDocuments(query);
+
+//     res.status(200).json({
+//       success: true,
+//       data: merchants,
+//       pagination: {
+//         currentPage: parseInt(page),
+//         totalPages: Math.ceil(total / limit),
+//         totalItems: total,
+//         itemsPerPage: parseInt(limit)
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error fetching merchants:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Server error fetching merchants",
+//       error: error.message
+//     });
+//   }
+// };
+
+// // 3. Get Single Merchant with All Transactions
+// export const getMerchantDetails = async (req, res) => {
+//   try {
+//     const { merchantId } = req.params;
+
+//     if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid Merchant ID"
+//       });
+//     }
+
+//     // Get merchant basic info
+//     const merchant = await Merchant.findById(merchantId);
+//     if (!merchant) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Merchant not found"
+//       });
+//     }
+
+//     // Get user reference
+//     const user = await User.findById(merchant.userId).select('firstname lastname');
+
+//     // Get payment transactions
+//     const paymentTransactions = await Transaction.find({ merchantId: merchant.userId })
+//       .select('transactionId merchantOrderId amount status paymentMethod createdAt txnRefId customerName')
+//       .sort({ createdAt: -1 })
+//       .limit(100);
+
+//     // Get payout transactions
+//     const payoutTransactions = await PayoutTransaction.find({ merchantId: merchant.userId })
+//       .select('utr transactionId amount transactionType status paymentMode remark createdAt')
+//       .sort({ createdAt: -1 })
+//       .limit(100);
+
+//     // Calculate real-time statistics
+//     const totalCredits = paymentTransactions
+//       .filter(txn => ['SUCCESS', 'Success'].includes(txn.status))
+//       .reduce((sum, txn) => sum + txn.amount, 0);
+
+//     const totalDebits = payoutTransactions
+//       .filter(txn => txn.status === 'Success' && txn.transactionType === 'Debit')
+//       .reduce((sum, txn) => sum + txn.amount, 0);
+
+//     // Update merchant with latest calculations
+//     merchant.totalCredits = totalCredits;
+//     merchant.totalDebits = totalDebits;
+//     merchant.netEarnings = totalCredits - totalDebits;
+//     merchant.totalTransactions = paymentTransactions.length;
+//     merchant.successfulTransactions = paymentTransactions.filter(txn => 
+//       ['SUCCESS', 'Success'].includes(txn.status)
+//     ).length;
+//     merchant.failedTransactions = paymentTransactions.filter(txn => 
+//       ['FAILED', 'Failed'].includes(txn.status)
+//     ).length;
+
+//     await merchant.save();
+
+//     // Combine transactions for timeline
+//     const allTransactions = [
+//       ...paymentTransactions.map(txn => ({
+//         _id: txn._id,
+//         type: 'payment',
+//         transactionId: txn.transactionId,
+//         reference: txn.merchantOrderId,
+//         amount: txn.amount,
+//         transactionType: 'Credit',
+//         status: txn.status,
+//         method: txn.paymentMethod,
+//         date: txn.createdAt,
+//         customer: txn.customerName,
+//         remark: 'Payment Received'
+//       })),
+//       ...payoutTransactions.map(txn => ({
+//         _id: txn._id,
+//         type: 'payout',
+//         transactionId: txn.transactionId || txn.utr,
+//         reference: txn.utr,
+//         amount: txn.amount,
+//         transactionType: txn.transactionType,
+//         status: txn.status,
+//         method: txn.paymentMode,
+//         date: txn.createdAt,
+//         customer: '-',
+//         remark: txn.remark || 'Payout Processed'
+//       }))
+//     ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         merchantInfo: {
+//           _id: merchant._id,
+//           merchantName: merchant.merchantName,
+//           company: merchant.company,
+//           email: merchant.email,
+//           contact: merchant.contact,
+//           mid: merchant.mid,
+//           status: merchant.status,
+//           bankDetails: merchant.bankDetails,
+//           userInfo: user
+//         },
+//         balanceSummary: {
+//           availableBalance: merchant.availableBalance,
+//           unsettledBalance: merchant.unsettledBalance,
+//           totalCredits: merchant.totalCredits,
+//           totalDebits: merchant.totalDebits,
+//           netEarnings: merchant.netEarnings
+//         },
+//         transactionStats: {
+//           totalTransactions: merchant.totalTransactions,
+//           successfulTransactions: merchant.successfulTransactions,
+//           failedTransactions: merchant.failedTransactions,
+//           successRate: merchant.totalTransactions > 0 ? 
+//             ((merchant.successfulTransactions / merchant.totalTransactions) * 100).toFixed(2) : 0
+//         },
+//         transactions: allTransactions,
+//         transactionCount: {
+//           payments: paymentTransactions.length,
+//           payouts: payoutTransactions.length,
+//           total: allTransactions.length
+//         }
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error fetching merchant details:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Server error fetching merchant details",
+//       error: error.message
+//     });
+//   }
+// };
 
 // 4. Update Merchant Balance (Credit/Debit)
 export const updateMerchantBalance = async (req, res) => {
@@ -653,40 +756,40 @@ export const getMerchantTransactionStats = async (req, res) => {
 // };
 
 // Get merchant users
-export const getMerchantUsers = async (req, res) => {
-  try {
-    console.log("🔍 Fetching merchant users...");
+// export const getMerchantUsers = async (req, res) => {
+//   try {
+//     console.log("🔍 Fetching merchant users...");
     
-    const users = await User.find({ role: 'merchant' })
-      .select('-password')
-      .sort({ createdAt: -1 });
+//     const users = await User.find({ role: 'merchant' })
+//       .select('-password')
+//       .sort({ createdAt: -1 });
     
-    console.log(`✅ Found ${users.length} merchant users`);
+//     console.log(`✅ Found ${users.length} merchant users`);
 
-    const usersWithFinancialData = users.map(user => ({
-      ...user._doc,
-      holdAmount: user.holdAmount || 1000,
-      unsettleBal: user.unsettleBalance || 1000,
-      todayNetPayin: 0,
-      availableBal: user.balance || 1000,
-      payoutBal: Math.random() > 0.5 ? 1500 : 1000,
-      payoutMid: Math.random() > 0.5 ? 'PayoutOne/1 L' : 'NA / NA',
-      status: user.status || 'Active'
-    }));
+//     const usersWithFinancialData = users.map(user => ({
+//       ...user._doc,
+//       holdAmount: user.holdAmount || 1000,
+//       unsettleBal: user.unsettleBalance || 1000,
+//       todayNetPayin: 0,
+//       availableBal: user.balance || 1000,
+//       payoutBal: Math.random() > 0.5 ? 1500 : 1000,
+//       payoutMid: Math.random() > 0.5 ? 'PayoutOne/1 L' : 'NA / NA',
+//       status: user.status || 'Active'
+//     }));
     
-    res.status(200).json({
-      success: true,
-      data: usersWithFinancialData
-    });
-  } catch (error) {
-    console.error('❌ Error fetching merchant users:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error while fetching merchant users.',
-      error: error.message 
-    });
-  }
-};
+//     res.status(200).json({
+//       success: true,
+//       data: usersWithFinancialData
+//     });
+//   } catch (error) {
+//     console.error('❌ Error fetching merchant users:', error);
+//     res.status(500).json({ 
+//       success: false,
+//       message: 'Server error while fetching merchant users.',
+//       error: error.message 
+//     });
+//   }
+// };
 
 // Create merchant user
 // export const createMerchantUser = async (req, res) => {
@@ -779,6 +882,620 @@ export const getMerchantUsers = async (req, res) => {
 // };
 
 // Update merchant user
+// export const updateMerchantUser = async (req, res) => {
+//   try {
+//     console.log("🔄 Updating merchant user:", req.params.id, req.body);
+    
+//     const { firstname, lastname, company, email, contact, status, password } = req.body;
+//     const userId = req.params.id;
+
+//     const user = await User.findById(userId);
+//     if (!user || user.role !== 'merchant') {
+//       return res.status(404).json({ 
+//         success: false,
+//         message: 'Merchant user not found or is not a merchant.' 
+//       });
+//     }
+
+//     // Update fields
+//     if (firstname) user.firstname = firstname;
+//     if (lastname) user.lastname = lastname;
+//     if (company !== undefined) user.company = company;
+//     if (contact) user.contact = contact;
+//     if (status) user.status = status;
+
+//     // Email validation and uniqueness check
+//     if (email && email !== user.email) {
+//       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+//       if (!emailRegex.test(email)) {
+//         return res.status(400).json({ 
+//           success: false,
+//           message: 'Please enter a valid email address for update.' 
+//         });
+//       }
+//       const existingUserWithEmail = await User.findOne({ email });
+//       if (existingUserWithEmail && existingUserWithEmail._id.toString() !== userId) {
+//         return res.status(400).json({ 
+//           success: false,
+//           message: 'Another user with this email already exists.' 
+//         });
+//       }
+//       user.email = email;
+//     }
+
+//     // Password update
+//     if (password) {
+//       if (password.length < 6) {
+//         return res.status(400).json({ 
+//           success: false,
+//           message: 'New password must be at least 6 characters long.' 
+//         });
+//       }
+//       const salt = await bcrypt.genSalt(10);
+//       user.password = await bcrypt.hash(password, salt);
+//     }
+
+//     const updatedUser = await user.save();
+//     const userResponse = updatedUser.toObject();
+//     delete userResponse.password;
+    
+//     console.log("✅ Merchant user updated successfully");
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Merchant user updated successfully',
+//       data: userResponse
+//     });
+
+//   } catch (error) {
+//     console.error('❌ Error updating merchant user:', error);
+    
+//     if (error.code === 11000) {
+//       return res.status(400).json({ 
+//         success: false,
+//         message: 'A user with this email already exists.' 
+//       });
+//     }
+    
+//     res.status(500).json({ 
+//       success: false,
+//       message: 'Server error while updating merchant user.',
+//       error: error.message 
+//     });
+//   }
+// };
+
+// // Delete merchant user
+// export const deleteMerchantUser = async (req, res) => {
+//   try {
+//     console.log("🗑️ Deleting merchant user:", req.params.id);
+    
+//     const user = await User.findById(req.params.id);
+
+//     if (!user) {
+//       return res.status(404).json({ 
+//         success: false,
+//         message: 'User not found.' 
+//       });
+//     }
+
+//     if (user.role !== 'merchant') {
+//       return res.status(403).json({ 
+//         success: false,
+//         message: 'Forbidden: Only merchant users can be deleted via this endpoint.' 
+//       });
+//     }
+
+//     await User.findByIdAndDelete(req.params.id);
+    
+//     console.log("✅ Merchant user deleted successfully");
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Merchant user deleted successfully.'
+//     });
+
+//   } catch (error) {
+//     console.error('❌ Error deleting merchant user:', error);
+//     res.status(500).json({ 
+//       success: false,
+//       message: 'Server error while deleting merchant user.',
+//       error: error.message 
+//     });
+//   }
+// };
+
+// // Get merchant by ID
+// export const getMerchantById = async (req, res) => {
+//   try {
+//     const merchant = await User.findById(req.params.id).select('-password');
+    
+//     if (!merchant || merchant.role !== 'merchant') {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Merchant not found'
+//       });
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       data: merchant
+//     });
+//   } catch (error) {
+//     console.error('Error fetching merchant:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error',
+//       error: error.message
+//     });
+//   }
+// };
+
+export const getMerchantDashboard = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Merchant ID"
+      });
+    }
+
+    // Get merchant with populated transactions
+    const merchant = await Merchant.findById(merchantId)
+      .populate('paymentTransactions')
+      .populate('payoutTransactions')
+      .populate('userId', 'balance unsettleBalance firstname lastname email');
+
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found"
+      });
+    }
+
+    // REAL-TIME BALANCE CALCULATION
+    const userBalance = merchant.userId?.balance || 0;
+    const userUnsettleBalance = merchant.userId?.unsettleBalance || 0;
+
+    // Update merchant balances from User model (single source of truth)
+    merchant.availableBalance = userBalance;
+    merchant.unsettledBalance = userUnsettleBalance;
+
+    // Calculate transaction statistics
+    const successfulPayments = merchant.paymentTransactions?.filter(
+      txn => txn.status === 'SUCCESS' || txn.status === 'Success'
+    ) || [];
+
+    const successfulPayouts = merchant.payoutTransactions?.filter(
+      txn => txn.status === 'Success' && txn.transactionType === 'Debit'
+    ) || [];
+
+    const totalCredits = successfulPayments.reduce((sum, txn) => sum + (txn.amount || 0), 0);
+    const totalDebits = successfulPayouts.reduce((sum, txn) => sum + (txn.amount || 0), 0);
+
+    // Update merchant stats
+    merchant.totalCredits = totalCredits;
+    merchant.totalDebits = totalDebits;
+    merchant.netEarnings = totalCredits - totalDebits;
+    merchant.totalTransactions = merchant.paymentTransactions?.length || 0;
+    merchant.successfulTransactions = successfulPayments.length;
+    merchant.failedTransactions = (merchant.paymentTransactions?.length || 0) - successfulPayments.length;
+
+    await merchant.save();
+
+    // Format response
+    const allTransactions = [
+      ...(merchant.paymentTransactions || []).map(txn => ({
+        _id: txn._id,
+        type: 'payment',
+        transactionId: txn.transactionId,
+        reference: txn.merchantOrderId,
+        amount: txn.amount,
+        transactionType: 'Credit',
+        status: txn.status,
+        method: txn.paymentMethod,
+        date: txn.createdAt,
+        customer: txn.customerName || 'N/A',
+        remark: 'Payment Received'
+      })),
+      ...(merchant.payoutTransactions || []).map(txn => ({
+        _id: txn._id,
+        type: 'payout',
+        transactionId: txn.transactionId || txn.utr,
+        reference: txn.utr,
+        amount: txn.amount,
+        transactionType: txn.transactionType,
+        status: txn.status,
+        method: txn.paymentMode,
+        date: txn.createdAt,
+        customer: '-',
+        remark: txn.remark || 'Payout Processed'
+      }))
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        merchantInfo: {
+          _id: merchant._id,
+          merchantName: merchant.merchantName,
+          company: merchant.company,
+          email: merchant.email,
+          contact: merchant.contact,
+          mid: merchant.mid,
+          status: merchant.status,
+          bankDetails: merchant.bankDetails,
+          userInfo: {
+            firstname: merchant.userId?.firstname,
+            lastname: merchant.userId?.lastname,
+            email: merchant.userId?.email
+          }
+        },
+        balanceSummary: {
+          availableBalance: merchant.availableBalance,
+          unsettledBalance: merchant.unsettledBalance,
+          totalCredits: merchant.totalCredits,
+          totalDebits: merchant.totalDebits,
+          netEarnings: merchant.netEarnings
+        },
+        transactionStats: {
+          totalTransactions: merchant.totalTransactions,
+          successfulTransactions: merchant.successfulTransactions,
+          failedTransactions: merchant.failedTransactions,
+          successRate: merchant.totalTransactions > 0 ? 
+            ((merchant.successfulTransactions / merchant.totalTransactions) * 100).toFixed(2) : 0
+        },
+        transactions: allTransactions,
+        transactionCount: {
+          payments: merchant.paymentTransactions?.length || 0,
+          payouts: merchant.payoutTransactions?.length || 0,
+          total: allTransactions.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching merchant dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching merchant dashboard",
+      error: error.message
+    });
+  }
+};
+
+// 2. Sync All Merchant Transactions
+export const syncAllMerchantTransactions = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    const merchant = await Merchant.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found"
+      });
+    }
+
+    // Find all transactions for this merchant
+    const paymentTransactions = await Transaction.find({ 
+      merchantId: merchant.userId 
+    }).sort({ createdAt: -1 });
+
+    const payoutTransactions = await PayoutTransaction.find({ 
+      merchantId: merchant.userId 
+    }).sort({ createdAt: -1 });
+
+    // Update merchant with transaction references
+    merchant.paymentTransactions = paymentTransactions.map(txn => txn._id);
+    merchant.payoutTransactions = payoutTransactions.map(txn => txn._id);
+
+    await merchant.save();
+
+    res.status(200).json({
+      success: true,
+      message: "All transactions synced successfully",
+      data: {
+        paymentCount: paymentTransactions.length,
+        payoutCount: payoutTransactions.length,
+        total: paymentTransactions.length + payoutTransactions.length
+      }
+    });
+
+  } catch (error) {
+    console.error("Error syncing transactions:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error syncing transactions",
+      error: error.message
+    });
+  }
+};
+
+// 3. Create Payment Transaction (WITH AUTO-SYNC)
+export const createPaymentTransaction = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const {
+      merchantId,
+      merchantOrderId,
+      amount,
+      currency = 'INR',
+      status = 'Pending',
+      customerName,
+      customerVPA,
+      customerContact,
+      paymentMethod,
+      paymentOption,
+      txnRefId,
+      enpayTxnId,
+      remark,
+    } = req.body;
+
+    // Validate Merchant
+    const merchantUser = await User.findById(merchantId).session(session);
+    if (!merchantUser || merchantUser.role !== 'merchant') {
+      await session.abortTransaction();
+      return res.status(404).json({ 
+        success: false,
+        message: "Merchant not found." 
+      });
+    }
+
+    // Generate transaction ID
+    const transactionId = await generateUniqueTransactionId();
+
+    const newTransaction = new Transaction({
+      transactionId,
+      merchantId: merchantUser._id,
+      merchantName: merchantUser.company || `${merchantUser.firstname} ${merchantUser.lastname}`,
+      merchantOrderId,
+      amount: parseFloat(amount),
+      currency,
+      status,
+      customerName,
+      customerVPA,
+      customerContact,
+      paymentMethod,
+      paymentOption,
+      txnRefId,
+      enpayTxnId,
+      remark,
+    });
+
+    await newTransaction.save({ session });
+
+    // AUTO-SYNC TO MERCHANT TABLE
+    await autoSyncTransaction(merchantUser._id, newTransaction, 'payment');
+    await autoSyncToMerchant(merchantUser._id, newTransaction, 'payment');
+
+    // Update user balance if success
+    if (['Success', 'SUCCESS'].includes(status)) {
+      merchantUser.balance += parseFloat(amount);
+      await merchantUser.save({ session });
+    }
+
+    await session.commitTransaction();
+    
+    res.status(201).json({
+      success: true,
+      message: "Payment transaction created and synced to merchant.",
+      data: newTransaction,
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Error creating payment transaction:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error during payment transaction creation.", 
+      error: error.message 
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// ========== EXISTING FUNCTIONS ==========
+
+// Get All Merchants
+export const getAllMerchants = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+
+    const query = {};
+    if (search) {
+      query.$or = [
+        { merchantName: { $regex: search, $options: 'i' } },
+        { company: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { mid: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+
+    const merchants = await Merchant.find(query)
+      .select('merchantName company email contact mid availableBalance unsettledBalance totalCredits totalDebits netEarnings status createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Merchant.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: merchants,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching merchants:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching merchants",
+      error: error.message
+    });
+  }
+};
+
+// Get Merchant Users
+export const getMerchantUsers = async (req, res) => {
+  try {
+    console.log("🔍 Fetching merchant users...");
+    
+    const users = await User.find({ role: 'merchant' })
+      .select('-password')
+      .sort({ createdAt: -1 });
+    
+    console.log(`✅ Found ${users.length} merchant users`);
+
+    const usersWithFinancialData = users.map(user => ({
+      ...user._doc,
+      holdAmount: user.holdAmount || 1000,
+      unsettleBal: user.unsettleBalance || 1000,
+      todayNetPayin: 0,
+      availableBal: user.balance || 1000,
+      payoutBal: Math.random() > 0.5 ? 1500 : 1000,
+      payoutMid: Math.random() > 0.5 ? 'PayoutOne/1 L' : 'NA / NA',
+      status: user.status || 'Active'
+    }));
+    
+    res.status(200).json({
+      success: true,
+      data: usersWithFinancialData
+    });
+  } catch (error) {
+    console.error('❌ Error fetching merchant users:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error while fetching merchant users.',
+      error: error.message 
+    });
+  }
+};
+
+// Create Merchant User
+export const createMerchantUser = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { firstname, lastname, company, email, password, contact } = req.body;
+
+    console.log("💰 Creating merchant user in BOTH tables:", req.body);
+
+    // Validation
+    if (!firstname || !lastname || !email || !password || !contact) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        message: 'Please enter all required fields.' 
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email }).session(session);
+    if (existingUser) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        message: 'User with this email already exists.' 
+      });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Generate MID
+    const mid = generateMid();
+
+    // 1. FIRST CREATE USER
+    const user = new User({
+      firstname,
+      lastname,
+      company: company || '',
+      email,
+      password: hashedPassword,
+      role: 'merchant',
+      contact,
+      mid,
+      balance: 0,
+      unsettleBalance: 0
+    });
+
+    const savedUser = await user.save({ session });
+
+    // 2. THEN AUTOMATICALLY CREATE MERCHANT
+    const merchant = new Merchant({
+      userId: savedUser._id,
+      merchantName: company || `${firstname} ${lastname}`,
+      company: company || '',
+      email,
+      contact,
+      mid,
+      availableBalance: 0,
+      unsettledBalance: 0,
+      totalCredits: 0,
+      totalDebits: 0,
+      netEarnings: 0,
+      status: 'Active'
+    });
+
+    const savedMerchant = await merchant.save({ session });
+
+    // 3. UPDATE USER WITH MERCHANT REFERENCE
+    savedUser.merchantRef = savedMerchant._id;
+    await savedUser.save({ session });
+
+    await session.commitTransaction();
+
+    console.log("✅ Merchant user created in BOTH tables successfully");
+
+    const userResponse = savedUser.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({
+      success: true,
+      message: 'Merchant user created successfully in both tables',
+      data: {
+        user: userResponse,
+        merchant: savedMerchant
+      }
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('❌ Error creating merchant user:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'A user with this email or MID already exists.' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error while creating merchant user.',
+      error: error.message 
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Update Merchant User
 export const updateMerchantUser = async (req, res) => {
   try {
     console.log("🔄 Updating merchant user:", req.params.id, req.body);
@@ -862,7 +1579,7 @@ export const updateMerchantUser = async (req, res) => {
   }
 };
 
-// Delete merchant user
+// Delete Merchant User
 export const deleteMerchantUser = async (req, res) => {
   try {
     console.log("🗑️ Deleting merchant user:", req.params.id);
@@ -902,7 +1619,7 @@ export const deleteMerchantUser = async (req, res) => {
   }
 };
 
-// Get merchant by ID
+// Get Merchant By ID
 export const getMerchantById = async (req, res) => {
   try {
     const merchant = await User.findById(req.params.id).select('-password');
@@ -923,6 +1640,179 @@ export const getMerchantById = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Get Merchant Details
+export const getMerchantDetails = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Merchant ID"
+      });
+    }
+
+    // Get merchant basic info
+    const merchant = await Merchant.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found"
+      });
+    }
+
+    // Get user reference
+    const user = await User.findById(merchant.userId).select('firstname lastname');
+
+    // Get payment transactions
+    const paymentTransactions = await Transaction.find({ merchantId: merchant.userId })
+      .select('transactionId merchantOrderId amount status paymentMethod createdAt txnRefId customerName')
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    // Get payout transactions
+    const payoutTransactions = await PayoutTransaction.find({ merchantId: merchant.userId })
+      .select('utr transactionId amount transactionType status paymentMode remark createdAt')
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    // Calculate real-time statistics
+    const totalCredits = paymentTransactions
+      .filter(txn => ['SUCCESS', 'Success'].includes(txn.status))
+      .reduce((sum, txn) => sum + txn.amount, 0);
+
+    const totalDebits = payoutTransactions
+      .filter(txn => txn.status === 'Success' && txn.transactionType === 'Debit')
+      .reduce((sum, txn) => sum + txn.amount, 0);
+
+    // Update merchant with latest calculations
+    merchant.totalCredits = totalCredits;
+    merchant.totalDebits = totalDebits;
+    merchant.netEarnings = totalCredits - totalDebits;
+    merchant.totalTransactions = paymentTransactions.length;
+    merchant.successfulTransactions = paymentTransactions.filter(txn => 
+      ['SUCCESS', 'Success'].includes(txn.status)
+    ).length;
+    merchant.failedTransactions = paymentTransactions.filter(txn => 
+      ['FAILED', 'Failed'].includes(txn.status)
+    ).length;
+
+    await merchant.save();
+
+    // Combine transactions for timeline
+    const allTransactions = [
+      ...paymentTransactions.map(txn => ({
+        _id: txn._id,
+        type: 'payment',
+        transactionId: txn.transactionId,
+        reference: txn.merchantOrderId,
+        amount: txn.amount,
+        transactionType: 'Credit',
+        status: txn.status,
+        method: txn.paymentMethod,
+        date: txn.createdAt,
+        customer: txn.customerName,
+        remark: 'Payment Received'
+      })),
+      ...payoutTransactions.map(txn => ({
+        _id: txn._id,
+        type: 'payout',
+        transactionId: txn.transactionId || txn.utr,
+        reference: txn.utr,
+        amount: txn.amount,
+        transactionType: txn.transactionType,
+        status: txn.status,
+        method: txn.paymentMode,
+        date: txn.createdAt,
+        customer: '-',
+        remark: txn.remark || 'Payout Processed'
+      }))
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        merchantInfo: {
+          _id: merchant._id,
+          merchantName: merchant.merchantName,
+          company: merchant.company,
+          email: merchant.email,
+          contact: merchant.contact,
+          mid: merchant.mid,
+          status: merchant.status,
+          bankDetails: merchant.bankDetails,
+          userInfo: user
+        },
+        balanceSummary: {
+          availableBalance: merchant.availableBalance,
+          unsettledBalance: merchant.unsettledBalance,
+          totalCredits: merchant.totalCredits,
+          totalDebits: merchant.totalDebits,
+          netEarnings: merchant.netEarnings
+        },
+        transactionStats: {
+          totalTransactions: merchant.totalTransactions,
+          successfulTransactions: merchant.successfulTransactions,
+          failedTransactions: merchant.failedTransactions,
+          successRate: merchant.totalTransactions > 0 ? 
+            ((merchant.successfulTransactions / merchant.totalTransactions) * 100).toFixed(2) : 0
+        },
+        transactions: allTransactions,
+        transactionCount: {
+          payments: paymentTransactions.length,
+          payouts: payoutTransactions.length,
+          total: allTransactions.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching merchant details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching merchant details",
+      error: error.message
+    });
+  }
+};
+
+
+export const getMerchantPayoutBalance = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    // Find the merchant and populate the payout transactions
+    const merchant = await Merchant.findById(merchantId).populate('payoutTransactions');
+
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found"
+      });
+    }
+
+    // Calculate the total payout balance
+    const totalPayouts = merchant.payoutTransactions.reduce((acc, txn) => {
+      return acc + (txn.status === 'SUCCESS' ? txn.amount : 0);
+    }, 0);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        merchantId: merchant._id,
+        totalPayouts
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching merchant payout balance:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching merchant payout balance",
       error: error.message
     });
   }

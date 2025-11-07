@@ -421,17 +421,10 @@ export const getMerchantPayoutBalance = async (req, res) => {
 };
 
 
-// Sync all transactions for a merchant
-export const syncMerchantTransactions = async (req, res) => {
+
+export const syncAllMerchantTransactions = async (req, res) => {
   try {
     const { merchantId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Merchant ID"
-      });
-    }
 
     const merchant = await Merchant.findById(merchantId);
     if (!merchant) {
@@ -441,100 +434,28 @@ export const syncMerchantTransactions = async (req, res) => {
       });
     }
 
-    // Get latest transactions
+    // Find all transactions for this merchant
     const paymentTransactions = await Transaction.find({ 
       merchantId: merchant.userId 
-    })
-    .select('transactionId merchantOrderId amount status paymentMethod createdAt txnRefId customerName')
-    .sort({ createdAt: -1 })
-    .limit(50);
+    }).sort({ createdAt: -1 });
 
     const payoutTransactions = await PayoutTransaction.find({ 
       merchantId: merchant.userId 
-    })
-    .select('utr transactionId amount transactionType status paymentMode remark createdAt')
-    .sort({ createdAt: -1 })
-    .limit(50);
+    }).sort({ createdAt: -1 });
 
-    // Format transactions for merchant table
-    const formattedTransactions = [
-      ...paymentTransactions.map(txn => ({
-        transactionId: txn.transactionId,
-        type: 'payment',
-        transactionType: 'Credit',
-        amount: txn.amount,
-        status: txn.status,
-        reference: txn.merchantOrderId,
-        method: txn.paymentMethod,
-        remark: 'Payment Received',
-        date: txn.createdAt,
-        customer: txn.customerName || 'N/A'
-      })),
-      ...payoutTransactions.map(txn => ({
-        transactionId: txn.transactionId || txn.utr,
-        type: 'payout',
-        transactionType: txn.transactionType,
-        amount: txn.amount,
-        status: txn.status,
-        reference: txn.utr,
-        method: txn.paymentMode,
-        remark: txn.remark || 'Payout Processed',
-        date: txn.createdAt,
-        customer: 'N/A'
-      }))
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    // Update merchant with transactions
-    merchant.recentTransactions = formattedTransactions.slice(0, 20); // Last 20 transactions
-    
-    // Calculate transaction summary
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const last7Days = new Date();
-    last7Days.setDate(last7Days.getDate() - 7);
-    
-    const last30Days = new Date();
-    last30Days.setDate(last30Days.getDate() - 30);
-
-    // Today's summary
-    const todayTransactions = formattedTransactions.filter(txn => 
-      new Date(txn.date) >= today
-    );
-    merchant.transactionSummary.today = {
-      credits: todayTransactions.filter(t => t.transactionType === 'Credit').reduce((sum, t) => sum + t.amount, 0),
-      debits: todayTransactions.filter(t => t.transactionType === 'Debit').reduce((sum, t) => sum + t.amount, 0),
-      count: todayTransactions.length
-    };
-
-    // Last 7 days summary
-    const last7DaysTransactions = formattedTransactions.filter(txn => 
-      new Date(txn.date) >= last7Days
-    );
-    merchant.transactionSummary.last7Days = {
-      credits: last7DaysTransactions.filter(t => t.transactionType === 'Credit').reduce((sum, t) => sum + t.amount, 0),
-      debits: last7DaysTransactions.filter(t => t.transactionType === 'Debit').reduce((sum, t) => sum + t.amount, 0),
-      count: last7DaysTransactions.length
-    };
-
-    // Last 30 days summary
-    const last30DaysTransactions = formattedTransactions.filter(txn => 
-      new Date(txn.date) >= last30Days
-    );
-    merchant.transactionSummary.last30Days = {
-      credits: last30DaysTransactions.filter(t => t.transactionType === 'Credit').reduce((sum, t) => sum + t.amount, 0),
-      debits: last30DaysTransactions.filter(t => t.transactionType === 'Debit').reduce((sum, t) => sum + t.amount, 0),
-      count: last30DaysTransactions.length
-    };
+    // Update merchant with transaction references
+    merchant.paymentTransactions = paymentTransactions.map(txn => txn._id);
+    merchant.payoutTransactions = payoutTransactions.map(txn => txn._id);
 
     await merchant.save();
 
     res.status(200).json({
       success: true,
-      message: "Transactions synced successfully",
+      message: "All transactions synced successfully",
       data: {
-        transactions: merchant.recentTransactions,
-        summary: merchant.transactionSummary
+        paymentCount: paymentTransactions.length,
+        payoutCount: payoutTransactions.length,
+        total: paymentTransactions.length + payoutTransactions.length
       }
     });
 
@@ -548,75 +469,24 @@ export const syncMerchantTransactions = async (req, res) => {
   }
 };
 
-
-
-// Auto-sync transaction to merchant
-const autoSyncToMerchant = async (merchantUserId, transactionData, type) => {
+// Auto-sync when new transaction is created
+export const autoSyncTransaction = async (merchantUserId, transaction, type) => {
   try {
-    console.log(`🔄 Auto-syncing ${type} transaction to merchant table`);
-    
-    // Find merchant by userId
     const merchant = await Merchant.findOne({ userId: merchantUserId });
-    if (!merchant) {
-      console.log('❌ Merchant not found for auto-sync');
-      return;
-    }
+    if (!merchant) return;
 
-    const newTransaction = {
-      transactionId: transactionData.transactionId,
-      type: type,
-      transactionType: type === 'payment' ? 'Credit' : 'Debit',
-      amount: transactionData.amount,
-      status: transactionData.status,
-      reference: type === 'payment' ? transactionData.merchantOrderId : transactionData.utr,
-      method: type === 'payment' ? transactionData.paymentMethod : transactionData.paymentMode,
-      remark: transactionData.remark || (type === 'payment' ? 'Payment Received' : 'Payout Processed'),
-      date: transactionData.createdAt || new Date(),
-      customer: transactionData.customerName || 'N/A'
-    };
-
-    // Add to recent transactions
-    merchant.recentTransactions.unshift(newTransaction);
-    if (merchant.recentTransactions.length > 20) {
-      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
-    }
-
-    // Update balance if transaction is successful
-    if (transactionData.status === 'Success' || transactionData.status === 'SUCCESS') {
-      if (type === 'payment') {
-        // Credit for payments
-        merchant.availableBalance += transactionData.amount;
-        merchant.totalCredits += transactionData.amount;
-      } else if (type === 'payout') {
-        // Debit for payouts
-        merchant.availableBalance -= transactionData.amount;
-        merchant.totalDebits += transactionData.amount;
-      }
-      
-      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
-    }
-
-    // Update transaction summary
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (new Date(newTransaction.date) >= today) {
-      if (newTransaction.transactionType === 'Credit') {
-        merchant.transactionSummary.today.credits += newTransaction.amount;
-      } else {
-        merchant.transactionSummary.today.debits += newTransaction.amount;
-      }
-      merchant.transactionSummary.today.count += 1;
+    if (type === 'payment') {
+      merchant.paymentTransactions.push(transaction._id);
+    } else if (type === 'payout') {
+      merchant.payoutTransactions.push(transaction._id);
     }
 
     await merchant.save();
     console.log(`✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`);
-
   } catch (error) {
-    console.error('❌ Error in auto-sync to merchant:', error);
+    console.error('❌ Error in auto-sync:', error);
   }
 };
-
 // Create Payment Transaction (WITH AUTO-SYNC)
 export const createPaymentTransaction = async (req, res) => {
   const session = await mongoose.startSession();

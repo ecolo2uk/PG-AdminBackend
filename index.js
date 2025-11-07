@@ -48,27 +48,27 @@ app.use(cors());
 connectDB();
 
 // ✅ RUN MIGRATION WHEN SERVER STARTS
-const runMigrations = async () => {
-  try {
-    console.log('🔄 Checking for migration...');
+// const runMigrations = async () => {
+//   try {
+//     console.log('🔄 Checking for migration...');
     
-    // Wait for MongoDB connection
-    await mongoose.connection.once('open', async () => {
-      console.log('✅ MongoDB connected, running migration...');
+//     // Wait for MongoDB connection
+//     await mongoose.connection.once('open', async () => {
+//       console.log('✅ MongoDB connected, running migration...');
       
-      // Wait 2 seconds to ensure DB is fully connected
-      setTimeout(async () => {
-        await migrateExistingUsersToMerchants();
-      }, 2000);
-    });
+//       // Wait 2 seconds to ensure DB is fully connected
+//       setTimeout(async () => {
+//         await migrateExistingUsersToMerchants();
+//       }, 2000);
+//     });
     
-  } catch (error) {
-    console.error('❌ Migration startup error:', error);
-  }
-};
+//   } catch (error) {
+//     console.error('❌ Migration startup error:', error);
+//   }
+// };
 
 // Call migration function
-runMigrations();
+// runMigrations();
 
 // Routes
 app.use('/api/admin/auth', adminauthRoutes);

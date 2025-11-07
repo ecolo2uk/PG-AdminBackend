@@ -143,7 +143,15 @@ const merchantSchema = new mongoose.Schema({
       debits: { type: Number, default: 0 },
       count: { type: Number, default: 0 }
     }
-  }
+  },
+   paymentTransactions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  }],
+  payoutTransactions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PayoutTransaction'
+  }],
 }, {
   timestamps: true
 });

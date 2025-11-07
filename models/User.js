@@ -51,5 +51,41 @@ merchantRef: {
   }
 }, { timestamps: true });
 
+UserSchema.post('save', async function(doc) {
+  if (doc.role === 'merchant') {
+    try {
+      // Check if merchant already exists
+      const existingMerchant = await Merchant.findOne({ userId: doc._id });
+      
+      if (!existingMerchant) {
+        const merchant = new Merchant({
+          userId: doc._id,
+          merchantName: doc.company || `${doc.firstname} ${doc.lastname}`,
+          company: doc.company || '',
+          email: doc.email,
+          contact: doc.contact,
+          mid: doc.mid,
+          availableBalance: doc.balance || 0,
+          unsettledBalance: doc.unsettleBalance || 0,
+          totalCredits: 0,
+          totalDebits: 0,
+          netEarnings: 0,
+          status: 'Active'
+        });
+
+        await merchant.save();
+        console.log(`✅ Auto-created merchant for user: ${doc.email}`);
+        
+        // Update user with merchant reference
+        doc.merchantRef = merchant._id;
+        await doc.save();
+      }
+    } catch (error) {
+      console.error('❌ Error auto-creating merchant:', error);
+    }
+  }
+});
+
+
 const User = mongoose.model("User", UserSchema);
 export default User;
