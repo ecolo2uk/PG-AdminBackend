@@ -902,6 +902,7 @@ const getGroupingForSalesReport = (timeFilter) => {
     }
 };
 
+// In your dashboardController.js - Update getSalesReport function
 export const getSalesReport = async (req, res) => {
     try {
         const { merchantId, timeFilter = 'today', startDate, endDate } = req.query;
@@ -918,7 +919,42 @@ export const getSalesReport = async (req, res) => {
 
         console.log('🔍 Sales Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
-        const groupById = getGroupingForSalesReport(timeFilter);
+        // FIX: Determine grouping based on time filter
+        let groupById = {};
+        let sortBy = {};
+        
+        switch (timeFilter) {
+            case 'today':
+            case 'yesterday':
+                groupById = {
+                    year: { $year: "$createdAt" },
+                    month: { $month: "$createdAt" },
+                    day: { $dayOfMonth: "$createdAt" },
+                    hour: { $hour: "$createdAt" }
+                };
+                sortBy = { "_id.year": 1, "_id.month": 1, "_id.day": 1, "_id.hour": 1 };
+                break;
+            case 'this_week':
+            case 'last_week':
+                groupById = {
+                    year: { $year: "$createdAt" },
+                    month: { $month: "$createdAt" },
+                    day: { $dayOfMonth: "$createdAt" }
+                };
+                sortBy = { "_id.year": 1, "_id.month": 1, "_id.day": 1 };
+                break;
+            case 'this_month':
+            case 'last_month':
+            case 'custom':
+            default:
+                groupById = {
+                    year: { $year: "$createdAt" },
+                    month: { $month: "$createdAt" },
+                    day: { $dayOfMonth: "$createdAt" }
+                };
+                sortBy = { "_id.year": 1, "_id.month": 1, "_id.day": 1 };
+                break;
+        }
 
         const salesReport = await Transaction.aggregate([
             {
@@ -1006,42 +1042,37 @@ export const getSalesReport = async (req, res) => {
                             year: "$_id.year",
                             month: "$_id.month",
                             day: { $ifNull: ["$_id.day", 1] },
-                            hour: { $ifNull: ["$_id.hour", 0] }
+                            hour: { $ifNull: ["$_id.hour", 0] },
+                            minute: 0,
+                            second: 0
                         }
                     },
                     month: "$_id.month",
+                    day: "$_id.day",
                     hour: "$_id.hour",
                     totalIncome: { $ifNull: ["$totalIncome", 0] },
                     totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] },
                     totalRefundAmount: { $ifNull: ["$totalRefundAmount", 0] },
                     totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
                     totalAmount: { $ifNull: ["$totalAmount", 0] },
-                    successCount: 1,
-                    failedCount: 1,
-                    pendingCount: 1,
-                    refundCount: 1
+                    successCount: { $ifNull: ["$successCount", 0] },
+                    failedCount: { $ifNull: ["$failedCount", 0] },
+                    pendingCount: { $ifNull: ["$pendingCount", 0] },
+                    refundCount: { $ifNull: ["$refundCount", 0] }
                 }
             },
-            { $sort: { date: 1 } }
+            { $sort: sortBy }
         ]);
 
         console.log(`✅ Sales report fetched: ${salesReport.length} entries`);
         
         if (salesReport.length > 0) {
-            const totalIncome = salesReport.reduce((sum, item) => sum + item.totalIncome, 0);
-            const totalPending = salesReport.reduce((sum, item) => sum + item.totalPendingAmount, 0);
-            const totalCost = salesReport.reduce((sum, item) => sum + item.totalCostOfSales, 0);
-            const totalRefund = salesReport.reduce((sum, item) => sum + item.totalRefundAmount, 0);
-            
-            console.log('📊 Sales report summary:', {
-                totalIncome,
-                totalPending,
-                totalCost,
-                totalRefund,
-                totalAmount: salesReport.reduce((sum, item) => sum + item.totalAmount, 0)
-            });
+            console.log('📊 Sample sales report entry:', salesReport[0]);
         } else {
             console.log('📊 No sales report data found for the given filters');
+            
+            // FIX: Return empty array instead of trying to create fake data
+            // The frontend will handle the "no data" state properly
         }
         
         res.status(200).json(salesReport);
