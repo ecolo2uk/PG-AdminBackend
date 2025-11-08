@@ -1031,140 +1031,140 @@ export const getMerchantTransactionStats = async (req, res) => {
 //   }
 // };
 
-export const getMerchantDashboard = async (req, res) => {
-  try {
-    const { merchantId } = req.params;
+// export const getMerchantDashboard = async (req, res) => {
+//   try {
+//     const { merchantId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(merchantId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Merchant ID"
-      });
-    }
+//     if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid Merchant ID"
+//       });
+//     }
 
-    // Get merchant with populated transactions
-    const merchant = await Merchant.findById(merchantId)
-      .populate('paymentTransactions')
-      .populate('payoutTransactions')
-      .populate('userId', 'balance unsettleBalance firstname lastname email');
+//     // Get merchant with populated transactions
+//     const merchant = await Merchant.findById(merchantId)
+//       .populate('paymentTransactions')
+//       .populate('payoutTransactions')
+//       .populate('userId', 'balance unsettleBalance firstname lastname email');
 
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found"
-      });
-    }
+//     if (!merchant) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Merchant not found"
+//       });
+//     }
 
-    // REAL-TIME BALANCE CALCULATION
-    const userBalance = merchant.userId?.balance || 0;
-    const userUnsettleBalance = merchant.userId?.unsettleBalance || 0;
+//     // REAL-TIME BALANCE CALCULATION
+//     const userBalance = merchant.userId?.balance || 0;
+//     const userUnsettleBalance = merchant.userId?.unsettleBalance || 0;
 
-    // Update merchant balances from User model (single source of truth)
-    merchant.availableBalance = userBalance;
-    merchant.unsettledBalance = userUnsettleBalance;
+//     // Update merchant balances from User model (single source of truth)
+//     merchant.availableBalance = userBalance;
+//     merchant.unsettledBalance = userUnsettleBalance;
 
-    // Calculate transaction statistics
-    const successfulPayments = merchant.paymentTransactions?.filter(
-      txn => txn.status === 'SUCCESS' || txn.status === 'Success'
-    ) || [];
+//     // Calculate transaction statistics
+//     const successfulPayments = merchant.paymentTransactions?.filter(
+//       txn => txn.status === 'SUCCESS' || txn.status === 'Success'
+//     ) || [];
 
-    const successfulPayouts = merchant.payoutTransactions?.filter(
-      txn => txn.status === 'Success' && txn.transactionType === 'Debit'
-    ) || [];
+//     const successfulPayouts = merchant.payoutTransactions?.filter(
+//       txn => txn.status === 'Success' && txn.transactionType === 'Debit'
+//     ) || [];
 
-    const totalCredits = successfulPayments.reduce((sum, txn) => sum + (txn.amount || 0), 0);
-    const totalDebits = successfulPayouts.reduce((sum, txn) => sum + (txn.amount || 0), 0);
+//     const totalCredits = successfulPayments.reduce((sum, txn) => sum + (txn.amount || 0), 0);
+//     const totalDebits = successfulPayouts.reduce((sum, txn) => sum + (txn.amount || 0), 0);
 
-    // Update merchant stats
-    merchant.totalCredits = totalCredits;
-    merchant.totalDebits = totalDebits;
-    merchant.netEarnings = totalCredits - totalDebits;
-    merchant.totalTransactions = merchant.paymentTransactions?.length || 0;
-    merchant.successfulTransactions = successfulPayments.length;
-    merchant.failedTransactions = (merchant.paymentTransactions?.length || 0) - successfulPayments.length;
+//     // Update merchant stats
+//     merchant.totalCredits = totalCredits;
+//     merchant.totalDebits = totalDebits;
+//     merchant.netEarnings = totalCredits - totalDebits;
+//     merchant.totalTransactions = merchant.paymentTransactions?.length || 0;
+//     merchant.successfulTransactions = successfulPayments.length;
+//     merchant.failedTransactions = (merchant.paymentTransactions?.length || 0) - successfulPayments.length;
 
-    await merchant.save();
+//     await merchant.save();
 
-    // Format response
-    const allTransactions = [
-      ...(merchant.paymentTransactions || []).map(txn => ({
-        _id: txn._id,
-        type: 'payment',
-        transactionId: txn.transactionId,
-        reference: txn.merchantOrderId,
-        amount: txn.amount,
-        transactionType: 'Credit',
-        status: txn.status,
-        method: txn.paymentMethod,
-        date: txn.createdAt,
-        customer: txn.customerName || 'N/A',
-        remark: 'Payment Received'
-      })),
-      ...(merchant.payoutTransactions || []).map(txn => ({
-        _id: txn._id,
-        type: 'payout',
-        transactionId: txn.transactionId || txn.utr,
-        reference: txn.utr,
-        amount: txn.amount,
-        transactionType: txn.transactionType,
-        status: txn.status,
-        method: txn.paymentMode,
-        date: txn.createdAt,
-        customer: '-',
-        remark: txn.remark || 'Payout Processed'
-      }))
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+//     // Format response
+//     const allTransactions = [
+//       ...(merchant.paymentTransactions || []).map(txn => ({
+//         _id: txn._id,
+//         type: 'payment',
+//         transactionId: txn.transactionId,
+//         reference: txn.merchantOrderId,
+//         amount: txn.amount,
+//         transactionType: 'Credit',
+//         status: txn.status,
+//         method: txn.paymentMethod,
+//         date: txn.createdAt,
+//         customer: txn.customerName || 'N/A',
+//         remark: 'Payment Received'
+//       })),
+//       ...(merchant.payoutTransactions || []).map(txn => ({
+//         _id: txn._id,
+//         type: 'payout',
+//         transactionId: txn.transactionId || txn.utr,
+//         reference: txn.utr,
+//         amount: txn.amount,
+//         transactionType: txn.transactionType,
+//         status: txn.status,
+//         method: txn.paymentMode,
+//         date: txn.createdAt,
+//         customer: '-',
+//         remark: txn.remark || 'Payout Processed'
+//       }))
+//     ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    res.status(200).json({
-      success: true,
-      data: {
-        merchantInfo: {
-          _id: merchant._id,
-          merchantName: merchant.merchantName,
-          company: merchant.company,
-          email: merchant.email,
-          contact: merchant.contact,
-          mid: merchant.mid,
-          status: merchant.status,
-          bankDetails: merchant.bankDetails,
-          userInfo: {
-            firstname: merchant.userId?.firstname,
-            lastname: merchant.userId?.lastname,
-            email: merchant.userId?.email
-          }
-        },
-        balanceSummary: {
-          availableBalance: merchant.availableBalance,
-          unsettledBalance: merchant.unsettledBalance,
-          totalCredits: merchant.totalCredits,
-          totalDebits: merchant.totalDebits,
-          netEarnings: merchant.netEarnings
-        },
-        transactionStats: {
-          totalTransactions: merchant.totalTransactions,
-          successfulTransactions: merchant.successfulTransactions,
-          failedTransactions: merchant.failedTransactions,
-          successRate: merchant.totalTransactions > 0 ? 
-            ((merchant.successfulTransactions / merchant.totalTransactions) * 100).toFixed(2) : 0
-        },
-        transactions: allTransactions,
-        transactionCount: {
-          payments: merchant.paymentTransactions?.length || 0,
-          payouts: merchant.payoutTransactions?.length || 0,
-          total: allTransactions.length
-        }
-      }
-    });
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         merchantInfo: {
+//           _id: merchant._id,
+//           merchantName: merchant.merchantName,
+//           company: merchant.company,
+//           email: merchant.email,
+//           contact: merchant.contact,
+//           mid: merchant.mid,
+//           status: merchant.status,
+//           bankDetails: merchant.bankDetails,
+//           userInfo: {
+//             firstname: merchant.userId?.firstname,
+//             lastname: merchant.userId?.lastname,
+//             email: merchant.userId?.email
+//           }
+//         },
+//         balanceSummary: {
+//           availableBalance: merchant.availableBalance,
+//           unsettledBalance: merchant.unsettledBalance,
+//           totalCredits: merchant.totalCredits,
+//           totalDebits: merchant.totalDebits,
+//           netEarnings: merchant.netEarnings
+//         },
+//         transactionStats: {
+//           totalTransactions: merchant.totalTransactions,
+//           successfulTransactions: merchant.successfulTransactions,
+//           failedTransactions: merchant.failedTransactions,
+//           successRate: merchant.totalTransactions > 0 ? 
+//             ((merchant.successfulTransactions / merchant.totalTransactions) * 100).toFixed(2) : 0
+//         },
+//         transactions: allTransactions,
+//         transactionCount: {
+//           payments: merchant.paymentTransactions?.length || 0,
+//           payouts: merchant.payoutTransactions?.length || 0,
+//           total: allTransactions.length
+//         }
+//       }
+//     });
 
-  } catch (error) {
-    console.error("Error fetching merchant dashboard:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching merchant dashboard",
-      error: error.message
-    });
-  }
-};
+//   } catch (error) {
+//     console.error("Error fetching merchant dashboard:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Server error fetching merchant dashboard",
+//       error: error.message
+//     });
+//   }
+// };
 
 // 2. Sync All Merchant Transactions
 export const syncAllMerchantTransactions = async (req, res) => {
