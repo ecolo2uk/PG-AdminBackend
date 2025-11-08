@@ -1056,3 +1056,192 @@ export const getSalesReport = async (req, res) => {
 };
 
 
+export const getMerchantDashboard = async (req, res) => {
+    try {
+        const { merchantId } = req.params; // Get merchantId from URL parameters
+        console.log('🟡 Fetching complete merchant dashboard for:', merchantId);
+
+        if (!mongoose.Types.ObjectId.isValid(merchantId)) {
+            return res.status(400).json({ success: false, message: 'Invalid Merchant ID' });
+        }
+
+        const merchantObjectId = new mongoose.Types.ObjectId(merchantId);
+
+        // 1. Fetch Merchant Info
+        const merchantInfo = await User.findById(merchantObjectId).select('firstname lastname company email contact status mid');
+        if (!merchantInfo) {
+            return res.status(404).json({ success: false, message: 'Merchant not found' });
+        }
+
+        const dashboardData = {
+            merchantInfo: {
+                _id: merchantInfo._id,
+                merchantName: merchantInfo.company || `${merchantInfo.firstname} ${merchantInfo.lastname}`,
+                email: merchantInfo.email,
+                contact: merchantInfo.contact,
+                status: merchantInfo.status,
+                mid: merchantInfo.mid,
+            },
+            balanceSummary: {
+                availableBalance: 0,
+                totalCredits: 0,
+                totalDebits: 0,
+                netEarnings: 0,
+            },
+            transactionStats: {
+                totalTransactions: 0,
+                successfulTransactions: 0,
+                failedTransactions: 0,
+                pendingTransactions: 0,
+                refundTransactions: 0,
+                successRate: 0,
+            },
+            transactionCount: { // For payment/payout types
+                payments: 0,
+                payouts: 0,
+                total: 0,
+            },
+            transactions: [], // Recent transactions
+        };
+
+        // Date range for current day/period for analytics (adjust as needed)
+        const now = new Date();
+        const startOfDay = new Date(now.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(now.setHours(23, 59, 59, 999));
+
+        const matchQuery = {
+            merchantId: merchantObjectId,
+            unifiedCreatedAt: { $gte: startOfDay, $lte: endOfDay } // Unified field for consistency
+        };
+
+        // 2. Fetch Balance Summary and Transaction Stats (using aggregation)
+        const analyticsAndBalance = await Transaction.aggregate([
+            {
+                $addFields: {
+                    unifiedStatus: getTransactionStatusField,
+                    unifiedAmount: getTransactionAmountField,
+                    unifiedCreatedAt: getCreatedAtField,
+                    unifiedType: { $ifNull: ["$type", "$Transaction Type"] } // Assuming 'type' or 'Transaction Type' for payment/payout
+                }
+            },
+            {
+                $match: {
+                    merchantId: merchantObjectId // Match by merchant ID for all transactions
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalCredits: {
+                        $sum: {
+                            $cond: [{ $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")] }, "$unifiedAmount", 0]
+                        }
+                    },
+                    totalDebits: { // Assuming failed/refunds are debits from their perspective, adjust logic if needed
+                        $sum: {
+                            $cond: [{ $in: ["$unifiedStatus", [...getUnifiedStatusMatch("FAILED"), ...getUnifiedStatusMatch("REFUND")]] }, "$unifiedAmount", 0]
+                        }
+                    },
+                    totalTransactions: { $sum: 1 },
+                    successfulTransactions: { $sum: { $cond: [{ $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")] }, 1, 0] } },
+                    failedTransactions: { $sum: { $cond: [{ $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")] }, 1, 0] } },
+                    pendingTransactions: { $sum: { $cond: [{ $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")] }, 1, 0] } },
+                    refundTransactions: { $sum: { $cond: [{ $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")] }, 1, 0] } },
+                    totalPayments: { $sum: { $cond: [{ $eq: ["$unifiedType", "payment"] }, 1, 0] } },
+                    totalPayouts: { $sum: { $cond: [{ $eq: ["$unifiedType", "payout"] }, 1, 0] } },
+                    totalPaymentAmount: { $sum: { $cond: [{ $eq: ["$unifiedType", "payment"] }, "$unifiedAmount", 0] } },
+                    totalPayoutAmount: { $sum: { $cond: [{ $eq: ["$unifiedType", "payout"] }, "$unifiedAmount", 0] } },
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    totalCredits: 1,
+                    totalDebits: 1,
+                    totalTransactions: 1,
+                    successfulTransactions: 1,
+                    failedTransactions: 1,
+                    pendingTransactions: 1,
+                    refundTransactions: 1,
+                    totalPayments: 1,
+                    totalPayouts: 1,
+                    totalPaymentAmount: 1,
+                    totalPayoutAmount: 1,
+                }
+            }
+        ]);
+
+        if (analyticsAndBalance.length > 0) {
+            const data = analyticsAndBalance[0];
+            dashboardData.balanceSummary.totalCredits = data.totalCredits;
+            dashboardData.balanceSummary.totalDebits = data.totalDebits;
+            dashboardData.balanceSummary.netEarnings = data.totalCredits - data.totalDebits; // Simple net earnings
+            // Assuming available balance might be a separate field or calculated from credits/debits
+            // For now, let's keep it based on net earnings for this example
+            dashboardData.balanceSummary.availableBalance = data.totalCredits - data.totalDebits;
+
+
+            dashboardData.transactionStats.totalTransactions = data.totalTransactions;
+            dashboardData.transactionStats.successfulTransactions = data.successfulTransactions;
+            dashboardData.transactionStats.failedTransactions = data.failedTransactions;
+            dashboardData.transactionStats.pendingTransactions = data.pendingTransactions;
+            dashboardData.transactionStats.refundTransactions = data.refundTransactions;
+            dashboardData.transactionStats.successRate = data.totalTransactions > 0 
+                ? ((data.successfulTransactions / data.totalTransactions) * 100).toFixed(2) : 0;
+            
+            dashboardData.transactionCount.payments = data.totalPayments;
+            dashboardData.transactionCount.payouts = data.totalPayouts;
+            dashboardData.transactionCount.total = data.totalTransactions;
+        }
+
+        // 3. Fetch Recent Transactions (e.g., last 10)
+        const recentTransactions = await Transaction.aggregate([
+            {
+                $addFields: {
+                    unifiedTransactionId: getTransactionIdField,
+                    unifiedAmount: getTransactionAmountField,
+                    unifiedStatus: getTransactionStatusField,
+                    unifiedCreatedAt: getCreatedAtField,
+                    unifiedType: { $ifNull: ["$type", "$Transaction Type"] }, // To determine credit/debit type
+                    unifiedMethod: { $ifNull: ["$method", "$Payment Method"] },
+                    unifiedCustomer: { $ifNull: ["$customerName", "$Customer Name"] }
+                }
+            },
+            {
+                $match: {
+                    merchantId: merchantObjectId
+                }
+            },
+            {
+                $sort: { unifiedCreatedAt: -1 }
+            },
+            {
+                $limit: 10 // Fetch last 10 transactions
+            },
+            {
+                $project: {
+                    _id: 1,
+                    transactionId: "$unifiedTransactionId",
+                    amount: "$unifiedAmount",
+                    status: "$unifiedStatus",
+                    date: "$unifiedCreatedAt",
+                    type: "$unifiedType",
+                    method: "$unifiedMethod",
+                    customer: "$unifiedCustomer",
+                    transactionType: { // Determine if it's a credit or debit for display
+                        $cond: [{ $in: ["$unifiedType", ["payment", "credit"]] }, "Credit", "Debit"]
+                    }
+                }
+            }
+        ]);
+
+        dashboardData.transactions = recentTransactions;
+
+        console.log('✅ Merchant dashboard data successfully compiled:', dashboardData);
+        res.status(200).json({ success: true, data: dashboardData });
+
+    } catch (error) {
+        console.error('❌ Error fetching complete merchant dashboard:', error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message, stack: error.stack });
+    }
+};
