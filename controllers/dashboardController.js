@@ -563,34 +563,35 @@ export const getMerchantTransactionSummary = async (req, res) => {
           totalTransactions: {
             $sum: 1
           },
-          successCount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
-              }, 1, 0]
-            }
-          },
-          pendingCount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
-              }, 1, 0]
-            }
-          },
-          failedCount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
-              }, 1, 0]
-            }
-          },
-          refundCount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
-              }, 1, 0]
-            }
-          },
+          // In your sales report aggregation, make sure to include:
+successCount: {
+  $sum: { 
+    $cond: [{
+      $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
+    }, 1, 0] 
+  }
+},
+failedCount: {
+  $sum: { 
+    $cond: [{
+      $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
+    }, 1, 0] 
+  }
+},
+pendingCount: {
+  $sum: { 
+    $cond: [{
+      $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
+    }, 1, 0] 
+  }
+},
+refundCount: {
+  $sum: { 
+    $cond: [{
+      $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
+    }, 1, 0] 
+  }
+},
           totalAmount: {
             $sum: "$unifiedAmount"
           }
