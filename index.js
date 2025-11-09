@@ -33,7 +33,7 @@ import dashboardRoutes from './routes/dashboardRoutes.js';
 import riskManagementRoutes from './routes/riskManagementRoutes.js';
 import payoutSettlementRoutes from './routes/payoutSettlementRoutes.js';
 import payoutTransactionRoutes from './routes/payoutTransactionRoutes.js';
-import autoSyncRoutes from './routes/autoSyncRoutes.js';
+import syncRoutes from './routes/syncRoutes.js';
 
 import { migrateExistingUsersToMerchants } from './utils/migrateExistingUsers.js';
 
@@ -97,7 +97,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/risk-management', riskManagementRoutes);
 app.use('/api/payout-settlements', payoutSettlementRoutes);
 app.use('/api/payout-transactions', payoutTransactionRoutes);
-app.use('/api/sync', autoSyncRoutes);
+app.use('/api/sync', syncRoutes);
 
 // Basic root route
 app.get('/', (req, res) => {

@@ -1,5 +1,7 @@
 // models/Transaction.js
 import mongoose from 'mongoose';
+import Merchant from './Merchant.js';
+import User from './User.js';
 
 const transactionSchema = new mongoose.Schema({
   transactionId: {
@@ -15,10 +17,7 @@ const transactionSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  merchantId: {
-    type: String,
-    required: true
-  },
+  merchantId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   merchantName: {
     type: String,
     required: true
@@ -104,7 +103,6 @@ const transactionSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-
 transactionSchema.post('save', async function(doc) {
   try {
     console.log(`🔄 Auto-syncing transaction to merchant: ${doc.transactionId}`);
@@ -117,12 +115,12 @@ transactionSchema.post('save', async function(doc) {
       return;
     }
 
-    // Add to paymentTransactions array if not already present
+    // 1. Add to paymentTransactions array
     if (!merchant.paymentTransactions.includes(doc._id)) {
       merchant.paymentTransactions.push(doc._id);
     }
 
-    // Update recentTransactions array
+    // 2. Update recentTransactions array
     const newTransaction = {
       transactionId: doc.transactionId,
       type: 'payment',
@@ -136,7 +134,6 @@ transactionSchema.post('save', async function(doc) {
       customer: doc.customerName || 'N/A'
     };
 
-    // Add to beginning of array
     merchant.recentTransactions.unshift(newTransaction);
     
     // Keep only last 20 transactions
@@ -144,7 +141,7 @@ transactionSchema.post('save', async function(doc) {
       merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
     }
 
-    // UPDATE BALANCE if transaction is successful
+    // 3. UPDATE BALANCE if transaction is successful
     if (doc.status === 'SUCCESS' || doc.status === 'Success') {
       merchant.availableBalance += doc.amount;
       merchant.totalCredits += doc.amount;
@@ -156,7 +153,7 @@ transactionSchema.post('save', async function(doc) {
       });
     }
 
-    // Update transaction counts
+    // 4. Update transaction counts
     merchant.totalTransactions = merchant.paymentTransactions.length;
     merchant.successfulTransactions = merchant.paymentTransactions.filter(
       txnId => txnId.status === 'SUCCESS' || txnId.status === 'Success'
@@ -170,7 +167,5 @@ transactionSchema.post('save', async function(doc) {
   }
 });
 
-
 const Transaction = mongoose.model('Transaction', transactionSchema);
-
 export default Transaction;

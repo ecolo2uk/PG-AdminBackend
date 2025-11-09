@@ -13,11 +13,8 @@ const payoutTransactionSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
-  merchantId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-  },
+    merchantId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+
   merchantName: {
     type: String,
     required: true,
@@ -114,12 +111,12 @@ payoutTransactionSchema.post('save', async function(doc) {
       return;
     }
 
-    // Add to payoutTransactions array
+    // 1. Add to payoutTransactions array
     if (!merchant.payoutTransactions.includes(doc._id)) {
       merchant.payoutTransactions.push(doc._id);
     }
 
-    // Update recentTransactions
+    // 2. Update recentTransactions
     const newPayout = {
       transactionId: doc.transactionId || doc.utr,
       type: 'payout',
@@ -139,16 +136,27 @@ payoutTransactionSchema.post('save', async function(doc) {
       merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
     }
 
-    // UPDATE BALANCE for successful debit transactions
-    if (doc.status === 'Success' && doc.transactionType === 'Debit') {
-      merchant.availableBalance -= doc.amount;
-      merchant.totalDebits += doc.amount;
-      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+    // 3. UPDATE BALANCE for successful transactions
+    if (doc.status === 'Success') {
+      if (doc.transactionType === 'Debit') {
+        merchant.availableBalance -= doc.amount;
+        merchant.totalDebits += doc.amount;
+        
+        // Also update user balance
+        await User.findByIdAndUpdate(doc.merchantId, {
+          $inc: { balance: -doc.amount }
+        });
+      } else if (doc.transactionType === 'Credit') {
+        merchant.availableBalance += doc.amount;
+        merchant.totalCredits += doc.amount;
+        
+        // Also update user balance
+        await User.findByIdAndUpdate(doc.merchantId, {
+          $inc: { balance: doc.amount }
+        });
+      }
       
-      // Also update user balance
-      await User.findByIdAndUpdate(doc.merchantId, {
-        $inc: { balance: -doc.amount }
-      });
+      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
     }
 
     await merchant.save();

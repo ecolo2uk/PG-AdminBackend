@@ -1,5 +1,6 @@
 // backend/models/User.js
 import mongoose from "mongoose";
+import Merchant from './Merchant.js'; 
 
 const UserSchema = new mongoose.Schema(
   {
@@ -50,7 +51,6 @@ merchantRef: {
     ref: 'Merchant'
   }
 }, { timestamps: true });
-
 UserSchema.post('save', async function(doc) {
   if (doc.role === 'merchant') {
     try {
@@ -85,7 +85,6 @@ UserSchema.post('save', async function(doc) {
     }
   }
 });
-
 
 const User = mongoose.model("User", UserSchema);
 export default User;
