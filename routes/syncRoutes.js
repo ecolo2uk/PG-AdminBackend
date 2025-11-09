@@ -4,14 +4,14 @@ import {
   syncAllExistingTransactions, 
   syncMerchantTransactions,
   fixTransactionBalances,
-  debugTransactions  // Add this
-} from '../controllers/syncController.js';
+  debugTransactions 
+} from '../controllers/transactionSyncController.js'; // ← Update import path
 
 const router = express.Router();
 
-router.post('/all', syncAllExistingTransactions);
-router.post('/merchant/:merchantId', syncMerchantTransactions);
-router.post('/fix-balances', fixTransactionBalances);  // Add this
-router.get('/debug', debugTransactions);  // Add this
+router.get('/all', syncAllExistingTransactions);
+router.get('/merchant/:merchantId', syncMerchantTransactions);
+router.get('/fix-balances', fixTransactionBalances);
+router.get('/debug', debugTransactions);
 
-export default router
+export default router;
