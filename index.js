@@ -43,15 +43,6 @@ const app = express();
 
 // Middleware
 app.use(bodyParser.json());
-
-
-// Allow specific origin
-app.use(cors({
-  origin: 'http://localhost:3001',
-  credentials: true
-}));
-
-// Or allow all origins (for development)
 app.use(cors());
 
 // MongoDB connection

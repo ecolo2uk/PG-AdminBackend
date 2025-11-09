@@ -14,4 +14,4 @@ router.post('/merchant/:merchantId', syncMerchantTransactions);
 router.post('/fix-balances', fixTransactionBalances);  // Add this
 router.get('/debug', debugTransactions);  // Add this
 
-export default router;
+export default router
