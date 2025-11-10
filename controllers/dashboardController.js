@@ -8,6 +8,10 @@ const getDateRange = (filter, startDate, endDate) => {
   let start, end;
 
   switch (filter) {
+    case 'all_time': // For testing all data
+  start = new Date(0); // Beginning of time
+  end = new Date(); // Now
+  break;
     case 'today':
       start = new Date(now);
       start.setHours(0, 0, 0, 0);
@@ -70,16 +74,26 @@ const getDateRange = (filter, startDate, endDate) => {
   };
 };
 
-// Helper to unify transaction status for aggregation
 const getUnifiedStatusMatch = (status) => {
+  console.log('🔍 Checking status mapping for:', status);
+  
   const statusMappings = {
-    'SUCCESS': ['Success', 'SUCCESS'],
-    'PENDING': ['Pending', 'PENDING'],
-    'FAILED': ['Failed', 'FAILED'],
-    'REFUND': ['Refund', 'REFUND'],
-    'INITIATED': ['Initiated', 'INITIATED'],
+    'SUCCESS': ['SUCCESS', 'Success', 'success', 'SUCCESSFUL', 'successful'],
+    'FAILED': ['FAILED', 'Failed', 'failed', 'FAILURE', 'failure', 'REJECTED', 'rejected'],
+    'PENDING': ['PENDING', 'Pending', 'pending', 'INITIATED', 'Initiated', 'initiated', 'GENERATED', 'Generated', 'generated'],
+    'REFUND': ['REFUND', 'Refund', 'refund', 'REFUNDED', 'refunded']
   };
-  return statusMappings[status.toUpperCase()] || [status]; // Default to original status if no mapping
+  
+  const upperStatus = status?.toUpperCase();
+  const matchedStatuses = statusMappings[upperStatus] || [status];
+  
+  console.log('📊 Status mapping result:', {
+    input: status,
+    upperStatus: upperStatus,
+    matchedStatuses: matchedStatuses
+  });
+  
+  return matchedStatuses;
 };
 
 // Helper to get transaction amount regardless of schema
@@ -164,6 +178,7 @@ export const getAllMerchants = async (req, res) => {
   }
 };
 
+
 export const getDashboardAnalytics = async (req, res) => {
   try {
     const {
@@ -187,34 +202,49 @@ export const getDashboardAnalytics = async (req, res) => {
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    // Use the unified createdAt field for date filtering
-    matchQuery = { ...matchQuery, ...dateRange
-    };
+    matchQuery = { ...matchQuery, ...dateRange };
 
+    console.log('🔍 Final Match Query:', JSON.stringify(matchQuery, null, 2));
 
-    const analytics = await Transaction.aggregate([
-      // First, normalize status and amount fields
+    // DEBUG: Check what data we have with current filters
+    const debugData = await Transaction.aggregate([
       {
         $addFields: {
           unifiedStatus: getTransactionStatusField,
           unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField // Add unified createdAt for matching
-        }
-      },
-      // Now match using the unified fields
-      {
-        $match: {
-          ...matchQuery,
-          // Ensure date range also applies to the unifiedCreatedAt
-          ...(matchQuery.createdAt && {
-            unifiedCreatedAt: matchQuery.createdAt
-          })
+          unifiedCreatedAt: getCreatedAtField
         }
       },
       {
-      
+        $match: matchQuery
+      },
+      {
+        $group: {
+          _id: "$unifiedStatus",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$unifiedAmount" }
+        }
+      }
+    ]);
+
+    console.log('🔍 DEBUG - Filtered transactions by status:', debugData);
+
+    // MAIN ANALYTICS QUERY WITH FIXED STATUS MAPPING
+    const analytics = await Transaction.aggregate([
+      {
+        $addFields: {
+          unifiedStatus: getTransactionStatusField,
+          unifiedAmount: getTransactionAmountField,
+          unifiedCreatedAt: getCreatedAtField
+        }
+      },
+      {
+        $match: matchQuery
+      },
+      {
         $group: {
           _id: null,
+          // Amount calculations with COMPREHENSIVE status matching
           totalSuccessAmount: {
             $sum: {
               $cond: [{
@@ -225,7 +255,7 @@ export const getDashboardAnalytics = async (req, res) => {
           totalFailedAmount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")] 
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
               }, "$unifiedAmount", 0]
             }
           },
@@ -243,7 +273,7 @@ export const getDashboardAnalytics = async (req, res) => {
               }, "$unifiedAmount", 0]
             }
           },
-          // Counts साठी
+          // Count calculations with COMPREHENSIVE status matching
           totalSuccessOrders: {
             $sum: {
               $cond: [{
@@ -274,38 +304,19 @@ export const getDashboardAnalytics = async (req, res) => {
           },
           totalTransactions: { $sum: 1 }
         }
-      
       },
       {
         $project: {
           _id: 0,
-          totalSuccessAmount: {
-            $ifNull: ["$totalSuccessAmount", 0]
-          },
-          totalFailedAmount: {
-            $ifNull: ["$totalFailedAmount", 0]
-          },
-          totalPendingAmount: {
-            $ifNull: ["$totalPendingAmount", 0]
-          },
-          totalRefundAmount: {
-            $ifNull: ["$totalRefundAmount", 0]
-          },
-          totalSuccessOrders: {
-            $ifNull: ["$totalSuccessOrders", 0]
-          },
-          totalFailedOrders: {
-            $ifNull: ["$totalFailedOrders", 0]
-          },
-          totalPendingOrders: {
-            $ifNull: ["$totalPendingOrders", 0]
-          },
-          totalRefundOrders: {
-            $ifNull: ["$totalRefundOrders", 0]
-          },
-          totalTransactions: {
-            $ifNull: ["$totalTransactions", 0]
-          }
+          totalSuccessAmount: { $ifNull: ["$totalSuccessAmount", 0] },
+          totalFailedAmount: { $ifNull: ["$totalFailedAmount", 0] },
+          totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
+          totalRefundAmount: { $ifNull: ["$totalRefundAmount", 0] },
+          totalSuccessOrders: { $ifNull: ["$totalSuccessOrders", 0] },
+          totalFailedOrders: { $ifNull: ["$totalFailedOrders", 0] },
+          totalPendingOrders: { $ifNull: ["$totalPendingOrders", 0] },
+          totalRefundOrders: { $ifNull: ["$totalRefundOrders", 0] },
+          totalTransactions: { $ifNull: ["$totalTransactions", 0] }
         }
       }
     ]);
@@ -322,7 +333,7 @@ export const getDashboardAnalytics = async (req, res) => {
       totalTransactions: 0
     };
 
-    console.log('✅ Analytics result:', result);
+    console.log('✅ FINAL Analytics result:', result);
 
     res.status(200).json(result);
   } catch (error) {
