@@ -1,17 +1,9 @@
-
 import Transaction from '../models/Transaction.js';
-import axios from 'axios';
 import { encrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
 
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-
-const ENCRYPTION_KEY_RAW = process.env.PAYMENT_LINK_ENCRYPTION_KEY;
-if (!ENCRYPTION_KEY_RAW || ENCRYPTION_KEY_RAW.length !== 64) {
-    console.warn("⚠️ WARNING: PAYMENT_LINK_ENCRYPTION_KEY is missing or invalid in .env. Using a randomly generated key for this session. THIS IS UNSAFE FOR PRODUCTION!");
-    process.env.PAYMENT_LINK_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
-}
-
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
 export const generatePaymentLink = async (req, res) => {
   try {
@@ -23,41 +15,32 @@ export const generatePaymentLink = async (req, res) => {
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
       return res.status(400).json({
         success: false,
-        message: 'Merchant ID, Amount, Payment Method, and Payment Option are required'
+        message: 'All fields are required'
       });
     }
 
     const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
+    if (amountNum < 500 || amountNum > 10000) {
       return res.status(400).json({
         success: false,
-        message: 'Please enter a valid amount'
+        message: 'Amount must be between 500 and 10,000 INR'
       });
     }
 
-    if (amountNum < 500) {
-      return res.status(400).json({
-        success: false,
-        message: 'Minimum amount should be at least 500 INR for Enpay'
-      });
-    }
-
-    if (amountNum > 10000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Maximum amount cannot exceed 10,000 INR for Enpay'
-      });
-    }
-
-    // Static merchant data (from your payments.jsx)
+    // Static merchant data
     const staticMerchants = [
-      { _id: "MERCHANT001", firstname: "John", lastname: "Doe", mid: "MID123456", hashId: "MERCDSH51Y7CD4YJLFIZR8NF", vpa: "enpay1.skypal@fino" },
-      { _id: "MERCHANT002", firstname: "Jane", lastname: "Smith", mid: "MID789012", hashId: "MERCDSH52Y8CD5YJLFIZR9NG", vpa: "enpay3.skypal@fino" }
+      { 
+        _id: "MERCHANT001", 
+        firstname: "John", 
+        lastname: "Doe", 
+        mid: "MID123456", 
+        hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
+        vpa: "enpay1.skypal@fino" 
+      }
     ];
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
-      console.error('Merchant not found for ID:', merchantId);
       return res.status(404).json({
         success: false,
         message: 'Merchant not found'
@@ -68,11 +51,9 @@ export const generatePaymentLink = async (req, res) => {
     const timestamp = Date.now();
     const randomSuffix = Math.floor(Math.random() * 1000);
     const merchantOrderId = `ORDER${timestamp}${randomSuffix}`;
-    const merchantTrnId = `TRN${timestamp}${randomSuffix}`; // Our internal system transaction ID
-    const txnRefId = `TXN${timestamp}${randomSuffix}`; // A reference for Enpay or external systems
-    const formattedAmount = amountNum.toFixed(2);
+    const merchantTrnId = `TRN${timestamp}${randomSuffix}`;
 
-    // Create initial transaction record with ALL required fields from your schema
+    // Create transaction
     const transaction = new Transaction({
       transactionId: merchantTrnId,
       merchantOrderId: merchantOrderId,
@@ -83,233 +64,114 @@ export const generatePaymentLink = async (req, res) => {
       amount: amountNum,
       currency: currency,
       status: 'Pending',
-      "Commission Amount": 0,
-      "Settlement Status": 'Pending',
-      "Vendor Ref ID": `VENDOR_REF_${merchantTrnId}`,
-      upiId: merchant.vpa,
       merchantVpa: merchant.vpa,
-      txnRefId: txnRefId,
+      txnRefId: merchantTrnId,
       txnNote: `Payment for Order ${merchantOrderId}`,
       paymentMethod: paymentMethod,
       paymentOption: paymentOption,
-      source: 'enpay',
-      isMock: false,
-      // Add a field to store the original encrypted payload (for the short link)
-      encryptedPaymentPayload: null, // Will be set later
-      shortLinkId: null // Will store a short hash
+      source: 'enpay'
     });
 
-    try {
-      await transaction.save();
-      console.log('✅ Transaction saved as PENDING:', transaction.transactionId);
-    } catch (saveError) {
-      console.error('❌ Error saving transaction:', saveError);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to save transaction to database',
-        error: saveError.message,
-        validationErrors: saveError.errors
-      });
-    }
-    // Enpay API request data
+    await transaction.save();
+    console.log('✅ Transaction saved:', transaction.transactionId);
+
+    // Enpay API call
     const requestData = {
-      "amount": formattedAmount,
+      "amount": amountNum.toFixed(2),
       "merchantHashId": merchant.hashId,
       "merchantOrderId": merchantOrderId,
       "merchantTrnId": merchantTrnId,
       "merchantVpa": merchant.vpa,
-      // Enpay's callback URLs should point back to your backend
-      "returnURL": `${process.env.API_BASE_URL}/payment/return?transactionId=${merchantTrnId}`, // Point to backend
-      "successURL": `${process.env.API_BASE_URL}/payment/success?transactionId=${merchantTrnId}`, // Point to backend
+      "returnURL": `${API_BASE_URL}/api/payment/return?transactionId=${merchantTrnId}`,
+      "successURL": `${API_BASE_URL}/api/payment/success?transactionId=${merchantTrnId}`,
       "txnNote": `Payment for Order ${merchantOrderId}`
     };
 
-    console.log('📤 Sending to Enpay API:', JSON.stringify(requestData, null, 2));
+    console.log('📤 Sending to Enpay API:', requestData);
 
-    const options = {
-      method: 'POST',
-      url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY || 'YOUR_DEFAULT_ENPAY_KEY', // Use a default or ensure env is set
-        'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET || 'YOUR_DEFAULT_ENPAY_SECRET' // Use a default or ensure env is set
-      },
-      data: requestData,
-      timeout: 30000
-    };
-
-    // Mask sensitive keys for logs
-    console.log('🔑 Using Merchant Key:', process.env.ENPAY_MERCHANT_KEY ? '******' : 'YOUR_DEFAULT_ENPAY_KEY');
-
-  let finalPaymentLink = '';
+    let finalPaymentLink = '';
     let isMockPayment = false;
-    let enpayTxnId = merchantTrnId;
 
     try {
-      const response = await axios(options);
+      // Using axios for API call
+      const axios = await import('axios');
+      const response = await axios.default({
+        method: 'POST',
+        url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY || '0851439b-03df-4983-88d6-32399b1e4514',
+          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET || 'bae97f533a594af9bf3dded47f09c34e15e053d1'
+        },
+        data: requestData,
+        timeout: 30000
+      });
+
       console.log('✅ Enpay API Response:', response.data);
 
-      const enpayResponse = response.data;
-
-      if (enpayResponse.code === 200 || enpayResponse.status?.toLowerCase() === 'success') {
-        if (enpayResponse.details && enpayResponse.details.includes('https://enpay.in')) {
-            finalPaymentLink = enpayResponse.details;
-        } else if (enpayResponse.data && enpayResponse.data.paymentLink) {
-            finalPaymentLink = enpayResponse.data.paymentLink;
-        } else if (enpayResponse.paymentLink) {
-            finalPaymentLink = enpayResponse.paymentLink;
-        } else if (enpayResponse.data && enpayResponse.data.token) {
-            finalPaymentLink = `https://enpay.in/enpay/ui/pg?token=${enpayResponse.data.token}`;
-        } else {
-            throw new Error('No valid payment link found in Enpay response');
-        }
-
-        enpayTxnId = enpayResponse.data?.txnId || enpayResponse.txnId || merchantTrnId;
+      if (response.data.code === 200) {
+        finalPaymentLink = response.data.details;
         isMockPayment = false;
-        console.log('🔗 Generated Real Enpay Payment Link:', finalPaymentLink);
-
+        console.log('🔗 Real Enpay Link:', finalPaymentLink);
       } else {
-        throw new Error(enpayResponse.message || 'Enpay API returned non-success status');
+        throw new Error('Enpay API error');
       }
 
     } catch (apiError) {
-      console.error('❌ Enpay API error (falling back to mock):', apiError.response?.data || apiError.message);
+      console.error('❌ Enpay API failed, using mock:', apiError.message);
       isMockPayment = true;
       finalPaymentLink = `${FRONTEND_BASE_URL}/mock-payment?transactionId=${merchantTrnId}&amount=${amountNum}`;
-      console.log('🔄 Using mock payment as fallback:', finalPaymentLink);
     }
 
-    // Update the transaction in DB with the actual link/mock link and status
-    // BEFORE creating the custom short link
+    // Update transaction with payment URL
     await Transaction.findOneAndUpdate(
       { transactionId: merchantTrnId },
       {
-        enpayTxnId: enpayTxnId,
         paymentUrl: finalPaymentLink,
-        qrCode: finalPaymentLink,
         isMock: isMockPayment,
         status: 'INITIATED'
-      },
-      { new: true, runValidators: true }
+      }
     );
 
-    // --- CUSTOM SHORT LINK GENERATION ---
-    // Data to encrypt: We need the actual payment link (Enpay or mock) and our internal transaction ID.
-    const dataToEncrypt = JSON.stringify({
-        enpayLink: finalPaymentLink, // The actual link to redirect to
-        transactionId: merchantTrnId // Your internal transaction ID
-    });
+    // Generate short link
+    const shortLinkId = crypto.createHash('sha256')
+      .update(merchantTrnId)
+      .digest('base64url')
+      .substring(0, 10);
 
-    const encryptedPayload = encrypt(dataToEncrypt);
+    const encryptedPayload = encrypt(JSON.stringify({
+      enpayLink: finalPaymentLink,
+      transactionId: merchantTrnId
+    }));
 
-    // Generate a short, unique ID for this payload.
-    // We can use a hash of the encrypted payload or a simple base64 encoded transaction ID.
-    // For this example, let's use a short hash based on transactionId.
-    const shortLinkId = crypto.createHash('sha256').update(merchantTrnId).digest('base64url').substring(0, 10); // e.g., 10 characters
-
-    // Store the encrypted payload AND the shortLinkId in the transaction document
-    const updatedTransactionWithShortLink = await Transaction.findOneAndUpdate(
-        { transactionId: merchantTrnId },
-        {
-            encryptedPaymentPayload: encryptedPayload,
-            shortLinkId: shortLinkId
-        },
-        { new: true, runValidators: true }
+    await Transaction.findOneAndUpdate(
+      { transactionId: merchantTrnId },
+      {
+        encryptedPaymentPayload: encryptedPayload,
+        shortLinkId: shortLinkId
+      }
     );
 
-    // The customPaymentLink will now use the shortLinkId
-const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
-    console.log('🔗 Generated Custom (Short) Payment Link for frontend:', customPaymentLink);
+    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
 
-    return res.json({
+    res.json({
       success: true,
-      paymentLink: customPaymentLink, // Return the short link
+      paymentLink: customPaymentLink,
       transactionRefId: merchantTrnId,
       merchantOrderId: merchantOrderId,
       isMock: isMockPayment,
-      message: isMockPayment ? 'Mock payment link generated (Enpay API unavailable or error)' : 'Real payment link generated successfully'
+      message: isMockPayment ? 
+        'Mock payment link generated' : 
+        'Real payment link generated successfully'
     });
 
   } catch (error) {
-    console.error('🔥 generatePaymentLink top-level ERROR:', error);
+    console.error('🔥 generatePaymentLink ERROR:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error during payment link generation',
-      error: error.message,
-      stack: error.stack
+      message: 'Internal server error',
+      error: error.message
     });
-  }
-};
-
-
-export const handleSuccess = async (req, res) => {
-  try {
-    const { transactionId } = req.query; // This transactionId is YOUR internal merchantTrnId
-    console.log('✅ Success callback called for transaction:', transactionId);
-
-    if (transactionId) {
-      // Find the transaction by your internal ID and update its status
-      const updatedTransaction = await Transaction.findOneAndUpdate(
-        { transactionId: transactionId },
-        { status: 'SUCCESS' },
-        { new: true } // Return the updated document
-      );
-
-      if (updatedTransaction) {
-        console.log(`Transaction ${transactionId} updated to SUCCESS.`);
-      } else {
-        console.warn(`Transaction ${transactionId} not found for success callback.`);
-      }
-    }
-
-    // Redirect to your frontend success page
-    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${transactionId || ''}`);
-  } catch (error) {
-    console.error('Success callback error:', error);
-    // Redirect to frontend success page with an error status
-    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=error&message=${encodeURIComponent(error.message)}`);
-  }
-};
-
-export const handleReturn = async (req, res) => {
-  try {
-    const { transactionId, status } = req.query; // transactionId is YOUR internal merchantTrnId
-    console.log('↩️ Return callback called for transaction:', transactionId, 'with status:', status);
-
-    if (transactionId) {
-      let newStatus = 'FAILED'; // Default to FAILED
-      switch (status?.toLowerCase()) {
-        case 'success': // Enpay might send success to returnURL in some cases
-          newStatus = 'SUCCESS';
-          break;
-        case 'failed':
-          newStatus = 'FAILED';
-          break;
-        case 'cancelled':
-          newStatus = 'CANCELLED';
-          break;
-        default:
-          newStatus = 'FAILED'; // Fallback for unknown statuses
-      }
-
-      const updatedTransaction = await Transaction.findOneAndUpdate(
-        { transactionId: transactionId },
-        { status: newStatus },
-        { new: true }
-      );
-
-      if (updatedTransaction) {
-        console.log(`Transaction ${transactionId} updated to ${newStatus}.`);
-      } else {
-        console.warn(`Transaction ${transactionId} not found for return callback.`);
-      }
-    }
-
-    // Redirect to your frontend return/failure page
-    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=${status || 'failed'}&transactionRefId=${transactionId || ''}`);
-  } catch (error) {
-    console.error('Return callback error:', error);
-    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error&message=${encodeURIComponent(error.message)}`);
   }
 };
 
@@ -319,11 +181,11 @@ export const getMerchants = async (req, res) => {
       {
         _id: "MERCHANT001",
         firstname: "John",
-        lastname: "Doe",
+        lastname: "Doe", 
         mid: "MID123456"
       },
       {
-        _id: "MERCHANT002",
+        _id: "MERCHANT002", 
         firstname: "Jane",
         lastname: "Smith",
         mid: "MID789012"
@@ -335,18 +197,16 @@ export const getMerchants = async (req, res) => {
       merchants: staticMerchants
     });
   } catch (error) {
-    console.error('Error fetching merchants:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching merchants',
-      error: error.message
+      message: 'Error fetching merchants'
     });
   }
 };
 
 export const getPaymentMethods = async (req, res) => {
   try {
-    const mockPaymentMethods = [
+    const methods = [
       { id: "upi", name: "UPI" },
       { id: "card", name: "Credit/Debit Card" },
       { id: "netbanking", name: "Net Banking" }
@@ -354,14 +214,50 @@ export const getPaymentMethods = async (req, res) => {
 
     res.json({
       success: true,
-      methods: mockPaymentMethods
+      methods: methods
     });
   } catch (error) {
-    console.error('Error fetching payment methods:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payment methods',
-      error: error.message
+      message: 'Error fetching payment methods'
     });
+  }
+};
+
+export const handleSuccess = async (req, res) => {
+  try {
+    const { transactionId } = req.query;
+    console.log('✅ Success callback for:', transactionId);
+
+    if (transactionId) {
+      await Transaction.findOneAndUpdate(
+        { transactionId: transactionId },
+        { status: 'SUCCESS' }
+      );
+    }
+
+    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${transactionId || ''}`);
+  } catch (error) {
+    console.error('Success callback error:', error);
+    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=error`);
+  }
+};
+
+export const handleReturn = async (req, res) => {
+  try {
+    const { transactionId, status } = req.query;
+    console.log('↩️ Return callback for:', transactionId, 'status:', status);
+
+    if (transactionId) {
+      await Transaction.findOneAndUpdate(
+        { transactionId: transactionId },
+        { status: status || 'FAILED' }
+      );
+    }
+
+    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=${status || 'failed'}&transactionRefId=${transactionId || ''}`);
+  } catch (error) {
+    console.error('Return callback error:', error);
+    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
   }
 };
