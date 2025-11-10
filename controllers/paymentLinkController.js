@@ -1,7 +1,7 @@
 import Transaction from '../models/Transaction.js';
 import { encrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
-import mongoose from 'mongoose';
+import mongoose from 'mongoose'; // ✅ ADD THIS IMPORT
 
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
@@ -34,16 +34,15 @@ export const generatePaymentLink = async (req, res) => {
 
     // Static merchant data
     const staticMerchants = [
-  { 
-    _id: new mongoose.Types.ObjectId(), // Generate new ObjectId
-    merchantId: "MERCHANT001", // Keep your string ID
-    firstname: "John", 
-    lastname: "Doe", 
-    mid: "MID123456", 
-    hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
-    vpa: "enpay1.skypal@fino" 
-  }
-];
+      { 
+        _id: "MERCHANT001", 
+        firstname: "John", 
+        lastname: "Doe", 
+        mid: "MID123456", 
+        hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
+        vpa: "enpay1.skypal@fino" 
+      }
+    ];
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
@@ -68,7 +67,7 @@ export const generatePaymentLink = async (req, res) => {
       transactionId: merchantTrnId,
       merchantOrderId: merchantOrderId,
       merchantHashId: merchant.hashId,
-  merchantId: merchant._id, // This is now an ObjectId
+      merchantId: merchant._id, // Use string ID for static merchants
       merchantName: `${merchant.firstname} ${merchant.lastname}`,
       mid: merchant.mid,
       amount: amountNum,
