@@ -41,20 +41,22 @@ const transactionSchema = new mongoose.Schema({
     enum: ['Pending', 'INITIATED', 'SUCCESS', 'FAILED', 'CANCELLED', 'REFUNDED'],
     default: 'Pending'
   },
-  "Commission Amount": { // Using quotes due to space
-    type: Number,
-    default: 0
-  },
-  "Settlement Status": { // Using quotes due to space
+ "Settlement Status": { // Exact name as in your database
     type: String,
     enum: ['Pending', 'Settled', 'Failed'],
     default: 'Pending'
   },
-  "Vendor Ref ID": {
-    type: String
+  "Vendor Ref ID": { // Exact name as in your database
+    type: String,
+    default: ''
+  },
+  "Vendor Txn ID": { // Add this field from your data
+    type: String,
+    default: ''
   },
   upiId: {
-    type: String // For merchant's VPA or payer's VPA if collected
+    type: String,
+     default: '' // For merchant's VPA or payer's VPA if collected
   },
   merchantVpa: {
     type: String, // Merchant's VPA specifically
@@ -65,7 +67,8 @@ const transactionSchema = new mongoose.Schema({
     required: true
   },
   txnNote: {
-    type: String
+    type: String,
+     default: ''
   },
   paymentMethod: {
     type: String,
@@ -77,31 +80,53 @@ const transactionSchema = new mongoose.Schema({
   },
   source: {
     type: String, // e.g., 'enpay', 'razorpay'
-    required: true
+     default: 'enpay'
   },
   isMock: {
     type: Boolean,
     default: false
   },
   paymentUrl: { // The direct Enpay or mock payment URL
-    type: String
+    type: String,
+     default: ''
   },
   qrCode: { // If a QR code image URL is provided
-    type: String
+    type: String,
+     default: ''
   },
   enpayTxnId: { // Actual transaction ID from Enpay
-    type: String
+    type: String,
+     default: ''
   },
   // New fields for short link functionality
   encryptedPaymentPayload: {
     type: String // To store the encrypted data needed by the frontend
   },
+ "Customer Name": {
+    type: String,
+    default: ''
+  },
+  "Customer VPA": {
+    type: String,
+    default: ''
+  },
+  "Customer Contact No": {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  // Short link fields
+  encryptedPaymentPayload: {
+    type: String,
+    default: ''
+  },
   shortLinkId: {
     type: String,
-    unique: true, // Ensure short link IDs are unique
-    sparse: true // Allows null values, useful if not all transactions get short links
+    unique: true,
+    sparse: true
   }
-}, { timestamps: true });
+}, { 
+  timestamps: true 
+});
 
 transactionSchema.post('save', async function(doc) {
   try {
