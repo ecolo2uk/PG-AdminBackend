@@ -212,6 +212,7 @@ export const getDashboardAnalytics = async (req, res) => {
         }
       },
       {
+      
         $group: {
           _id: null,
           totalSuccessAmount: {
@@ -224,7 +225,7 @@ export const getDashboardAnalytics = async (req, res) => {
           totalFailedAmount: {
             $sum: {
               $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")] 
               }, "$unifiedAmount", 0]
             }
           },
@@ -242,6 +243,7 @@ export const getDashboardAnalytics = async (req, res) => {
               }, "$unifiedAmount", 0]
             }
           },
+          // Counts साठी
           totalSuccessOrders: {
             $sum: {
               $cond: [{
@@ -270,10 +272,9 @@ export const getDashboardAnalytics = async (req, res) => {
               }, 1, 0]
             }
           },
-          totalTransactions: {
-            $sum: 1
-          }
+          totalTransactions: { $sum: 1 }
         }
+      
       },
       {
         $project: {
@@ -1057,3 +1058,31 @@ export const getSalesReport = async (req, res) => {
 };
 
 
+
+
+// Temporary route add करा data check साठी
+export const checkTransactionData = async (req, res) => {
+  try {
+    const transactions = await Transaction.aggregate([
+      {
+        $addFields: {
+          unifiedStatus: getTransactionStatusField,
+          unifiedAmount: getTransactionAmountField
+        }
+      },
+      {
+        $group: {
+          _id: "$unifiedStatus",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$unifiedAmount" }
+        }
+      }
+    ]);
+    
+    console.log('📊 TRANSACTION STATUS SUMMARY:', transactions);
+    res.json(transactions);
+  } catch (error) {
+    console.error('❌ Error checking transaction data:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

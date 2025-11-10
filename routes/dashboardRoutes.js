@@ -5,7 +5,8 @@ import {
   getAllMerchants,
   getTransactionsByMerchantStatus,
   getSalesReport,
-  getAllTransactions 
+  getAllTransactions ,
+  checkTransactionData
   // Assuming you want this too, it's defined in the controller
 } from '../controllers/dashboardController.js';
 
@@ -20,5 +21,6 @@ router.get('/transactions-by-merchant', getTransactionsByMerchantStatus);
 // router.get('/transactions-by-merchant', getTransactionsByMerchant); // Removed - duplicate, use getTransactionsByMerchantStatus
 router.get('/sales-report', getSalesReport);
 router.get('/all-transactions', getAllTransactions); // Added route for getAllTransactions
+router.get('/checkTransaction', checkTransactionData); // Added route for checkTransactionData
 
 export default router;
