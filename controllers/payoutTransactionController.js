@@ -6,216 +6,129 @@ import mongoose from 'mongoose';
 // Utility for generating UTR
 const generateUtr = () => `UTR${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-// --- Payout to Merchant ---
-// export const createPayoutToMerchant = async (req, res) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
+// Add this utility function at the top of your controller
+const executeWithRetry = async (operation, maxRetries = 3, baseDelay = 1000) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error.message.includes('Write conflict') && attempt < maxRetries) {
+        const delay = baseDelay * attempt;
+        console.log(`🔄 Write conflict detected. Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+};
 
-//   try {
-//     const {
-//       merchantId,
-//       bankName,
-//       accountNumber,
-//       ifscCode,
-//       accountHolderName,
-//       accountType,
-//       paymentMode,
-//       amount,
-//       customerEmail,
-//       customerPhoneNumber,
-//       remark,
-//       responseUrl,
-//     } = req.body;
-
-//     console.log('📦 Creating payout to merchant with data:', req.body);
-
-//     // Validate required fields - FIXED THIS PART
-//     if (!merchantId || !amount || !bankName || !accountNumber || !ifscCode || !accountHolderName) {
-//       await session.abortTransaction();
-//       return res.status(400).json({ 
-//         success: false,
-//         message: "Missing required fields: merchantId, amount, bankName, accountNumber, ifscCode, accountHolderName" 
-//       });
-//     }
-
-//     // Rest of the code remains same...
-
-//     // Validate initiating merchant
-//     const initiatingMerchant = await User.findById(merchantId).session(session);
-//     if (!initiatingMerchant || initiatingMerchant.role !== 'merchant') {
-//       await session.abortTransaction();
-//       return res.status(404).json({ 
-//         success: false,
-//         message: "Initiating merchant not found." 
-//       });
-//     }
-    
-//     // Check balance
-//     const payoutAmount = parseFloat(amount);
-//     if (initiatingMerchant.balance < payoutAmount) {
-//       await session.abortTransaction();
-//       return res.status(400).json({ 
-//         success: false,
-//         message: `Insufficient balance. Available: ₹${initiatingMerchant.balance}, Required: ₹${payoutAmount}` 
-//       });
-//     }
-
-//     console.log(`💰 Merchant balance: ${initiatingMerchant.balance}, Payout amount: ${payoutAmount}`);
-
-//     // Deduct amount from initiating merchant's balance
-//     initiatingMerchant.balance -= payoutAmount;
-//     await initiatingMerchant.save({ session });
-
-//     // Create Payout Transaction
-//   // Create Payout Transaction - FIXED VERSION
-// const newPayout = new PayoutTransaction({
-//   merchantId,
-//   merchantName: initiatingMerchant.company || `${initiatingMerchant.firstname} ${initiatingMerchant.lastname}`,
-//   recipientBankName: bankName,
-//   recipientAccountNumber: accountNumber,
-//   recipientIfscCode: ifscCode,
-//   recipientAccountHolderName: accountHolderName,
-//   recipientAccountType: accountType || 'Saving',
-//   amount: payoutAmount,
-//   currency: 'INR',
-//   paymentMode: paymentMode || 'IMPS',
-//   transactionType: 'Debit',
-//   status: 'Success',
-//   customerEmail,
-//   customerPhoneNumber,
-//   remark,
-//   responseUrl,
-//   utr: generateUtr(),
-//   // 🔥 ADD THIS: Generate unique transactionId
-//   transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
-// });
-    
-//     const savedPayout = await newPayout.save({ session });
-//     await session.commitTransaction();
-    
-//     console.log('✅ Payout created successfully:', savedPayout._id);
-    
-//     res.status(201).json({
-//       success: true,
-//       message: "Payout initiated successfully",
-//       payoutTransaction: savedPayout,
-//       newBalance: initiatingMerchant.balance
-//     });
-
-//   } catch (error) {
-//     await session.abortTransaction();
-//     console.error("❌ Error creating payout to merchant:", error);
-//     res.status(500).json({ 
-//       success: false,
-//       message: "Server error during payout creation.",
-//       error: error.message 
-//     });
-//   } finally {
-//     session.endSession();
-//   }
-// };
-
-// --- Create Payout Transaction (for your Create Payout form) ---
+// Update your createPayoutTransaction function
 export const createPayoutTransaction = async (req, res) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
-
+  
   try {
-    const {
-      merchantId,
-      transactionType,
-      amount,
-      remark,
-      feeApplied = false,
-      connector
-    } = req.body;
+    await executeWithRetry(async () => {
+      session.startTransaction();
+      
+      const {
+        merchantId,
+        transactionType,
+        amount,
+        remark,
+        feeApplied = false,
+        connector
+      } = req.body;
 
-    console.log('📦 Creating payout transaction:', req.body);
+      console.log('📦 Creating payout transaction:', req.body);
 
-    // 1. Validate required fields
-    if (!merchantId || !transactionType || !amount) {
-      await session.abortTransaction();
-      return res.status(400).json({ 
-        success: false,
-        message: "Missing required fields: merchantId, transactionType, amount" 
+      // 1. Validate required fields
+      if (!merchantId || !transactionType || !amount) {
+        await session.abortTransaction();
+        return res.status(400).json({ 
+          success: false,
+          message: "Missing required fields: merchantId, transactionType, amount" 
+        });
+      }
+
+      // 2. Validate merchant
+      const merchant = await User.findById(merchantId).session(session);
+      if (!merchant || merchant.role !== 'merchant') {
+        await session.abortTransaction();
+        return res.status(404).json({ 
+          success: false,
+          message: "Merchant not found." 
+        });
+      }
+      
+      // 3. Check balance for debit transactions
+      const transactionAmount = parseFloat(amount);
+      if (transactionType === 'Debit' && merchant.balance < transactionAmount) {
+        await session.abortTransaction();
+        return res.status(400).json({ 
+          success: false,
+          message: `Insufficient balance. Available: ₹${merchant.balance}, Required: ₹${transactionAmount}` 
+        });
+      }
+
+      console.log(`💰 Merchant balance: ${merchant.balance}, Transaction amount: ${transactionAmount}`);
+
+      // 4. Update merchant balance
+      if (transactionType === 'Debit') {
+        merchant.balance -= transactionAmount;
+      } else if (transactionType === 'Credit') {
+        merchant.balance += transactionAmount;
+      }
+      
+      await merchant.save({ session });
+
+      const merchantNameValue = merchant.company || (merchant.firstname && merchant.lastname ? `${merchant.firstname} ${merchant.lastname}` : 'Unknown Merchant');
+      
+      // 5. Create Payout Transaction
+      const newPayout = new PayoutTransaction({
+        merchantId,
+        merchantName: merchantNameValue,
+        accountNumber: "N/A", 
+        connector: connector || "Manual", 
+        amount: transactionAmount,
+        paymentMode: 'Wallet Transfer',
+        transactionType,
+        status: 'Success',
+        webhook: 'N/A',
+        remark,
+        feeApplied: feeApplied,
+        feeAmount: feeApplied ? transactionAmount * 0.02 : 0,
+        utr: generateUtr(),
+        transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
       });
-    }
 
-    // 2. Validate merchant
-    const merchant = await User.findById(merchantId).session(session);
-    if (!merchant || merchant.role !== 'merchant') {
-      await session.abortTransaction();
-      return res.status(404).json({ 
-        success: false,
-        message: "Merchant not found." 
+      const savedPayout = await newPayout.save({ session });
+      await session.commitTransaction();
+      
+      console.log('✅ Payout transaction created:', savedPayout._id);
+      
+      res.status(201).json({
+        success: true,
+        message: "Payout transaction created successfully",
+        payoutTransaction: savedPayout,
+        newBalance: merchant.balance
       });
-    }
-    
-    // 3. Check balance for debit transactions
-    const transactionAmount = parseFloat(amount);
-    if (transactionType === 'Debit' && merchant.balance < transactionAmount) {
-      await session.abortTransaction();
-      return res.status(400).json({ 
-        success: false,
-        message: `Insufficient balance. Available: ₹${merchant.balance}, Required: ₹${transactionAmount}` 
-      });
-    }
-
-    console.log(`💰 Merchant balance: ${merchant.balance}, Transaction amount: ${transactionAmount}`);
-
-    // 4. Update merchant balance
-    if (transactionType === 'Debit') {
-      merchant.balance -= transactionAmount;
-    } else if (transactionType === 'Credit') {
-      merchant.balance += transactionAmount;
-    }
-    
-    // This `await merchant.save({ session });` is where the merchant balance update is saved.
-    await merchant.save({ session }); 
-const merchantNameValue = merchant.company || (merchant.firstname && merchant.lastname ? `${merchant.firstname} ${merchant.lastname}` : 'Unknown Merchant');
-    // 5. Create Payout Transaction with all required fields
-  const newPayout = new PayoutTransaction({
-      merchantId,
-      merchantName: merchantNameValue,
-      accountNumber: "N/A", 
-      connector: connector || "Manual", 
-      amount: transactionAmount,
-      paymentMode: 'Wallet Transfer', // Hardcoded
-      transactionType,
-      status: 'Success',
-      webhook: 'N/A',
-      remark,
-      feeApplied: feeApplied,
-      feeAmount: feeApplied ? transactionAmount * 0.02 : 0,
-      utr: generateUtr(),
-      transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
     });
-
-    console.log("DEBUG: Merchant object before payout creation:", merchant);
-console.log("DEBUG: merchantName will be:", merchant.company || `${merchant.firstname} ${merchant.lastname}`);
-
-    
-    // This `await newPayout.save({ session });` is where the new payout transaction is saved.
-    const savedPayout = await newPayout.save({ session });
-    await session.commitTransaction(); // If everything above succeeds, commit changes.
-    
-    console.log('✅ Payout transaction created:', savedPayout._id);
-    
-    res.status(201).json({
-      success: true,
-      message: "Payout transaction created successfully",
-      payoutTransaction: savedPayout,
-      newBalance: merchant.balance
-    });
-
   } catch (error) {
-    await session.abortTransaction(); // If any error, abort transaction.
+    await session.abortTransaction();
     console.error("❌ Error creating payout transaction:", error);
     
-    if (error.code === 11000) { // Duplicate key error
+    if (error.code === 11000) {
       return res.status(400).json({ 
         success: false,
         message: "Duplicate transaction detected. Please try again."
+      });
+    }
+    
+    if (error.message.includes('Write conflict')) {
+      return res.status(409).json({ 
+        success: false,
+        message: "Database busy. Please try again in a moment."
       });
     }
     
@@ -225,7 +138,7 @@ console.log("DEBUG: merchantName will be:", merchant.company || `${merchant.firs
       error: error.message 
     });
   } finally {
-    session.endSession(); // Always end the session.
+    session.endSession();
   }
 };
 
