@@ -174,22 +174,26 @@ export const createPayoutTransaction = async (req, res) => {
     await merchant.save({ session }); 
 
     // 5. Create Payout Transaction with all required fields
-    const newPayout = new PayoutTransaction({
+  const newPayout = new PayoutTransaction({
       merchantId,
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      accountNumber: "N/A", // For your table display
-      connector: connector || "Manual", // For your table display
+      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`, // This looks correct
+      accountNumber: "N/A", 
+      connector: connector || "Manual", 
       amount: transactionAmount,
-      paymentMode: 'Wallet Transfer',
+      paymentMode: 'Wallet Transfer', // This also looks correct and is a valid enum value
       transactionType,
       status: 'Success',
-      webhook: 'N/A', // For your table display
+      webhook: 'N/A',
       remark,
       feeApplied: feeApplied,
       feeAmount: feeApplied ? transactionAmount * 0.02 : 0,
       utr: generateUtr(),
       transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
     });
+
+    console.log("DEBUG: Merchant object before payout creation:", merchant);
+console.log("DEBUG: merchantName will be:", merchant.company || `${merchant.firstname} ${merchant.lastname}`);
+
     
     // This `await newPayout.save({ session });` is where the new payout transaction is saved.
     const savedPayout = await newPayout.save({ session });
