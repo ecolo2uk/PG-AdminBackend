@@ -26,14 +26,14 @@ const getDateRange = (filter, startDate, endDate) => {
       end.setDate(now.getDate() - 1);
       end.setHours(23, 59, 59, 999);
       break;
-    case 'this_week':
-      start = new Date(now);
-      start.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now);
-      end.setDate(now.getDate() + (6 - now.getDay())); // End of current week (Saturday)
-      end.setHours(23, 59, 59, 999);
-      break;
+   case 'this_week':
+  // Last 7 days (including today)
+  start = new Date(now);
+  start.setDate(now.getDate() - 6); // Last 6 days + today = 7 days
+  start.setHours(0, 0, 0, 0);
+  end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  break;
     case 'this_month':
       start = new Date(now.getFullYear(), now.getMonth(), 1);
       start.setHours(0, 0, 0, 0);
@@ -177,173 +177,9 @@ export const getAllMerchants = async (req, res) => {
     });
   }
 };
+// controllers/dashboardController.js
 
 
-export const getDashboardAnalytics = async (req, res) => {
-  try {
-    const {
-      merchantId,
-      timeFilter = 'today',
-      startDate,
-      endDate
-    } = req.query;
-
-    console.log('🟡 Fetching analytics with:', {
-      merchantId,
-      timeFilter,
-      startDate,
-      endDate
-    });
-
-    let matchQuery = {};
-
-    if (merchantId && merchantId !== 'all') {
-      matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
-    }
-
-    const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery, ...dateRange };
-
-    console.log('🔍 Final Match Query:', JSON.stringify(matchQuery, null, 2));
-
-    // DEBUG: Check what data we have with current filters
-    const debugData = await Transaction.aggregate([
-      {
-        $addFields: {
-          unifiedStatus: getTransactionStatusField,
-          unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField
-        }
-      },
-      {
-        $match: matchQuery
-      },
-      {
-        $group: {
-          _id: "$unifiedStatus",
-          count: { $sum: 1 },
-          totalAmount: { $sum: "$unifiedAmount" }
-        }
-      }
-    ]);
-
-    console.log('🔍 DEBUG - Filtered transactions by status:', debugData);
-
-    // MAIN ANALYTICS QUERY WITH FIXED STATUS MAPPING
-    const analytics = await Transaction.aggregate([
-      {
-        $addFields: {
-          unifiedStatus: getTransactionStatusField,
-          unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField
-        }
-      },
-      {
-        $match: matchQuery
-      },
-      {
-        $group: {
-          _id: null,
-          // Amount calculations with COMPREHENSIVE status matching
-          totalSuccessAmount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
-              }, "$unifiedAmount", 0]
-            }
-          },
-          totalFailedAmount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
-              }, "$unifiedAmount", 0]
-            }
-          },
-          totalPendingAmount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
-              }, "$unifiedAmount", 0]
-            }
-          },
-          totalRefundAmount: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
-              }, "$unifiedAmount", 0]
-            }
-          },
-          // Count calculations with COMPREHENSIVE status matching
-          totalSuccessOrders: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
-              }, 1, 0]
-            }
-          },
-          totalFailedOrders: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
-              }, 1, 0]
-            }
-          },
-          totalPendingOrders: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
-              }, 1, 0]
-            }
-          },
-          totalRefundOrders: {
-            $sum: {
-              $cond: [{
-                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
-              }, 1, 0]
-            }
-          },
-          totalTransactions: { $sum: 1 }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          totalSuccessAmount: { $ifNull: ["$totalSuccessAmount", 0] },
-          totalFailedAmount: { $ifNull: ["$totalFailedAmount", 0] },
-          totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
-          totalRefundAmount: { $ifNull: ["$totalRefundAmount", 0] },
-          totalSuccessOrders: { $ifNull: ["$totalSuccessOrders", 0] },
-          totalFailedOrders: { $ifNull: ["$totalFailedOrders", 0] },
-          totalPendingOrders: { $ifNull: ["$totalPendingOrders", 0] },
-          totalRefundOrders: { $ifNull: ["$totalRefundOrders", 0] },
-          totalTransactions: { $ifNull: ["$totalTransactions", 0] }
-        }
-      }
-    ]);
-
-    const result = analytics.length > 0 ? analytics[0] : {
-      totalSuccessAmount: 0,
-      totalFailedAmount: 0,
-      totalPendingAmount: 0,
-      totalRefundAmount: 0,
-      totalSuccessOrders: 0,
-      totalFailedOrders: 0,
-      totalPendingOrders: 0,
-      totalRefundOrders: 0,
-      totalTransactions: 0
-    };
-
-    console.log('✅ FINAL Analytics result:', result);
-
-    res.status(200).json(result);
-  } catch (error) {
-    console.error('❌ Error fetching dashboard analytics:', error);
-    res.status(500).json({
-      message: 'Server Error',
-      error: error.message
-    });
-  }
-};
 
 export const getTransactionsByMerchantStatus = async (req, res) => {
   try {
@@ -914,9 +750,11 @@ const getGroupingForSalesReport = (timeFilter) => {
     }
 };
 
+// controllers/dashboardController.js मध्ये getSalesReport function FIX करा
+// controllers/dashboardController.js मध्ये getSalesReport function FIX करा
 export const getSalesReport = async (req, res) => {
     try {
-        const { merchantId, timeFilter = 'today', startDate, endDate } = req.query;
+        const { merchantId, timeFilter = 'this_week', startDate, endDate } = req.query; // Default to this_week
         console.log('🟡 Fetching sales report with:', { merchantId, timeFilter, startDate, endDate });
 
         let matchQuery = {};
@@ -930,13 +768,7 @@ export const getSalesReport = async (req, res) => {
 
         console.log('🔍 Sales Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
-        // ✅ FIXED: Simplified grouping for daily data
-        const groupById = {
-            year: { $year: "$createdAt" },
-            month: { $month: "$createdAt" },
-            day: { $dayOfMonth: "$createdAt" }
-        };
-
+        // For this_week, get last 7 days including today
         const salesReport = await Transaction.aggregate([
             {
                 $addFields: {
@@ -950,61 +782,64 @@ export const getSalesReport = async (req, res) => {
             },
             {
                 $group: {
-                    _id: groupById,
+                    _id: {
+                        year: { $year: "$unifiedCreatedAt" },
+                        month: { $month: "$unifiedCreatedAt" },
+                        day: { $dayOfMonth: "$unifiedCreatedAt" }
+                    },
                     totalIncome: {
                         $sum: {
                             $cond: [{
-                                $in: ["$unifiedStatus", ["SUCCESS", "Success"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
                             }, "$unifiedAmount", 0]
                         }
                     },
                     totalCostOfSales: {
                         $sum: {
                             $cond: [{
-                                $in: ["$unifiedStatus", ["FAILED", "Failed"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
                             }, "$unifiedAmount", 0]
                         }
                     },
                     totalRefundAmount: {
                         $sum: {
                             $cond: [{
-                                $in: ["$unifiedStatus", ["REFUND", "Refund"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
                             }, "$unifiedAmount", 0]
                         }
                     },
                     totalPendingAmount: {
                         $sum: {
                             $cond: [{
-                                $in: ["$unifiedStatus", ["PENDING", "Pending"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
                             }, "$unifiedAmount", 0]
                         }
                     },
-                    totalAmount: { $sum: "$unifiedAmount" },
                     successCount: {
                         $sum: { 
                             $cond: [{
-                                $in: ["$unifiedStatus", ["SUCCESS", "Success"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
                             }, 1, 0] 
                         }
                     },
                     failedCount: {
                         $sum: { 
                             $cond: [{
-                                $in: ["$unifiedStatus", ["FAILED", "Failed"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
                             }, 1, 0] 
                         }
                     },
                     pendingCount: {
                         $sum: { 
                             $cond: [{
-                                $in: ["$unifiedStatus", ["PENDING", "Pending"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
                             }, 1, 0] 
                         }
                     },
                     refundCount: {
                         $sum: { 
                             $cond: [{
-                                $in: ["$unifiedStatus", ["REFUND", "Refund"]]
+                                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
                             }, 1, 0] 
                         }
                     }
@@ -1024,7 +859,6 @@ export const getSalesReport = async (req, res) => {
                     totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] },
                     totalRefundAmount: { $ifNull: ["$totalRefundAmount", 0] },
                     totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
-                    totalAmount: { $ifNull: ["$totalAmount", 0] },
                     successCount: { $ifNull: ["$successCount", 0] },
                     failedCount: { $ifNull: ["$failedCount", 0] },
                     pendingCount: { $ifNull: ["$pendingCount", 0] },
@@ -1036,64 +870,210 @@ export const getSalesReport = async (req, res) => {
 
         console.log(`✅ Sales report fetched: ${salesReport.length} entries`);
         
-        // ✅ FIXED: If no data, create sample data for last 7 days
+        // If no data, fill with empty data for last 7 days
         let finalReport = salesReport;
-        if (salesReport.length === 0) {
-            console.log('📊 No sales report data found, creating sample data');
-            finalReport = createSampleSalesData();
-        }
-        
-        if (finalReport.length > 0) {
-            const totalIncome = finalReport.reduce((sum, item) => sum + item.totalIncome, 0);
-            const totalPending = finalReport.reduce((sum, item) => sum + item.totalPendingAmount, 0);
-            const totalCost = finalReport.reduce((sum, item) => sum + item.totalCostOfSales, 0);
-            const totalRefund = finalReport.reduce((sum, item) => sum + item.totalRefundAmount, 0);
-            
-            console.log('📊 Sales report summary:', {
-                totalIncome,
-                totalPending,
-                totalCost,
-                totalRefund,
-                totalAmount: finalReport.reduce((sum, item) => sum + item.totalAmount, 0)
-            });
+        if (salesReport.length === 0 || salesReport.length < 7) {
+            console.log('📊 Filling missing dates in sales report');
+            finalReport = fillMissingDates(salesReport, timeFilter);
         }
         
         res.status(200).json(finalReport);
 
     } catch (error) {
         console.error('❌ Error fetching sales report:', error);
-        // ✅ FIXED: Return sample data on error
-        const sampleData = createSampleSalesData();
-        res.status(200).json(sampleData);
+        res.status(500).json({
+            message: 'Server Error',
+            error: error.message
+        });
     }
 };
 
-
-
-
-// Temporary route add करा data check साठी
-export const checkTransactionData = async (req, res) => {
-  try {
-    const transactions = await Transaction.aggregate([
-      {
-        $addFields: {
-          unifiedStatus: getTransactionStatusField,
-          unifiedAmount: getTransactionAmountField
-        }
-      },
-      {
-        $group: {
-          _id: "$unifiedStatus",
-          count: { $sum: 1 },
-          totalAmount: { $sum: "$unifiedAmount" }
-        }
-      }
-    ]);
+// Helper function to fill missing dates
+const fillMissingDates = (existingData, timeFilter) => {
+    const now = new Date();
+    const result = [];
+    let daysToShow = 7; // Default for this_week
     
-    console.log('📊 TRANSACTION STATUS SUMMARY:', transactions);
-    res.json(transactions);
+    if (timeFilter === 'this_month') daysToShow = 30;
+    else if (timeFilter === 'last_month') daysToShow = 30;
+    else if (timeFilter === 'this_week') daysToShow = 7;
+    
+    for (let i = daysToShow - 1; i >= 0; i--) {
+        const date = new Date(now);
+        date.setDate(now.getDate() - i);
+        date.setHours(0, 0, 0, 0);
+        
+        const existing = existingData.find(item => {
+            const itemDate = new Date(item.date);
+            return itemDate.toDateString() === date.toDateString();
+        });
+        
+        if (existing) {
+            result.push(existing);
+        } else {
+            result.push({
+                date: date.toISOString(),
+                totalIncome: 0,
+                totalCostOfSales: 0,
+                totalRefundAmount: 0,
+                totalPendingAmount: 0,
+                successCount: 0,
+                failedCount: 0,
+                pendingCount: 0,
+                refundCount: 0
+            });
+        }
+    }
+    
+    return result;
+};
+
+// controllers/dashboardController.js
+
+// ✅ CORRECTED: Add missing export for getDashboardAnalytics
+export const getDashboardAnalytics = async (req, res) => {
+  try {
+    const { timeFilter, merchantId, startDate, endDate } = req.query;
+    
+    console.log('🟡 Fetching dashboard analytics with:', {
+      timeFilter,
+      merchantId,
+      startDate,
+      endDate
+    });
+
+    // ✅ FIXED: Unified status mapping
+    const statusMapping = {
+      'SUCCESS': ['SUCCESS', 'Success', 'success'],
+      'FAILED': ['FAILED', 'Failed', 'failed', 'FALLED'],
+      'PENDING': ['PENDING', 'Pending', 'pending', 'GENERATED', 'INITIATED'],
+      'REFUND': ['REFUND', 'Refund', 'refund']
+    };
+
+    // Build date filter
+    const dateFilter = getDateRange(timeFilter, startDate, endDate);
+    
+    // Build merchant filter
+    const merchantFilter = merchantId && merchantId !== 'all' 
+      ? { merchantId: merchantId } 
+      : {};
+
+    // ✅ FIXED: Get all transactions first
+    const transactions = await Transaction.find({
+      ...dateFilter,
+      ...merchantFilter
+    });
+
+    console.log(`📊 Found ${transactions.length} transactions for analytics`);
+
+    // ✅ FIXED: Manual aggregation with unified status
+    let analytics = {
+      totalSuccessAmount: 0,
+      totalFailedAmount: 0,
+      totalPendingAmount: 0,
+      totalRefundAmount: 0,
+      totalSuccessOrders: 0,
+      totalFailedOrders: 0,
+      totalPendingOrders: 0,
+      totalRefundOrders: 0,
+      totalTransactions: transactions.length
+    };
+
+    transactions.forEach(transaction => {
+      const amount = Number(transaction.amount) || 0;
+      const status = String(transaction.status).toUpperCase();
+
+      console.log(`🔍 Transaction Status: ${status}, Amount: ${amount}`);
+
+      // Map to unified status
+      if (statusMapping.SUCCESS.includes(status)) {
+        analytics.totalSuccessAmount += amount;
+        analytics.totalSuccessOrders += 1;
+      } else if (statusMapping.FAILED.includes(status)) {
+        analytics.totalFailedAmount += amount;
+        analytics.totalFailedOrders += 1;
+      } else if (statusMapping.PENDING.includes(status)) {
+        analytics.totalPendingAmount += amount;
+        analytics.totalPendingOrders += 1;
+      } else if (statusMapping.REFUND.includes(status)) {
+        analytics.totalRefundAmount += amount;
+        analytics.totalRefundOrders += 1;
+      }
+    });
+
+    console.log('✅ Unified Analytics:', analytics);
+    res.json(analytics);
+
   } catch (error) {
-    console.error('❌ Error checking transaction data:', error);
+    console.error('❌ Analytics error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ✅ CORRECTED: Export checkTransaction function
+export const checkTransaction = async (req, res) => {
+  try {
+    const { timeFilter, merchantId } = req.query;
+    
+    console.log('🟡 Checking transactions with:', { timeFilter, merchantId });
+    
+    const dateFilter = getDateRange(timeFilter);
+    const merchantFilter = merchantId && merchantId !== 'all' 
+      ? { merchantId: merchantId } 
+      : {};
+
+    const transactions = await Transaction.find({
+      ...dateFilter,
+      ...merchantFilter
+    });
+
+    console.log(`📊 Found ${transactions.length} transactions for status check`);
+
+    // ✅ FIXED: Unified status aggregation
+    const statusMapping = {
+      'SUCCESS': ['SUCCESS', 'Success', 'success'],
+      'FAILED': ['FAILED', 'Failed', 'failed', 'FALLED'],
+      'PENDING': ['PENDING', 'Pending', 'pending', 'GENERATED', 'INITIATED'],
+      'REFUND': ['REFUND', 'Refund', 'refund']
+    };
+
+    const result = {};
+
+    transactions.forEach(transaction => {
+      const amount = Number(transaction.amount) || 0;
+      const status = String(transaction.status).toUpperCase();
+
+      let unifiedStatus = 'OTHER';
+      
+      if (statusMapping.SUCCESS.includes(status)) unifiedStatus = 'SUCCESS';
+      else if (statusMapping.FAILED.includes(status)) unifiedStatus = 'FAILED';
+      else if (statusMapping.PENDING.includes(status)) unifiedStatus = 'PENDING';
+      else if (statusMapping.REFUND.includes(status)) unifiedStatus = 'REFUND';
+
+      if (!result[unifiedStatus]) {
+        result[unifiedStatus] = {
+          _id: unifiedStatus,
+          count: 0,
+          totalAmount: 0
+        };
+      }
+
+      result[unifiedStatus].count += 1;
+      result[unifiedStatus].totalAmount += amount;
+    });
+
+    // Convert to array and ensure all 4 statuses exist
+    const finalResult = ['SUCCESS', 'FAILED', 'PENDING', 'REFUND'].map(status => ({
+      _id: status,
+      count: result[status]?.count || 0,
+      totalAmount: result[status]?.totalAmount || 0
+    }));
+
+    console.log('✅ Unified Transaction Status:', finalResult);
+    res.json(finalResult);
+
+  } catch (error) {
+    console.error('❌ Check transaction error:', error);
     res.status(500).json({ error: error.message });
   }
 };
