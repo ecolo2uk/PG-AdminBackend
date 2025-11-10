@@ -132,7 +132,7 @@ export const createPayoutTransaction = async (req, res) => {
 
     console.log('📦 Creating payout transaction:', req.body);
 
-    // Validate required fields
+    // 1. Validate required fields
     if (!merchantId || !transactionType || !amount) {
       await session.abortTransaction();
       return res.status(400).json({ 
@@ -141,7 +141,7 @@ export const createPayoutTransaction = async (req, res) => {
       });
     }
 
-    // Validate merchant
+    // 2. Validate merchant
     const merchant = await User.findById(merchantId).session(session);
     if (!merchant || merchant.role !== 'merchant') {
       await session.abortTransaction();
@@ -151,7 +151,7 @@ export const createPayoutTransaction = async (req, res) => {
       });
     }
     
-    // Check balance for debit transactions
+    // 3. Check balance for debit transactions
     const transactionAmount = parseFloat(amount);
     if (transactionType === 'Debit' && merchant.balance < transactionAmount) {
       await session.abortTransaction();
@@ -163,16 +163,17 @@ export const createPayoutTransaction = async (req, res) => {
 
     console.log(`💰 Merchant balance: ${merchant.balance}, Transaction amount: ${transactionAmount}`);
 
-    // Update merchant balance
+    // 4. Update merchant balance
     if (transactionType === 'Debit') {
       merchant.balance -= transactionAmount;
     } else if (transactionType === 'Credit') {
       merchant.balance += transactionAmount;
     }
     
-    await merchant.save({ session });
+    // This `await merchant.save({ session });` is where the merchant balance update is saved.
+    await merchant.save({ session }); 
 
-    // Create Payout Transaction with all required fields
+    // 5. Create Payout Transaction with all required fields
     const newPayout = new PayoutTransaction({
       merchantId,
       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
@@ -190,12 +191,12 @@ export const createPayoutTransaction = async (req, res) => {
       transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
     });
     
+    // This `await newPayout.save({ session });` is where the new payout transaction is saved.
     const savedPayout = await newPayout.save({ session });
-    await session.commitTransaction();
+    await session.commitTransaction(); // If everything above succeeds, commit changes.
     
     console.log('✅ Payout transaction created:', savedPayout._id);
-  //   const { autoSyncTransaction } = await import('./transactionSyncController.js');
-  // autoSyncTransaction(merchantId, savedPayout, 'payout'); 
+    
     res.status(201).json({
       success: true,
       message: "Payout transaction created successfully",
@@ -204,10 +205,10 @@ export const createPayoutTransaction = async (req, res) => {
     });
 
   } catch (error) {
-    await session.abortTransaction();
+    await session.abortTransaction(); // If any error, abort transaction.
     console.error("❌ Error creating payout transaction:", error);
     
-    if (error.code === 11000) {
+    if (error.code === 11000) { // Duplicate key error
       return res.status(400).json({ 
         success: false,
         message: "Duplicate transaction detected. Please try again."
@@ -220,7 +221,7 @@ export const createPayoutTransaction = async (req, res) => {
       error: error.message 
     });
   } finally {
-    session.endSession();
+    session.endSession(); // Always end the session.
   }
 };
 
