@@ -33,16 +33,17 @@ export const generatePaymentLink = async (req, res) => {
     console.log('✅ Input validation passed');
 
     // Static merchant data
-    const staticMerchants = [
-      { 
-        _id: "MERCHANT001", 
-        firstname: "John", 
-        lastname: "Doe", 
-        mid: "MID123456", 
-        hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
-        vpa: "enpay1.skypal@fino" 
-      }
-    ];
+   // In paymentLinkController.js - update the static merchants
+const staticMerchants = [
+  { 
+    _id: "68fb0322970e105debcc26e7", // ✅ Change this to match your frontend
+    firstname: "John", 
+    lastname: "Doe", 
+    mid: "MID123456", 
+    hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
+    vpa: "enpay1.skypal@fino" 
+  }
+];
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
@@ -238,9 +239,9 @@ export const generatePaymentLink = async (req, res) => {
 // Keep other functions the same...
 export const getMerchants = async (req, res) => {
   try {
-    const staticMerchants = [
+   const staticMerchants = [
       {
-        _id: "68fb0322970e105debcc26e7",
+        _id: "68fb0322970e105debcc26e7", // ✅ Update this too
         firstname: "John",
         lastname: "Doe", 
         mid: "MID123456"
