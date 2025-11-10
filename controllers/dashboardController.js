@@ -3,8 +3,6 @@ import Transaction from '../models/Transaction.js';
 import User from '../models/User.js'; // Assuming User model contains merchant info
 import mongoose from 'mongoose';
 
-// getDateRange function मध्ये हे replace करा
-
 const getDateRange = (filter, startDate, endDate) => {
   const now = new Date();
   let start, end;
@@ -26,21 +24,22 @@ const getDateRange = (filter, startDate, endDate) => {
       break;
     case 'this_week':
       start = new Date(now);
-      start.setDate(now.getDate() - 7); // Last 7 days
+      start.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
       start.setHours(0, 0, 0, 0);
       end = new Date(now);
+      end.setDate(now.getDate() + (6 - now.getDay())); // End of current week (Saturday)
       end.setHours(23, 59, 59, 999);
       break;
     case 'this_month':
       start = new Date(now.getFullYear(), now.getMonth(), 1);
       start.setHours(0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
       end.setHours(23, 59, 59, 999);
       break;
     case 'last_month':
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       start.setHours(0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth(), 0);
+      end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of previous month
       end.setHours(23, 59, 59, 999);
       break;
     case 'custom':
@@ -50,19 +49,11 @@ const getDateRange = (filter, startDate, endDate) => {
         start.setHours(0, 0, 0, 0);
         end.setHours(23, 59, 59, 999);
       } else {
-        // Default to today if no dates provided
-        start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(now);
-        end.setHours(23, 59, 59, 999);
+        return {};
       }
       break;
     default:
-      // Default to today
-      start = new Date(now);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now);
-      end.setHours(23, 59, 59, 999);
+      return {};
   }
 
   console.log(`📅 Date Range for ${filter}:`, {
@@ -70,6 +61,7 @@ const getDateRange = (filter, startDate, endDate) => {
     end: end.toISOString()
   });
 
+  // Use 'createdAt' for filtering since 'timestamps: true' adds it
   return {
     createdAt: {
       $gte: start,
@@ -172,13 +164,21 @@ export const getAllMerchants = async (req, res) => {
   }
 };
 
-// controllers/dashboardController.js मध्ये हे replace करा
-
 export const getDashboardAnalytics = async (req, res) => {
   try {
-    const { merchantId, timeFilter = 'today', startDate, endDate } = req.query;
+    const {
+      merchantId,
+      timeFilter = 'today',
+      startDate,
+      endDate
+    } = req.query;
 
-    console.log('🟡 Fetching analytics with:', { merchantId, timeFilter, startDate, endDate });
+    console.log('🟡 Fetching analytics with:', {
+      merchantId,
+      timeFilter,
+      startDate,
+      endDate
+    });
 
     let matchQuery = {};
 
@@ -187,112 +187,145 @@ export const getDashboardAnalytics = async (req, res) => {
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery, ...dateRange };
+    // Use the unified createdAt field for date filtering
+    matchQuery = { ...matchQuery, ...dateRange
+    };
 
-    console.log('🔍 Analytics Match Query:', JSON.stringify(matchQuery, null, 2));
 
     const analytics = await Transaction.aggregate([
+      // First, normalize status and amount fields
       {
         $addFields: {
           unifiedStatus: getTransactionStatusField,
           unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField
+          unifiedCreatedAt: getCreatedAtField // Add unified createdAt for matching
+        }
+      },
+      // Now match using the unified fields
+      {
+        $match: {
+          ...matchQuery,
+          // Ensure date range also applies to the unifiedCreatedAt
+          ...(matchQuery.createdAt && {
+            unifiedCreatedAt: matchQuery.createdAt
+          })
         }
       },
       {
-        $match: matchQuery
+        $group: {
+          _id: null,
+          totalSuccessAmount: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
+              }, "$unifiedAmount", 0]
+            }
+          },
+          totalFailedAmount: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
+              }, "$unifiedAmount", 0]
+            }
+          },
+          totalPendingAmount: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
+              }, "$unifiedAmount", 0]
+            }
+          },
+          totalRefundAmount: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
+              }, "$unifiedAmount", 0]
+            }
+          },
+          totalSuccessOrders: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
+              }, 1, 0]
+            }
+          },
+          totalFailedOrders: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
+              }, 1, 0]
+            }
+          },
+          totalPendingOrders: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
+              }, 1, 0]
+            }
+          },
+          totalRefundOrders: {
+            $sum: {
+              $cond: [{
+                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
+              }, 1, 0]
+            }
+          },
+          totalTransactions: {
+            $sum: 1
+          }
+        }
       },
       {
-        $facet: {
-          // Amount analytics
-          amountAnalytics: [
-            {
-              $group: {
-                _id: null,
-                totalSuccessAmount: {
-                  $sum: {
-                    $cond: [{
-                      $in: ["$unifiedStatus", ["SUCCESS", "Success"]]
-                    }, "$unifiedAmount", 0]
-                  }
-                },
-                totalFailedAmount: {
-                  $sum: {
-                    $cond: [{
-                      $in: ["$unifiedStatus", ["FAILED", "Failed"]]
-                    }, "$unifiedAmount", 0]
-                  }
-                },
-                totalPendingAmount: {
-                  $sum: {
-                    $cond: [{
-                      $in: ["$unifiedStatus", ["PENDING", "Pending"]]
-                    }, "$unifiedAmount", 0]
-                  }
-                },
-                totalRefundAmount: {
-                  $sum: {
-                    $cond: [{
-                      $in: ["$unifiedStatus", ["REFUND", "Refund"]]
-                    }, "$unifiedAmount", 0]
-                  }
-                },
-                totalAmount: { $sum: "$unifiedAmount" }
-              }
-            }
-          ],
-          // Count analytics
-          countAnalytics: [
-            {
-              $group: {
-                _id: "$unifiedStatus",
-                count: { $sum: 1 }
-              }
-            }
-          ]
+        $project: {
+          _id: 0,
+          totalSuccessAmount: {
+            $ifNull: ["$totalSuccessAmount", 0]
+          },
+          totalFailedAmount: {
+            $ifNull: ["$totalFailedAmount", 0]
+          },
+          totalPendingAmount: {
+            $ifNull: ["$totalPendingAmount", 0]
+          },
+          totalRefundAmount: {
+            $ifNull: ["$totalRefundAmount", 0]
+          },
+          totalSuccessOrders: {
+            $ifNull: ["$totalSuccessOrders", 0]
+          },
+          totalFailedOrders: {
+            $ifNull: ["$totalFailedOrders", 0]
+          },
+          totalPendingOrders: {
+            $ifNull: ["$totalPendingOrders", 0]
+          },
+          totalRefundOrders: {
+            $ifNull: ["$totalRefundOrders", 0]
+          },
+          totalTransactions: {
+            $ifNull: ["$totalTransactions", 0]
+          }
         }
       }
     ]);
 
-    // Process results
-    const amountResult = analytics[0].amountAnalytics[0] || {
+    const result = analytics.length > 0 ? analytics[0] : {
       totalSuccessAmount: 0,
       totalFailedAmount: 0,
       totalPendingAmount: 0,
       totalRefundAmount: 0,
-      totalAmount: 0
-    };
-
-    const countResult = analytics[0].countAnalytics.reduce((acc, curr) => {
-      const status = curr._id?.toUpperCase();
-      if (status === 'SUCCESS' || status === 'SUCCESS') {
-        acc.totalSuccessOrders = curr.count;
-      } else if (status === 'FAILED' || status === 'FAILED') {
-        acc.totalFailedOrders = curr.count;
-      } else if (status === 'PENDING' || status === 'PENDING') {
-        acc.totalPendingOrders = curr.count;
-      } else if (status === 'REFUND' || status === 'REFUND') {
-        acc.totalRefundOrders = curr.count;
-      }
-      return acc;
-    }, {
       totalSuccessOrders: 0,
       totalFailedOrders: 0,
       totalPendingOrders: 0,
-      totalRefundOrders: 0
-    });
-
-    const result = {
-      ...amountResult,
-      ...countResult,
-      totalTransactions: Object.values(countResult).reduce((sum, count) => sum + count, 0)
+      totalRefundOrders: 0,
+      totalTransactions: 0
     };
 
-    console.log('✅ Final Analytics Result:', result);
-    res.status(200).json(result);
+    console.log('✅ Analytics result:', result);
 
+    res.status(200).json(result);
   } catch (error) {
-    console.error('❌ Error in dashboard analytics:', error);
+    console.error('❌ Error fetching dashboard analytics:', error);
     res.status(500).json({
       message: 'Server Error',
       error: error.message
