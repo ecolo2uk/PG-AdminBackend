@@ -172,15 +172,15 @@ export const createPayoutTransaction = async (req, res) => {
     
     // This `await merchant.save({ session });` is where the merchant balance update is saved.
     await merchant.save({ session }); 
-
+const merchantNameValue = merchant.company || (merchant.firstname && merchant.lastname ? `${merchant.firstname} ${merchant.lastname}` : 'Unknown Merchant');
     // 5. Create Payout Transaction with all required fields
   const newPayout = new PayoutTransaction({
       merchantId,
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`, // This looks correct
+      merchantName: merchantNameValue,
       accountNumber: "N/A", 
       connector: connector || "Manual", 
       amount: transactionAmount,
-      paymentMode: 'Wallet Transfer', // This also looks correct and is a valid enum value
+      paymentMode: 'Wallet Transfer', // Hardcoded
       transactionType,
       status: 'Success',
       webhook: 'N/A',
