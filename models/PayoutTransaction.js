@@ -97,6 +97,8 @@ const payoutTransactionSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+
+  
 }, {
   timestamps: true,
 });
@@ -166,6 +168,28 @@ payoutTransactionSchema.post('save', async function(doc) {
     console.error('❌ Error in payout auto-sync:', error);
   }
 });
+
+
+
+
+// PayoutTransaction model मध्ये indexes जोडा
+payoutTransactionSchema.index({ utr: 1 }, { 
+  unique: true, 
+  sparse: true,
+  background: true 
+});
+
+payoutTransactionSchema.index({ transactionId: 1 }, { 
+  unique: true, 
+  sparse: true,
+  background: true 
+});
+
+payoutTransactionSchema.index({ 
+  merchantId: 1, 
+  createdAt: -1 
+}, { background: true });
+
 
 const PayoutTransaction = mongoose.model('PayoutTransaction', payoutTransactionSchema);
 export default PayoutTransaction;
