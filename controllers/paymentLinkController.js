@@ -3,7 +3,7 @@ import { encrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose'; // ✅ ADD THIS IMPORT
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
 export const generatePaymentLink = async (req, res) => {
