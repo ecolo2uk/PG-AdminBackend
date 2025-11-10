@@ -24,136 +24,105 @@ const executeWithRetry = async (operation, maxRetries = 3, baseDelay = 1000) => 
   }
 };
 
-// createPayoutToMerchant function update करा
+// Simple version without MongoDB transactions
 export const createPayoutToMerchant = async (req, res) => {
-  let session;
-  
   try {
-    session = await mongoose.startSession();
-    
-    const result = await executeWithRetry(async () => {
-      session.startTransaction();
-      
-      const {
-        merchantId,
-        bankName,
-        accountNumber,
-        ifscCode,
-        accountHolderName,
-        accountType,
-        paymentMode,
-        amount,
-        customerEmail,
-        customerPhoneNumber,
-        remark,
-        responseUrl,
-      } = req.body;
+    const {
+      merchantId,
+      bankName,
+      accountNumber,
+      ifscCode,
+      accountHolderName,
+      accountType,
+      paymentMode,
+      amount,
+      customerEmail,
+      customerPhoneNumber,
+      remark,
+      responseUrl,
+    } = req.body;
 
-      console.log('📦 Creating payout to merchant with data:', req.body);
+    console.log('📦 Creating payout to merchant with data:', req.body);
 
-      // Validate required fields
-      if (!merchantId || !amount || !bankName || !accountNumber || !ifscCode || !accountHolderName) {
-        await session.abortTransaction();
-        return { 
-          success: false,
-          message: "Missing required fields: merchantId, amount, bankName, accountNumber, ifscCode, accountHolderName",
-          status: 400
-        };
-      }
-
-      // Validate initiating merchant
-      const initiatingMerchant = await User.findById(merchantId).session(session);
-      if (!initiatingMerchant || initiatingMerchant.role !== 'merchant') {
-        await session.abortTransaction();
-        return { 
-          success: false,
-          message: "Initiating merchant not found.",
-          status: 404
-        };
-      }
-      
-      // Check balance
-      const payoutAmount = parseFloat(amount);
-      if (initiatingMerchant.balance < payoutAmount) {
-        await session.abortTransaction();
-        return { 
-          success: false,
-          message: `Insufficient balance. Available: ₹${initiatingMerchant.balance}, Required: ₹${payoutAmount}`,
-          status: 400
-        };
-      }
-
-      console.log(`💰 Merchant balance: ${initiatingMerchant.balance}, Payout amount: ${payoutAmount}`);
-
-      // Deduct amount from initiating merchant's balance
-      initiatingMerchant.balance -= payoutAmount;
-      await initiatingMerchant.save({ session });
-
-      // Create Payout Transaction
-      const newPayout = new PayoutTransaction({
-        merchantId,
-        merchantName: initiatingMerchant.company || `${initiatingMerchant.firstname} ${initiatingMerchant.lastname}`,
-        recipientBankName: bankName,
-        recipientAccountNumber: accountNumber,
-        recipientIfscCode: ifscCode,
-        recipientAccountHolderName: accountHolderName,
-        recipientAccountType: accountType || 'Saving',
-        amount: payoutAmount,
-        currency: 'INR',
-        paymentMode: paymentMode || 'IMPS',
-        transactionType: 'Debit',
-        status: 'Success',
-        customerEmail,
-        customerPhoneNumber,
-        remark,
-        responseUrl,
-        utr: generateUtr(),
-        transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+    // Validate required fields
+    if (!merchantId || !amount || !bankName || !accountNumber || !ifscCode || !accountHolderName) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Missing required fields" 
       });
-      
-      const savedPayout = await newPayout.save({ session });
-      await session.commitTransaction();
-      
-      console.log('✅ Payout created successfully:', savedPayout._id);
-      
-      return {
-        success: true,
-        message: "Payout initiated successfully",
-        payoutTransaction: savedPayout,
-        newBalance: initiatingMerchant.balance,
-        status: 201
-      };
+    }
+
+    // Update merchant balance with atomic operation
+    const payoutAmount = parseFloat(amount);
+    const updatedMerchant = await User.findOneAndUpdate(
+      { 
+        _id: merchantId, 
+        role: 'merchant',
+        balance: { $gte: payoutAmount } // Check balance atomically
+      },
+      { 
+        $inc: { balance: -payoutAmount } 
+      },
+      { new: true }
+    );
+
+    if (!updatedMerchant) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Insufficient balance or merchant not found" 
+      });
+    }
+
+    // Create Payout Transaction
+    const newPayout = new PayoutTransaction({
+      merchantId,
+      merchantName: updatedMerchant.company || `${updatedMerchant.firstname} ${updatedMerchant.lastname}`,
+      recipientBankName: bankName,
+      recipientAccountNumber: accountNumber,
+      recipientIfscCode: ifscCode,
+      recipientAccountHolderName: accountHolderName,
+      recipientAccountType: accountType || 'Saving',
+      amount: payoutAmount,
+      currency: 'INR',
+      paymentMode: paymentMode || 'IMPS',
+      transactionType: 'Debit',
+      status: 'Success',
+      customerEmail,
+      customerPhoneNumber,
+      remark,
+      responseUrl,
+      utr: generateUtr(),
+      transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+    });
+    
+    const savedPayout = await newPayout.save();
+    
+    console.log('✅ Payout created successfully:', savedPayout._id);
+    
+    res.status(201).json({
+      success: true,
+      message: "Payout initiated successfully",
+      payoutTransaction: savedPayout,
+      newBalance: updatedMerchant.balance
     });
 
-    // Send response based on retry operation result
-    res.status(result.status || 200).json(result);
-
   } catch (error) {
-    if (session) {
-      await session.abortTransaction();
-    }
     console.error("❌ Error creating payout to merchant:", error);
     
-    if (error.message.includes('Write conflict')) {
-      return res.status(409).json({ 
+    if (error.code === 11000) {
+      return res.status(400).json({ 
         success: false,
-        message: "Database is busy. Please try again in a few seconds.",
-        retrySuggested: true
+        message: "Duplicate transaction detected" 
       });
     }
     
     res.status(500).json({ 
       success: false,
-      message: "Server error during payout creation.",
+      message: "Server error during payout creation",
       error: error.message 
     });
-  } finally {
-    if (session) {
-      session.endSession();
-    }
   }
 };
-
 // Update your createPayoutTransaction function
 // controllers/payoutTransactionController.js मध्ये
 export const createPayoutTransaction = async (req, res) => {
