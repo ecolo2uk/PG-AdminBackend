@@ -240,7 +240,7 @@ export const getMerchants = async (req, res) => {
   try {
     const staticMerchants = [
       {
-        _id: "MERCHANT001",
+        _id: "68fb0322970e105debcc26e7",
         firstname: "John",
         lastname: "Doe", 
         mid: "MID123456"
