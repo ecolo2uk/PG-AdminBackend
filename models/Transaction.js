@@ -1,7 +1,4 @@
-// models/Transaction.js
 import mongoose from 'mongoose';
-import Merchant from './Merchant.js';
-import User from './User.js';
 
 const transactionSchema = new mongoose.Schema({
   transactionId: {
@@ -17,7 +14,11 @@ const transactionSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  merchantId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  merchantId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true 
+  },
   merchantName: {
     type: String,
     required: true
@@ -32,7 +33,6 @@ const transactionSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    required: true,
     default: 'INR'
   },
   status: {
@@ -41,34 +41,38 @@ const transactionSchema = new mongoose.Schema({
     enum: ['Pending', 'INITIATED', 'SUCCESS', 'FAILED', 'CANCELLED', 'REFUNDED'],
     default: 'Pending'
   },
- "Settlement Status": { // Exact name as in your database
+  "Commission Amount": { // ✅ EXACT name as in your database
+    type: Number,
+    default: 0
+  },
+  "Settlement Status": { // ✅ EXACT name as in your database
     type: String,
     enum: ['Pending', 'Settled', 'Failed'],
     default: 'Pending'
   },
-  "Vendor Ref ID": { // Exact name as in your database
+  "Vendor Ref ID": { // ✅ EXACT name as in your database
     type: String,
     default: ''
   },
-  "Vendor Txn ID": { // Add this field from your data
+  "Vendor Txn ID": { // ✅ EXACT name as in your database
     type: String,
     default: ''
   },
   upiId: {
     type: String,
-     default: '' // For merchant's VPA or payer's VPA if collected
+    default: ''
   },
   merchantVpa: {
-    type: String, // Merchant's VPA specifically
+    type: String,
     required: true
   },
   txnRefId: {
-    type: String, // Enpay's transaction ID or our own reference if Enpay's isn't available
+    type: String,
     required: true
   },
   txnNote: {
     type: String,
-     default: ''
+    default: ''
   },
   paymentMethod: {
     type: String,
@@ -79,42 +83,37 @@ const transactionSchema = new mongoose.Schema({
     required: true
   },
   source: {
-    type: String, // e.g., 'enpay', 'razorpay'
-     default: 'enpay'
+    type: String,
+    default: 'enpay'
   },
   isMock: {
     type: Boolean,
     default: false
   },
-  paymentUrl: { // The direct Enpay or mock payment URL
-    type: String,
-     default: ''
-  },
-  qrCode: { // If a QR code image URL is provided
-    type: String,
-     default: ''
-  },
-  enpayTxnId: { // Actual transaction ID from Enpay
-    type: String,
-     default: ''
-  },
-  // New fields for short link functionality
-  encryptedPaymentPayload: {
-    type: String // To store the encrypted data needed by the frontend
-  },
- "Customer Name": {
+  paymentUrl: {
     type: String,
     default: ''
   },
-  "Customer VPA": {
+  qrCode: {
     type: String,
     default: ''
   },
-  "Customer Contact No": {
+  enpayTxnId: {
+    type: String,
+    default: ''
+  },
+  "Customer Name": { // ✅ EXACT name as in your database
+    type: String,
+    default: ''
+  },
+  "Customer VPA": { // ✅ EXACT name as in your database
+    type: String,
+    default: ''
+  },
+  "Customer Contact No": { // ✅ EXACT name as in your database
     type: mongoose.Schema.Types.Mixed,
     default: null
   },
-  // Short link fields
   encryptedPaymentPayload: {
     type: String,
     default: ''

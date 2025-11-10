@@ -1,18 +1,19 @@
 import Transaction from '../models/Transaction.js';
 import { encrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
-import mongoose from 'mongoose';
 
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
 export const generatePaymentLink = async (req, res) => {
+  console.log('🚀 Starting payment link generation...');
+  
   try {
-    console.log('🔵 generatePaymentLink called with body:', req.body);
+    console.log('📦 Request body:', req.body);
 
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    // Validation
+    // Basic validation
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
       return res.status(400).json({
         success: false,
@@ -24,20 +25,14 @@ export const generatePaymentLink = async (req, res) => {
     if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be a valid number between 500 and 10,000 INR'
+        message: 'Amount must be between 500 and 10,000 INR'
       });
     }
 
-    // Static merchant data - तुमच्या actual merchant ID वापरा
+    console.log('✅ Input validation passed');
+
+    // Static merchant data
     const staticMerchants = [
-      { 
-        _id: "6905b4b5a10cf16d1f46b6b2", // तुमचा actual merchant ObjectId
-        firstname: "SKYPAL", 
-        lastname: "SYSTEM", 
-        mid: "M1761981621943857", // तुमचा actual MID
-        hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
-        vpa: "enpay1.skypal@fino" 
-      },
       { 
         _id: "MERCHANT001", 
         firstname: "John", 
@@ -56,27 +51,31 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
+    console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
+
     // Generate unique IDs
     const timestamp = Date.now();
     const randomSuffix = Math.floor(Math.random() * 1000);
     const merchantOrderId = `ORDER${timestamp}${randomSuffix}`;
     const merchantTrnId = `TRN${timestamp}${randomSuffix}`;
 
-    // Create transaction with EXACT field names from your database
+    console.log('🆔 Generated IDs:', { merchantOrderId, merchantTrnId });
+
+    // Create transaction with ALL required fields
     const transactionData = {
       transactionId: merchantTrnId,
       merchantOrderId: merchantOrderId,
       merchantHashId: merchant.hashId,
-      merchantId: new mongoose.Types.ObjectId(merchant._id), // Use ObjectId
-      merchantName: merchant.firstname + " " + merchant.lastname + " PRIVATE LIMITED",
+      merchantId: merchant._id, // Use string ID for static merchants
+      merchantName: `${merchant.firstname} ${merchant.lastname}`,
       mid: merchant.mid,
       amount: amountNum,
       currency: currency,
       status: 'Pending',
-      "Commission Amount": 0, // Exact field name
-      "Settlement Status": 'Pending', // Exact field name  
-      "Vendor Ref ID": `VENDOR_REF_${merchantTrnId}`, // Exact field name
-      "Vendor Txn ID": '', // Will be updated by Enpay
+      "Commission Amount": 0,
+      "Settlement Status": 'Pending',
+      "Vendor Ref ID": `VENDOR_REF_${merchantTrnId}`,
+      "Vendor Txn ID": '',
       merchantVpa: merchant.vpa,
       txnRefId: merchantTrnId,
       txnNote: `Payment for Order ${merchantOrderId}`,
@@ -84,30 +83,30 @@ export const generatePaymentLink = async (req, res) => {
       paymentOption: paymentOption,
       source: 'enpay',
       isMock: false,
-      // Customer fields
       "Customer Name": '',
       "Customer VPA": '',
       "Customer Contact No": null
     };
 
-    console.log('💾 Creating transaction with data:', transactionData);
+    console.log('💾 Saving transaction to database...');
 
+    // Save transaction
     let transaction;
     try {
       transaction = new Transaction(transactionData);
       await transaction.save();
       console.log('✅ Transaction saved successfully:', transaction.transactionId);
     } catch (saveError) {
-      console.error('❌ Transaction save error:', saveError);
+      console.error('❌ TRANSACTION SAVE ERROR:', saveError);
       return res.status(500).json({
         success: false,
-        message: 'Failed to save transaction to database',
+        message: 'Failed to save transaction',
         error: saveError.message,
-        validationErrors: saveError.errors
+        details: saveError.errors || 'Check database connection'
       });
     }
 
-    // Enpay API call
+    // Prepare Enpay API request
     const requestData = {
       "amount": amountNum.toFixed(2),
       "merchantHashId": merchant.hashId,
@@ -119,12 +118,12 @@ export const generatePaymentLink = async (req, res) => {
       "txnNote": `Payment for Order ${merchantOrderId}`
     };
 
-    console.log('📤 Sending to Enpay API:', JSON.stringify(requestData, null, 2));
+    console.log('📤 Calling Enpay API...');
 
     let finalPaymentLink = '';
     let isMockPayment = false;
-    let enpayResponse = null;
 
+    // Enpay API call
     try {
       const axios = await import('axios');
       const response = await axios.default({
@@ -132,52 +131,48 @@ export const generatePaymentLink = async (req, res) => {
         url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
         headers: {
           'Content-Type': 'application/json',
-          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY || '0851439b-03df-4983-88d6-32399b1e4514',
-          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET || 'bae97f533a594af9bf3dded47f09c34e15e053d1'
+          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY,
+          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET
         },
         data: requestData,
         timeout: 30000
       });
 
-      enpayResponse = response.data;
+      const enpayResponse = response.data;
       console.log('✅ Enpay API Response:', enpayResponse);
 
       if (enpayResponse.code === 200 || enpayResponse.code === 299) {
         finalPaymentLink = enpayResponse.details;
         isMockPayment = false;
-        console.log('🔗 Real Enpay Link:', finalPaymentLink);
+        console.log('🔗 Real Enpay Payment Link:', finalPaymentLink);
+        
+        // Update transaction with Enpay data
+        await Transaction.findOneAndUpdate(
+          { transactionId: merchantTrnId },
+          {
+            paymentUrl: finalPaymentLink,
+            status: 'INITIATED',
+            enpayTxnId: enpayResponse.data?.transactionId || merchantTrnId
+          }
+        );
       } else {
-        throw new Error(enpayResponse.message || 'Enpay API returned error');
+        throw new Error(enpayResponse.message || 'Enpay API error');
       }
 
     } catch (apiError) {
-      console.error('❌ Enpay API failed:', apiError.response?.data || apiError.message);
+      console.error('❌ Enpay API failed, using mock payment');
       isMockPayment = true;
       finalPaymentLink = `${FRONTEND_BASE_URL}/mock-payment?transactionId=${merchantTrnId}&amount=${amountNum}`;
-      console.log('🔄 Using mock payment:', finalPaymentLink);
-    }
-
-    // Update transaction with payment URL and Enpay response
-    try {
-      const updateData = {
-        paymentUrl: finalPaymentLink,
-        isMock: isMockPayment,
-        status: 'INITIATED'
-      };
-
-      // Add Enpay transaction ID if available
-      if (enpayResponse?.data?.transactionId) {
-        updateData.enpayTxnId = enpayResponse.data.transactionId;
-      }
-
+      
+      // Update transaction as mock
       await Transaction.findOneAndUpdate(
         { transactionId: merchantTrnId },
-        updateData,
-        { new: true }
+        {
+          paymentUrl: finalPaymentLink,
+          isMock: true,
+          status: 'INITIATED'
+        }
       );
-      console.log('✅ Transaction updated with payment URL');
-    } catch (updateError) {
-      console.error('❌ Transaction update error:', updateError);
     }
 
     // Generate short link
@@ -202,7 +197,7 @@ export const generatePaymentLink = async (req, res) => {
 
       const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
 
-      console.log('🎉 Payment link generation completed');
+      console.log('🎉 PAYMENT LINK GENERATION COMPLETED!');
       console.log('🔗 Short Link:', customPaymentLink);
 
       return res.json({
@@ -212,54 +207,42 @@ export const generatePaymentLink = async (req, res) => {
         merchantOrderId: merchantOrderId,
         isMock: isMockPayment,
         message: isMockPayment ? 
-          'Mock payment link generated (Enpay API unavailable)' : 
-          'Real payment link generated successfully',
-        enpayResponse: enpayResponse
+          'Mock payment link generated' : 
+          'Real payment link generated successfully!'
       });
 
     } catch (linkError) {
-      console.error('❌ Short link generation error:', linkError);
+      console.error('❌ Short link error, returning direct link');
       
-      // Return direct payment link if short link fails
       return res.json({
         success: true,
         paymentLink: finalPaymentLink,
         transactionRefId: merchantTrnId,
         merchantOrderId: merchantOrderId,
         isMock: isMockPayment,
-        message: 'Payment link generated (short link failed)'
+        message: 'Payment link generated'
       });
     }
 
   } catch (error) {
-    console.error('🔥 generatePaymentLink top-level ERROR:', error);
+    console.error('🔥 TOP-LEVEL ERROR:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error during payment link generation',
+      message: 'Internal server error',
       error: error.message
     });
   }
 };
 
-// Add mongoose import at top if not already there
-
+// Keep other functions the same...
 export const getMerchants = async (req, res) => {
   try {
-    // तुमचे actual merchants द्या
     const staticMerchants = [
       {
-        _id: "6905b4b5a10cf16d1f46b6b2", // तुमचा actual merchant ID
-        firstname: "SKYPAL",
-        lastname: "SYSTEM", 
-        mid: "M1761981621943857",
-        company: "SKYPAL SYSTEM PRIVATE LIMITED"
-      },
-      {
-        _id: "MERCHANT001", 
+        _id: "MERCHANT001",
         firstname: "John",
-        lastname: "Doe",
-        mid: "MID123456",
-        company: "Test Merchant"
+        lastname: "Doe", 
+        mid: "MID123456"
       }
     ];
 
