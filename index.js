@@ -35,7 +35,6 @@ import payoutSettlementRoutes from './routes/payoutSettlementRoutes.js';
 import payoutTransactionRoutes from './routes/payoutTransactionRoutes.js';
 import syncRoutes from './routes/syncRoutes.js';
 
-import { migrateExistingUsersToMerchants } from './utils/migrateExistingUsers.js';
 
 dotenv.config();
 
@@ -48,28 +47,6 @@ app.use(cors());
 // MongoDB connection
 connectDB();
 
-// ✅ RUN MIGRATION WHEN SERVER STARTS
-// const runMigrations = async () => {
-//   try {
-//     console.log('🔄 Checking for migration...');
-    
-//     // Wait for MongoDB connection
-//     await mongoose.connection.once('open', async () => {
-//       console.log('✅ MongoDB connected, running migration...');
-      
-//       // Wait 2 seconds to ensure DB is fully connected
-//       setTimeout(async () => {
-//         await migrateExistingUsersToMerchants();
-//       }, 2000);
-//     });
-    
-//   } catch (error) {
-//     console.error('❌ Migration startup error:', error);
-//   }
-// };
-
-// Call migration function
-// runMigrations();
 
 // Routes
 app.use('/api/admin/auth', adminauthRoutes);
@@ -98,6 +75,7 @@ app.use('/api/risk-management', riskManagementRoutes);
 app.use('/api/payout-settlements', payoutSettlementRoutes);
 app.use('/api/payout-transactions', payoutTransactionRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/payment', paymentRoutes);
 
 // Basic root route
 app.get('/', (req, res) => {
