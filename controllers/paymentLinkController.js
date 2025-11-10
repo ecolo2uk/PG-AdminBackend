@@ -33,15 +33,16 @@ export const generatePaymentLink = async (req, res) => {
 
     // Static merchant data
     const staticMerchants = [
-      { 
-        _id: "MERCHANT001", 
-        firstname: "John", 
-        lastname: "Doe", 
-        mid: "MID123456", 
-        hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
-        vpa: "enpay1.skypal@fino" 
-      }
-    ];
+  { 
+    _id: new mongoose.Types.ObjectId(), // Generate new ObjectId
+    merchantId: "MERCHANT001", // Keep your string ID
+    firstname: "John", 
+    lastname: "Doe", 
+    mid: "MID123456", 
+    hashId: "MERCDSH51Y7CD4YJLFIZR8NF", 
+    vpa: "enpay1.skypal@fino" 
+  }
+];
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
@@ -66,7 +67,7 @@ export const generatePaymentLink = async (req, res) => {
       transactionId: merchantTrnId,
       merchantOrderId: merchantOrderId,
       merchantHashId: merchant.hashId,
-      merchantId: merchant._id, // Use string ID for static merchants
+  merchantId: merchant._id, // This is now an ObjectId
       merchantName: `${merchant.firstname} ${merchant.lastname}`,
       mid: merchant.mid,
       amount: amountNum,

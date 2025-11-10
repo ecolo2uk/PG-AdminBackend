@@ -14,11 +14,11 @@ const transactionSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  merchantId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  },
+ // In your Transaction schema
+merchantId: { 
+  type: mongoose.Schema.Types.Mixed, // Accepts both ObjectId and String
+  required: true 
+},
   merchantName: {
     type: String,
     required: true
