@@ -5,6 +5,8 @@ import Transaction from '../models/Transaction.js';
 import PayoutTransaction from '../models/PayoutTransaction.js';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
+import { initiateCollectRequest } from '../utils/enpayService.js';
+import { encrypt, decrypt } from '../utils/encryption.js';
 
 // --- Simple version without pagination for testing ---
 export const getAllTransactionsSimple = async (req, res) => {
@@ -208,110 +210,6 @@ export const getPaymentTransactionById = async (req, res) => {
   }
 };
 
-// --- Create a new payment transaction ---
-// export const createPaymentTransaction = async (req, res) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
-
-//   try {
-//     const {
-//       merchantId,
-//       merchantOrderId,
-//       amount,
-//       currency = 'INR',
-//       status = 'Pending',
-//       customerName,
-//       customerVPA,
-//       customerContact,
-//       paymentMethod,
-//       paymentOption,
-//       txnRefId,
-//       enpayTxnId,
-//       remark,
-//     } = req.body;
-
-//     // Validate Merchant
-//     if (!mongoose.Types.ObjectId.isValid(merchantId)) {
-//       await session.abortTransaction();
-//       return res.status(400).json({ 
-//         success: false,
-//         message: "Invalid Merchant ID format." 
-//       });
-//     }
-
-//     const merchant = await User.findById(merchantId).session(session);
-//     if (!merchant || merchant.role !== 'merchant') {
-//       await session.abortTransaction();
-//       return res.status(404).json({ 
-//         success: false,
-//         message: "Merchant not found or not a merchant." 
-//       });
-//     }
-
-//     // Generate unique transaction ID
-//     const generateUniqueTransactionId = async () => {
-//       let transactionId;
-//       let isUnique = false;
-//       while (!isUnique) {
-//         transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 10000)}`;
-//         const existingTxn = await Transaction.findOne({ transactionId });
-//         if (!existingTxn) {
-//           isUnique = true;
-//         }
-//       }
-//       return transactionId;
-//     };
-
-//     const transactionId = await generateUniqueTransactionId();
-
-//     const newTransaction = new Transaction({
-//       transactionId,
-//       merchantId: merchant._id,
-//       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-//       merchantOrderId,
-//       amount: parseFloat(amount),
-//       currency,
-//       status,
-//       customerName,
-//       customerVPA,
-//       customerContact,
-//       paymentMethod,
-//       paymentOption,
-//       txnRefId,
-//       enpayTxnId,
-//       remark,
-//     });
-
-//     await newTransaction.save({ session });
-//   const { autoSyncTransaction } = await import('./transactionSyncController.js');
-//   autoSyncTransaction(merchant._id, newTransaction, 'payment');
-
-//     // Update merchant balance if status is Success
-//     if (['Success', 'SUCCESS'].includes(status)) {
-//       merchant.balance += parseFloat(amount);
-//       await merchant.save({ session });
-//     }
-
-//     await session.commitTransaction();
-    
-//     res.status(201).json({
-//       success: true,
-//       message: "Payment transaction created successfully.",
-//       data: newTransaction,
-//     });
-
-//   } catch (error) {
-//     await session.abortTransaction();
-//     console.error("Error creating payment transaction:", error);
-//     res.status(500).json({ 
-//       success: false,
-//       message: "Server error during payment transaction creation.", 
-//       error: error.message 
-//     });
-//   } finally {
-//     session.endSession();
-//   }
-// };
 
 // --- Update transaction status ---
 export const updateTransactionStatus = async (req, res) => {
@@ -345,8 +243,8 @@ export const updateTransactionStatus = async (req, res) => {
     if (remark) transaction.remark = remark;
 
     await transaction.save({ session });
-  const { autoSyncTransaction } = await import('./transactionSyncController.js');
-  autoSyncTransaction(transaction.merchantId, transaction, 'payment');
+  // const { autoSyncTransaction } = await import('./transactionSyncController.js');
+await autoSyncToMerchant(transaction.merchantId, transaction, 'payment');
 
     // Handle balance updates
     const merchant = await User.findById(transaction.merchantId).session(session);
@@ -484,7 +382,328 @@ const generateUniqueTransactionId = async () => {
   return transactionId;
 };
 
+const generateShortLinkId = () => {
+  return `PL${Date.now()}${Math.random().toString(36).substr(2, 6)}`.toUpperCase();
+};
+
 // Auto-sync function
+// export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
+//   try {
+//     const merchant = await Merchant.findOne({ userId: merchantUserId });
+//     if (!merchant) return;
+
+//     if (type === 'payment') {
+//       if (!merchant.paymentTransactions.includes(transaction._id)) {
+//         merchant.paymentTransactions.push(transaction._id);
+//       }
+//     } else if (type === 'payout') {
+//       if (!merchant.payoutTransactions.includes(transaction._id)) {
+//         merchant.payoutTransactions.push(transaction._id);
+//       }
+//     }
+
+//     // Add to recent transactions
+//     const newTransaction = {
+//       transactionId: transaction.transactionId,
+//       type: type,
+//       transactionType: 'Credit',
+//       amount: transaction.amount,
+//       status: transaction.status,
+//       reference: transaction.merchantOrderId,
+//       method: transaction.paymentMethod,
+//       remark: 'Payment Received',
+//       date: transaction.createdAt,
+//       customer: transaction.customerName || 'N/A'
+//     };
+
+//     merchant.recentTransactions.unshift(newTransaction);
+//     if (merchant.recentTransactions.length > 20) {
+//       merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+//     }
+
+//     // Update balance if successful
+//     if (transaction.status === 'SUCCESS' || transaction.status === 'Success') {
+//       merchant.availableBalance += transaction.amount;
+//       merchant.totalCredits += transaction.amount;
+//       merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+//     }
+
+//     merchant.totalTransactions = merchant.paymentTransactions.length;
+//     merchant.successfulTransactions = merchant.paymentTransactions.filter(
+//       txn => txn.status === 'SUCCESS' || txn.status === 'Success'
+//     ).length;
+
+//     await merchant.save();
+//     console.log(`✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`);
+//   } catch (error) {
+//     console.error('❌ Error in auto-sync:', error);
+//   }
+// };
+
+// Create Payment Transaction (WITH ENPAY INTEGRATION)
+export const createPaymentTransaction = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const {
+      merchantId,
+      merchantOrderId,
+      amount,
+      currency = 'INR',
+      customerName,
+      customerEmail,
+      customerContact,
+      customerVPA,
+      paymentMethod = 'UPI',
+      paymentOption = 'UPI_COLLECT',
+      txnNote = 'Payment for services',
+      merchantVpa,
+      returnURL,
+      successURL,
+      description,
+      generatePaymentLink = true
+    } = req.body;
+
+    // Validate Merchant
+    const merchantUser = await User.findById(merchantId).session(session);
+    if (!merchantUser || merchantUser.role !== 'merchant') {
+      await session.abortTransaction();
+      return res.status(404).json({ 
+        success: false,
+        message: "Merchant not found." 
+      });
+    }
+
+    // Generate transaction IDs
+    const transactionId = await generateUniqueTransactionId();
+    const merchantTrnId = `TRN${Date.now()}`;
+    const shortLinkId = generateShortLinkId();
+
+    // Create transaction with PENDING status
+    const newTransaction = new Transaction({
+      transactionId,
+      merchantId: merchantUser._id,
+      merchantName: merchantUser.company || `${merchantUser.firstname} ${merchantUser.lastname}`,
+      merchantOrderId,
+      merchantHashId: "MERCDSH51Y7CD4YJLFIZR8NF", // Your actual hash ID
+      mid: merchantUser.mid || "DEFAULT_MID",
+      amount: parseFloat(amount),
+      currency,
+      status: 'PENDING',
+      customerName,
+      customerEmail,
+      customerContact,
+      customerVPA,
+      paymentMethod,
+      paymentOption,
+      txnRefId: merchantTrnId,
+      txnNote,
+      merchantVpa: merchantVpa || "enpay1.skypal@fino",
+      source: 'enpay',
+      shortLinkId,
+      linkExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours expiry
+      isLinkActive: true,
+      description
+    });
+
+    // Generate payment link if requested
+    if (generatePaymentLink) {
+      const paymentPayload = {
+        transactionId: newTransaction.transactionId,
+        merchantId: newTransaction.merchantId.toString(),
+        amount: newTransaction.amount,
+        merchantOrderId: newTransaction.merchantOrderId,
+        customerName: newTransaction.customerName,
+        customerEmail: newTransaction.customerEmail,
+        timestamp: Date.now()
+      };
+
+      // Encrypt payload for secure transmission
+      const encryptedPayload = encrypt(JSON.stringify(paymentPayload));
+      newTransaction.encryptedPaymentPayload = encryptedPayload;
+      
+      // Generate payment link
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      newTransaction.paymentLink = `${baseUrl}/pay/${shortLinkId}`;
+    }
+
+    await newTransaction.save({ session });
+
+    // Call Enpay API to initiate collect request
+    let enpayResponse = null;
+    try {
+      enpayResponse = await initiateCollectRequest({
+        amount: amount.toString(),
+        merchantHashId: "MERCDSH51Y7CD4YJLFIZR8NF",
+        merchantOrderId,
+        merchantTrnId,
+        merchantVpa: merchantVpa || "enpay1.skypal@fino",
+        returnURL: returnURL || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/return`,
+        successURL: successURL || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/success`,
+        txnNote: txnNote || "Collect for Order"
+      });
+
+      // Update transaction with Enpay response
+      if (enpayResponse) {
+        if (enpayResponse.code === 200 || enpayResponse.success) {
+          newTransaction.status = 'INITIATED';
+          newTransaction.enpayTxnId = enpayResponse.data?.transactionId;
+          newTransaction.paymentUrl = enpayResponse.data?.paymentUrl;
+          newTransaction.qrCode = enpayResponse.data?.qrCode;
+          newTransaction.VendorRefID = enpayResponse.data?.vendorRefId;
+        } else {
+          newTransaction.status = 'FAILED';
+          newTransaction.remark = enpayResponse.message || 'Enpay API call failed';
+        }
+        await newTransaction.save({ session });
+      }
+    } catch (enpayError) {
+      console.error('Enpay API error:', enpayError);
+      newTransaction.status = 'FAILED';
+      newTransaction.remark = enpayError.message;
+      await newTransaction.save({ session });
+    }
+
+    await session.commitTransaction();
+    
+    res.status(201).json({
+      success: true,
+      message: "Payment transaction created successfully",
+      data: {
+        transaction: newTransaction,
+        paymentLink: newTransaction.paymentLink,
+        shortLinkId: newTransaction.shortLinkId
+      },
+      enpayResponse: enpayResponse
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Error creating payment transaction:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error during payment transaction creation.", 
+      error: error.message 
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Get Payment Link Details
+export const getPaymentLinkDetails = async (req, res) => {
+  try {
+    const { shortLinkId } = req.params;
+
+    const transaction = await Transaction.findOne({ 
+      shortLinkId,
+      isLinkActive: true,
+      linkExpiry: { $gt: new Date() }
+    }).populate('merchantId', 'company firstname lastname');
+
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment link not found or expired"
+      });
+    }
+
+    // Decrypt payload for frontend
+    let decryptedPayload = null;
+    if (transaction.encryptedPaymentPayload) {
+      try {
+        decryptedPayload = JSON.parse(decrypt(transaction.encryptedPaymentPayload));
+      } catch (error) {
+        console.error('Error decrypting payload:', error);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        transaction: {
+          transactionId: transaction.transactionId,
+          amount: transaction.amount,
+          currency: transaction.currency,
+          customerName: transaction.customerName,
+          customerEmail: transaction.customerEmail,
+          description: transaction.description,
+          txnNote: transaction.txnNote,
+          status: transaction.status,
+          createdAt: transaction.createdAt
+        },
+        merchant: {
+          name: transaction.merchantName,
+          company: transaction.merchantId?.company
+        },
+        paymentUrl: transaction.paymentUrl,
+        qrCode: transaction.qrCode,
+        encryptedPayload: transaction.encryptedPaymentPayload,
+        decryptedPayload: decryptedPayload
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching payment link details:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching payment link",
+      error: error.message
+    });
+  }
+};
+
+// Process Payment via Link
+export const processPaymentViaLink = async (req, res) => {
+  try {
+    const { shortLinkId } = req.params;
+
+    const transaction = await Transaction.findOne({ 
+      shortLinkId,
+      isLinkActive: true,
+      linkExpiry: { $gt: new Date() }
+    });
+
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment link not found or expired"
+      });
+    }
+
+    if (transaction.status === 'SUCCESS') {
+      return res.status(400).json({
+        success: false,
+        message: "Payment already completed"
+      });
+    }
+
+    // Redirect to Enpay payment page or show payment options
+    if (transaction.paymentUrl) {
+      return res.json({
+        success: true,
+        redirectUrl: transaction.paymentUrl,
+        transactionId: transaction.transactionId
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Payment URL not available"
+      });
+    }
+
+  } catch (error) {
+    console.error('Error processing payment via link:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error processing payment",
+      error: error.message
+    });
+  }
+};
+
+// Auto-sync function (keep your existing implementation)
 export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
   try {
     const merchant = await Merchant.findOne({ userId: merchantUserId });
@@ -493,10 +712,6 @@ export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
     if (type === 'payment') {
       if (!merchant.paymentTransactions.includes(transaction._id)) {
         merchant.paymentTransactions.push(transaction._id);
-      }
-    } else if (type === 'payout') {
-      if (!merchant.payoutTransactions.includes(transaction._id)) {
-        merchant.payoutTransactions.push(transaction._id);
       }
     }
 
@@ -520,7 +735,7 @@ export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
     }
 
     // Update balance if successful
-    if (transaction.status === 'SUCCESS' || transaction.status === 'Success') {
+    if (transaction.status === 'SUCCESS') {
       merchant.availableBalance += transaction.amount;
       merchant.totalCredits += transaction.amount;
       merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
@@ -528,7 +743,7 @@ export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
 
     merchant.totalTransactions = merchant.paymentTransactions.length;
     merchant.successfulTransactions = merchant.paymentTransactions.filter(
-      txn => txn.status === 'SUCCESS' || txn.status === 'Success'
+      txn => txn.status === 'SUCCESS'
     ).length;
 
     await merchant.save();
@@ -538,121 +753,6 @@ export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
   }
 };
 
-// Create Payment Transaction (WITH ENPAY INTEGRATION)
-export const createPaymentTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const {
-      merchantId,
-      merchantOrderId,
-      amount,
-      currency = 'INR',
-      customerName,
-      customerVPA,
-      customerContact,
-      paymentMethod = 'UPI',
-      paymentOption = 'UPI_COLLECT',
-      txnNote = 'Payment for services',
-      merchantVpa,
-      returnURL,
-      successURL
-    } = req.body;
-
-    // Validate Merchant
-    const merchantUser = await User.findById(merchantId).session(session);
-    if (!merchantUser || merchantUser.role !== 'merchant') {
-      await session.abortTransaction();
-      return res.status(404).json({ 
-        success: false,
-        message: "Merchant not found." 
-      });
-    }
-
-    // Generate transaction ID
-    const transactionId = await generateUniqueTransactionId();
-    const merchantTrnId = `TRN${Date.now()}`;
-
-    // Create transaction with PENDING status initially
-    const newTransaction = new Transaction({
-      transactionId,
-      merchantId: merchantUser._id,
-      merchantName: merchantUser.company || `${merchantUser.firstname} ${merchantUser.lastname}`,
-      merchantOrderId,
-      amount: parseFloat(amount),
-      currency,
-      status: 'PENDING',
-      customerName,
-      customerVPA,
-      customerContact,
-      paymentMethod,
-      paymentOption,
-      txnRefId: merchantTrnId,
-      txnNote,
-      merchantVpa,
-      source: 'enpay'
-    });
-
-    await newTransaction.save({ session });
-
-    // Call Enpay API to initiate collect request
-    try {
-      const enpayResponse = await initiateCollectRequest({
-        amount: amount.toString(),
-        merchantHashId: "MERCDSH51Y7CD4YJLFIZR8NF", // Use your actual hash ID
-        merchantOrderId,
-        merchantTrnId,
-        merchantVpa: merchantVpa || "enpay1.skypal@fino",
-        returnURL: returnURL || "https://yourdomain.com/return",
-        successURL: successURL || "https://yourdomain.com/success",
-        txnNote: txnNote || "Collect for Order"
-      });
-
-      // Update transaction with Enpay response
-      if (enpayResponse) {
-        if (enpayResponse.code === 200 || enpayResponse.success) {
-          newTransaction.status = 'INITIATED';
-          newTransaction.enpayTxnId = enpayResponse.data?.transactionId;
-          newTransaction.paymentUrl = enpayResponse.data?.paymentUrl;
-          newTransaction.qrCode = enpayResponse.data?.qrCode;
-        } else {
-          newTransaction.status = 'FAILED';
-          newTransaction.remark = enpayResponse.message || 'Enpay API call failed';
-        }
-        await newTransaction.save({ session });
-      }
-    } catch (enpayError) {
-      console.error('Enpay API error:', enpayError);
-      newTransaction.status = 'FAILED';
-      newTransaction.remark = enpayError.message;
-      await newTransaction.save({ session });
-    }
-
-    // AUTO-SYNC TO MERCHANT TABLE
-    await autoSyncToMerchant(merchantUser._id, newTransaction, 'payment');
-
-    await session.commitTransaction();
-    
-    res.status(201).json({
-      success: true,
-      message: "Payment transaction created and synced to merchant.",
-      data: newTransaction,
-      enpayResponse: enpayResponse || null
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("Error creating payment transaction:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Server error during payment transaction creation.", 
-      error: error.message 
-    });
-  } finally {
-    session.endSession();
-  }
-};
 
 // Keep all your other existing functions (getAllTransactionsSimple, getAllPaymentTransactions, etc.)
 // ... [rest of your existing functions]
