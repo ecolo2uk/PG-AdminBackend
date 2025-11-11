@@ -719,133 +719,95 @@ const getGroupingForSalesReport = (timeFilter) => {
     }
 };
 
-// controllers/dashboardController.js मध्ये getSalesReport function FIX करा
-// controllers/dashboardController.js मध्ये getSalesReport function FIX करा
+// controllers/dashboardController.js मध्ये getSalesReport update करा
 export const getSalesReport = async (req, res) => {
     try {
-        const { merchantId, timeFilter = 'this_week', startDate, endDate } = req.query; // Default to this_week
+        const { merchantId, timeFilter = 'this_week', startDate, endDate } = req.query;
         console.log('🟡 Fetching sales report with:', { merchantId, timeFilter, startDate, endDate });
 
-        let matchQuery = {};
-
+        // ✅ FIXED: Use manual processing instead of aggregation
+        const dateFilter = getDateRange(timeFilter, startDate, endDate);
+        
+        let merchantMatch = {};
         if (merchantId && merchantId !== 'all') {
-            matchQuery.merchantId = new mongoose.Types.ObjectId(merchantId);
+            if (mongoose.Types.ObjectId.isValid(merchantId)) {
+                merchantMatch.merchantId = new mongoose.Types.ObjectId(merchantId);
+            } else {
+                merchantMatch.merchantId = merchantId;
+            }
         }
 
-        const dateRange = getDateRange(timeFilter, startDate, endDate);
-        matchQuery = { ...matchQuery, ...dateRange };
+        const matchQuery = {
+            ...dateFilter,
+            ...merchantMatch
+        };
 
         console.log('🔍 Sales Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
-        // For this_week, get last 7 days including today
-        const salesReport = await Transaction.aggregate([
-            {
-                $addFields: {
-                    unifiedStatus: getTransactionStatusField,
-                    unifiedAmount: getTransactionAmountField,
-                    unifiedCreatedAt: getCreatedAtField
-                }
-            },
-            {
-                $match: matchQuery
-            },
-            {
-                $group: {
-                    _id: {
-                        year: { $year: "$unifiedCreatedAt" },
-                        month: { $month: "$unifiedCreatedAt" },
-                        day: { $dayOfMonth: "$unifiedCreatedAt" }
-                    },
-                    totalIncome: {
-                        $sum: {
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
-                            }, "$unifiedAmount", 0]
-                        }
-                    },
-                    totalCostOfSales: {
-                        $sum: {
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
-                            }, "$unifiedAmount", 0]
-                        }
-                    },
-                    totalRefundAmount: {
-                        $sum: {
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
-                            }, "$unifiedAmount", 0]
-                        }
-                    },
-                    totalPendingAmount: {
-                        $sum: {
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
-                            }, "$unifiedAmount", 0]
-                        }
-                    },
-                    successCount: {
-                        $sum: { 
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
-                            }, 1, 0] 
-                        }
-                    },
-                    failedCount: {
-                        $sum: { 
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
-                            }, 1, 0] 
-                        }
-                    },
-                    pendingCount: {
-                        $sum: { 
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
-                            }, 1, 0] 
-                        }
-                    },
-                    refundCount: {
-                        $sum: { 
-                            $cond: [{
-                                $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
-                            }, 1, 0] 
-                        }
-                    }
-                }
-            },
-            {
-                $project: {
-                    _id: 0,
-                    date: {
-                        $dateFromParts: {
-                            year: "$_id.year",
-                            month: "$_id.month",
-                            day: "$_id.day"
-                        }
-                    },
-                    totalIncome: { $ifNull: ["$totalIncome", 0] },
-                    totalCostOfSales: { $ifNull: ["$totalCostOfSales", 0] },
-                    totalRefundAmount: { $ifNull: ["$totalRefundAmount", 0] },
-                    totalPendingAmount: { $ifNull: ["$totalPendingAmount", 0] },
-                    successCount: { $ifNull: ["$successCount", 0] },
-                    failedCount: { $ifNull: ["$failedCount", 0] },
-                    pendingCount: { $ifNull: ["$pendingCount", 0] },
-                    refundCount: { $ifNull: ["$refundCount", 0] }
-                }
-            },
-            { $sort: { date: 1 } }
-        ]);
-
-        console.log(`✅ Sales report fetched: ${salesReport.length} entries`);
+        // ✅ FIXED: Get all transactions and process manually
+        const transactions = await Transaction.find(matchQuery);
         
-        // If no data, fill with empty data for last 7 days
+        console.log(`📊 Found ${transactions.length} transactions for sales report`);
+
+        // Group by date manually
+        const dailyData = new Map();
+        
+        transactions.forEach(transaction => {
+            const date = new Date(transaction.createdAt);
+            const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+            
+            if (!dailyData.has(dateKey)) {
+                dailyData.set(dateKey, {
+                    date: new Date(dateKey),
+                    totalIncome: 0,
+                    totalCostOfSales: 0,
+                    totalRefundAmount: 0,
+                    totalPendingAmount: 0,
+                    successCount: 0,
+                    failedCount: 0,
+                    pendingCount: 0,
+                    refundCount: 0
+                });
+            }
+            
+            const dayData = dailyData.get(dateKey);
+            const amount = Number(transaction.amount) || 0;
+            const status = String(transaction.status).toUpperCase().trim();
+            
+            // Count by status and amount
+            if (['SUCCESS', 'SUCCESSFUL'].includes(status)) {
+                dayData.successCount += 1;
+                dayData.totalIncome += amount;
+            } else if (['FAILED', 'FAILURE', 'FALLED'].includes(status)) {
+                dayData.failedCount += 1;
+                dayData.totalCostOfSales += amount;
+            } else if (['PENDING', 'INITIATED', 'GENERATED'].includes(status)) {
+                dayData.pendingCount += 1;
+                dayData.totalPendingAmount += amount;
+            } else if (['REFUND', 'REFUNDED'].includes(status)) {
+                dayData.refundCount += 1;
+                dayData.totalRefundAmount += amount;
+            }
+        });
+
+        // Convert to array and sort by date
+        let salesReport = Array.from(dailyData.values())
+            .map(item => ({
+                ...item,
+                date: item.date.toISOString()
+            }))
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        console.log(`✅ Sales report processed: ${salesReport.length} days`);
+
+        // Fill missing dates
         let finalReport = salesReport;
         if (salesReport.length === 0 || salesReport.length < 7) {
             console.log('📊 Filling missing dates in sales report');
-            finalReport = fillMissingDates(salesReport, timeFilter);
+            finalReport = fillMissingDatesManual(salesReport, timeFilter);
         }
         
+        console.log('📊 Final sales report data:', finalReport);
         res.status(200).json(finalReport);
 
     } catch (error) {
@@ -857,8 +819,8 @@ export const getSalesReport = async (req, res) => {
     }
 };
 
-// Helper function to fill missing dates
-const fillMissingDates = (existingData, timeFilter) => {
+// ✅ FIXED: Manual date filling function
+const fillMissingDatesManual = (existingData, timeFilter) => {
     const now = new Date();
     const result = [];
     let daysToShow = 7; // Default for this_week
@@ -872,9 +834,10 @@ const fillMissingDates = (existingData, timeFilter) => {
         date.setDate(now.getDate() - i);
         date.setHours(0, 0, 0, 0);
         
+        const dateString = date.toISOString().split('T')[0];
         const existing = existingData.find(item => {
-            const itemDate = new Date(item.date);
-            return itemDate.toDateString() === date.toDateString();
+            const itemDate = new Date(item.date).toISOString().split('T')[0];
+            return itemDate === dateString;
         });
         
         if (existing) {
@@ -896,7 +859,6 @@ const fillMissingDates = (existingData, timeFilter) => {
     
     return result;
 };
-
 // controllers/dashboardController.js मध्ये getDashboardAnalytics update करा
 export const getDashboardAnalytics = async (req, res) => {
   try {
