@@ -14,6 +14,7 @@ const ENPAY_MERCHANT_KEY = process.env.ENPAY_MERCHANT_KEY;
 const ENPAY_MERCHANT_SECRET = process.env.ENPAY_MERCHANT_SECRET;
 
 // backend/controllers/paymentLinkController.js
+// backend/controllers/paymentLinkController.js
 export const generatePaymentLink = async (req, res) => {
   console.log('🚀 generatePaymentLink function called');
   
@@ -38,8 +39,7 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    // Merchant data
-  const staticMerchants = [
+    const staticMerchants = [
   {
     _id: "6905b4b5a1ocf16df46bb2", // ✅ Real merchant ID
     firstname: "SKYPAL SYSTEM",
@@ -59,6 +59,7 @@ export const generatePaymentLink = async (req, res) => {
     merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
   }
 ];
+
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
       return res.status(404).json({
@@ -76,6 +77,63 @@ export const generatePaymentLink = async (req, res) => {
 
     console.log('🆔 Generated IDs:', { merchantOrderId, merchantTrnId, shortLinkId });
 
+    // ✅ REAL ENPAY API CALL
+    const API_BASE_URL = process.env.API_BASE_URL || 'https://pg-admin-backend.vercel.app';
+    const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+
+    const enpayRequestData = {
+      "amount": amountNum.toFixed(2),
+      "merchantHashId": merchant.hashId,
+      "merchantOrderId": merchantOrderId,
+      "merchantTrnId": merchantTrnId,
+      "merchantVpa": merchant.vpa,
+      "returnURL": `${API_BASE_URL}/api/payment/return?transactionId=${merchantTrnId}`,
+      "successURL": `${API_BASE_URL}/api/payment/success?transactionId=${merchantTrnId}`,
+      "txnNote": `Payment for ${merchant.merchantName}`
+    };
+
+    console.log('📤 Enpay API Request Data:', JSON.stringify(enpayRequestData, null, 2));
+
+    let enpayResponse;
+    let finalPaymentLink = '';
+    let isMock = false;
+
+    try {
+      console.log('🔄 Calling REAL Enpay API...');
+      
+      enpayResponse = await axios({
+        method: 'POST',
+        url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY,
+          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET
+        },
+        data: enpayRequestData,
+        timeout: 30000
+      });
+
+      console.log('✅ Enpay API Response Status:', enpayResponse.status);
+      console.log('✅ Enpay API Response Data:', JSON.stringify(enpayResponse.data, null, 2));
+
+      // Validate Enpay response
+      if (enpayResponse.data && enpayResponse.data.details) {
+        finalPaymentLink = enpayResponse.data.details;
+        console.log('🔗 Real Enpay Payment Link:', finalPaymentLink);
+        isMock = false;
+      } else {
+        throw new Error('Invalid response from Enpay API');
+      }
+
+    } catch (apiError) {
+      console.error('❌ Enpay API Error:', apiError.response?.data || apiError.message);
+      
+      // Fallback to mock
+      console.log('🔄 Falling back to mock payment...');
+      finalPaymentLink = "https://enpay.in/payment-page"; // Mock Enpay URL
+      isMock = true;
+    }
+
     // ✅ CRITICAL: Create transaction record in database
     const transactionData = {
       transactionId: merchantTrnId,
@@ -92,9 +150,10 @@ export const generatePaymentLink = async (req, res) => {
       txnNote: `Payment for ${merchant.merchantName}`,
       paymentMethod: paymentMethod,
       paymentOption: paymentOption,
-      paymentUrl: '', // Will be updated after Enpay call
+      paymentUrl: finalPaymentLink,
       shortLinkId: shortLinkId,
-      encryptedPaymentPayload: '' // Will be updated
+      isMock: isMock,
+      enpayTxnId: enpayResponse?.data?.data?.transactionId || merchantTrnId
     };
 
     console.log('💾 Saving transaction to database...');
@@ -109,39 +168,37 @@ export const generatePaymentLink = async (req, res) => {
       throw new Error(`Failed to save transaction: ${dbError.message}`);
     }
 
-    // Mock Enpay response (temporary for testing)
-    const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
-    
-    // Real Enpay URL for testing
-    const enpayLink = "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest"; // Replace with actual Enpay URL
-
-    // ✅ CRITICAL: Encrypt and save payment payload
+    // ✅ Encrypt and save payment payload
     const encryptedPayload = encrypt(JSON.stringify({
-      enpayLink: enpayLink,
+      enpayLink: finalPaymentLink,
       transactionId: merchantTrnId,
       merchantName: merchant.merchantName,
       amount: amountNum.toFixed(2),
-      orderId: merchantOrderId
+      orderId: merchantOrderId,
+      isMock: isMock
     }));
 
     // Update transaction with encrypted payload
     await Transaction.findByIdAndUpdate(newTransaction._id, {
-      encryptedPaymentPayload: encryptedPayload,
-      paymentUrl: enpayLink
+      encryptedPaymentPayload: encryptedPayload
     });
+
+    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
 
     console.log('🎉 Payment link generation completed!');
     console.log('🔗 Custom Payment Link:', customPaymentLink);
-    console.log('🔗 Enpay Link:', enpayLink);
+    console.log('🔗 Final Enpay Link:', finalPaymentLink);
+    console.log('📱 Is Mock:', isMock);
 
     return res.json({
       success: true,
       paymentLink: customPaymentLink,
       transactionRefId: merchantTrnId,
       merchantOrderId: merchantOrderId,
-      isMock: false,
-      message: 'Payment link generated successfully!'
+      isMock: isMock,
+      message: isMock ? 
+        'Mock payment link generated (Enpay API issue)' : 
+        'Real payment link generated successfully!'
     });
 
   } catch (error) {

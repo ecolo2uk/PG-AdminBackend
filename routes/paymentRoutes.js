@@ -37,46 +37,58 @@ router.get('/process/:shortLinkId', async (req, res) => {
     const { shortLinkId } = req.params;
     console.log('🔄 Process route called for shortLinkId:', shortLinkId);
 
-    // Check database connection
-    console.log('📊 Database state:', {
-      connectionState: mongoose.connection.readyState,
-      dbName: mongoose.connection.name
-    });
-
-    // Find transaction
+    // Find transaction with detailed logging
+    console.log('🔍 Searching for transaction with shortLinkId:', shortLinkId);
+    
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
-    console.log('🔍 Transaction search result:', transaction);
-
+    
     if (!transaction) {
-      console.error('❌ Transaction not found for shortLinkId:', shortLinkId);
+      console.error('❌ Transaction not found in database');
       
-      // Check all transactions for debugging
-      const allTransactions = await Transaction.find({}).limit(5);
+      // List all transactions for debugging
+      const allTransactions = await Transaction.find({}).sort({ createdAt: -1 }).limit(5);
       console.log('📋 Recent transactions:', allTransactions.map(t => ({
+        id: t._id,
         shortLinkId: t.shortLinkId,
         transactionId: t.transactionId,
-        merchantName: t.merchantName
+        merchantName: t.merchantName,
+        createdAt: t.createdAt
       })));
       
       return res.status(404).send(`
         <html>
-          <body>
-            <h2>Payment Link Not Found</h2>
-            <p>Short Link ID: ${shortLinkId}</p>
+          <head><title>Payment Link Not Found</title></head>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #dc3545;">Payment Link Not Found</h2>
+            <p>Short Link ID: <strong>${shortLinkId}</strong></p>
             <p>This payment link may have expired or is invalid.</p>
-            <a href="/">Return to Home</a>
+            <p><a href="/" style="color: #007bff;">Return to Home</a></p>
           </body>
         </html>
       `);
     }
 
+    console.log('✅ Transaction found:', {
+      id: transaction._id,
+      transactionId: transaction.transactionId,
+      shortLinkId: transaction.shortLinkId,
+      merchantName: transaction.merchantName,
+      amount: transaction.amount,
+      paymentUrl: transaction.paymentUrl,
+      hasEncryptedPayload: !!transaction.encryptedPaymentPayload
+    });
+
     if (!transaction.encryptedPaymentPayload) {
-      console.error('❌ Encrypted payload missing for transaction:', transaction.transactionId);
+      console.error('❌ Encrypted payload missing');
+      
+      // If no encrypted payload but has direct payment URL, use that
+      if (transaction.paymentUrl) {
+        console.log('🔄 Using direct payment URL:', transaction.paymentUrl);
+        return res.redirect(302, transaction.paymentUrl);
+      }
+      
       return res.status(404).send('Payment link payload missing.');
     }
-
-    console.log('✅ Transaction found:', transaction.transactionId);
-    console.log('🔐 Encrypted payload exists');
 
     // Decrypt payload
     let decryptedData;
@@ -108,19 +120,21 @@ router.get('/process/:shortLinkId', async (req, res) => {
     // Update transaction status
     await Transaction.findOneAndUpdate(
       { shortLinkId: shortLinkId },
-      { status: 'REDIRECTED' }
+      { status: 'REDIRECTED', redirectedAt: new Date() }
     );
 
+    // Final redirect to Enpay
     res.redirect(302, enpayLink);
 
   } catch (error) {
     console.error('🔥 ERROR in process route:', error);
     res.status(500).send(`
       <html>
-        <body>
-          <h2>Payment Processing Error</h2>
+        <head><title>Payment Error</title></head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h2 style="color: #dc3545;">Payment Processing Error</h2>
           <p>An error occurred while processing your payment.</p>
-          <a href="/">Return to Home</a>
+          <p><a href="/" style="color: #007bff;">Return to Home</a></p>
         </body>
       </html>
     `);
