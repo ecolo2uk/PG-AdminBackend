@@ -820,6 +820,7 @@ const getGroupingForSalesReport = (timeFilter) => {
 // };
 
 // controllers/dashboardController.js मध्ये getSalesReport update करा
+// controllers/dashboardController.js - Fix getSalesReport function
 export const getSalesReport = async (req, res) => {
     try {
         const { merchantId, timeFilter = 'this_week', startDate, endDate } = req.query;
@@ -843,7 +844,7 @@ export const getSalesReport = async (req, res) => {
 
         console.log('🔍 Sales Report Match Query:', JSON.stringify(matchQuery, null, 2));
 
-        // ✅ FIXED: Use aggregation for better performance and schema handling
+        // ✅ FIXED: Enhanced aggregation with better status handling
         const aggregationPipeline = [
           {
             $match: matchQuery
@@ -860,8 +861,14 @@ export const getSalesReport = async (req, res) => {
               unifiedStatus: {
                 $cond: {
                   if: { $ne: ["$status", undefined] },
-                  then: "$status",
-                  else: { $ifNull: ["$Transaction Status", "UNKNOWN"] }
+                  then: { $toUpper: { $trim: { input: "$status" } } },
+                  else: { 
+                    $cond: {
+                      if: { $ne: ["$Transaction Status", undefined] },
+                      then: { $toUpper: { $trim: { input: "$Transaction Status" } } },
+                      else: "UNKNOWN"
+                    }
+                  }
                 }
               },
               reportDate: {
@@ -889,55 +896,16 @@ export const getSalesReport = async (req, res) => {
                   }
                 }
               },
+              // Success
               totalIncome: {
                 $sum: {
                   $cond: {
                     if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["SUCCESS", "SUCCESSFUL", "COMPLETED"]
-                      ]
-                    },
-                    then: "$unifiedAmount",
-                    else: 0
-                  }
-                }
-              },
-              totalCostOfSales: {
-                $sum: {
-                  $cond: {
-                    if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["FAILED", "FAILURE", "FALLED", "REJECTED"]
-                      ]
-                    },
-                    then: "$unifiedAmount",
-                    else: 0
-                  }
-                }
-              },
-              totalPendingAmount: {
-                $sum: {
-                  $cond: {
-                    if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["PENDING", "INITIATED", "GENERATED", "PROCESSING"]
-                      ]
-                    },
-                    then: "$unifiedAmount",
-                    else: 0
-                  }
-                }
-              },
-              totalRefundAmount: {
-                $sum: {
-                  $cond: {
-                    if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["REFUND", "REFUNDED", "CANCELLED"]
+                      $or: [
+                        { $eq: ["$unifiedStatus", "SUCCESS"] },
+                        { $eq: ["$unifiedStatus", "SUCCESSFUL"] },
+                        { $eq: ["$unifiedStatus", "COMPLETED"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /SUCCESS/i } }
                       ]
                     },
                     then: "$unifiedAmount",
@@ -949,12 +917,32 @@ export const getSalesReport = async (req, res) => {
                 $sum: {
                   $cond: {
                     if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["SUCCESS", "SUCCESSFUL", "COMPLETED"]
+                      $or: [
+                        { $eq: ["$unifiedStatus", "SUCCESS"] },
+                        { $eq: ["$unifiedStatus", "SUCCESSFUL"] },
+                        { $eq: ["$unifiedStatus", "COMPLETED"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /SUCCESS/i } }
                       ]
                     },
                     then: 1,
+                    else: 0
+                  }
+                }
+              },
+              // Failed
+              totalCostOfSales: {
+                $sum: {
+                  $cond: {
+                    if: {
+                      $or: [
+                        { $eq: ["$unifiedStatus", "FAILED"] },
+                        { $eq: ["$unifiedStatus", "FAILURE"] },
+                        { $eq: ["$unifiedStatus", "FALLED"] },
+                        { $eq: ["$unifiedStatus", "REJECTED"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /FAIL/i } }
+                      ]
+                    },
+                    then: "$unifiedAmount",
                     else: 0
                   }
                 }
@@ -963,12 +951,33 @@ export const getSalesReport = async (req, res) => {
                 $sum: {
                   $cond: {
                     if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["FAILED", "FAILURE", "FALLED", "REJECTED"]
+                      $or: [
+                        { $eq: ["$unifiedStatus", "FAILED"] },
+                        { $eq: ["$unifiedStatus", "FAILURE"] },
+                        { $eq: ["$unifiedStatus", "FALLED"] },
+                        { $eq: ["$unifiedStatus", "REJECTED"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /FAIL/i } }
                       ]
                     },
                     then: 1,
+                    else: 0
+                  }
+                }
+              },
+              // Pending
+              totalPendingAmount: {
+                $sum: {
+                  $cond: {
+                    if: {
+                      $or: [
+                        { $eq: ["$unifiedStatus", "PENDING"] },
+                        { $eq: ["$unifiedStatus", "INITIATED"] },
+                        { $eq: ["$unifiedStatus", "GENERATED"] },
+                        { $eq: ["$unifiedStatus", "PROCESSING"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /PENDING/i } }
+                      ]
+                    },
+                    then: "$unifiedAmount",
                     else: 0
                   }
                 }
@@ -977,12 +986,32 @@ export const getSalesReport = async (req, res) => {
                 $sum: {
                   $cond: {
                     if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["PENDING", "INITIATED", "GENERATED", "PROCESSING"]
+                      $or: [
+                        { $eq: ["$unifiedStatus", "PENDING"] },
+                        { $eq: ["$unifiedStatus", "INITIATED"] },
+                        { $eq: ["$unifiedStatus", "GENERATED"] },
+                        { $eq: ["$unifiedStatus", "PROCESSING"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /PENDING/i } }
                       ]
                     },
                     then: 1,
+                    else: 0
+                  }
+                }
+              },
+              // Refund
+              totalRefundAmount: {
+                $sum: {
+                  $cond: {
+                    if: {
+                      $or: [
+                        { $eq: ["$unifiedStatus", "REFUND"] },
+                        { $eq: ["$unifiedStatus", "REFUNDED"] },
+                        { $eq: ["$unifiedStatus", "CANCELLED"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /REFUND/i } }
+                      ]
+                    },
+                    then: "$unifiedAmount",
                     else: 0
                   }
                 }
@@ -991,9 +1020,11 @@ export const getSalesReport = async (req, res) => {
                 $sum: {
                   $cond: {
                     if: {
-                      $in: [
-                        { $toUpper: "$unifiedStatus" },
-                        ["REFUND", "REFUNDED", "CANCELLED"]
+                      $or: [
+                        { $eq: ["$unifiedStatus", "REFUND"] },
+                        { $eq: ["$unifiedStatus", "REFUNDED"] },
+                        { $eq: ["$unifiedStatus", "CANCELLED"] },
+                        { $regexMatch: { input: "$unifiedStatus", regex: /REFUND/i } }
                       ]
                     },
                     then: 1,
@@ -1025,6 +1056,7 @@ export const getSalesReport = async (req, res) => {
         let salesReport = await Transaction.aggregate(aggregationPipeline);
         
         console.log(`✅ Sales report processed: ${salesReport.length} days`);
+        console.log('📊 Sales Report Sample:', salesReport.slice(0, 3));
 
         // Fill missing dates
         let finalReport = salesReport;
@@ -1033,7 +1065,7 @@ export const getSalesReport = async (req, res) => {
             finalReport = fillMissingDatesManual(salesReport, timeFilter);
         }
         
-        console.log('📊 Final sales report data:', finalReport);
+        console.log('📊 Final sales report data length:', finalReport.length);
         res.status(200).json(finalReport);
 
     } catch (error) {
@@ -1198,6 +1230,7 @@ const fillMissingDatesManual = (existingData, timeFilter) => {
 // };
 
 // controllers/dashboardController.js मध्ये getDashboardAnalytics update करा
+// controllers/dashboardController.js - Fix getDashboardAnalytics function
 export const getDashboardAnalytics = async (req, res) => {
   try {
     const { timeFilter, merchantId, startDate, endDate } = req.query;
@@ -1227,14 +1260,14 @@ export const getDashboardAnalytics = async (req, res) => {
 
     console.log('🔍 Analytics Match Query:', JSON.stringify(matchQuery, null, 2));
 
-    // ✅ FIXED: Use aggregation for better schema handling
+    // ✅ FIXED: Enhanced aggregation with better status mapping
     const aggregationPipeline = [
       {
         $match: matchQuery
       },
       {
         $addFields: {
-          // Unified amount field
+          // Unified amount field - handle both schemas
           unifiedAmount: {
             $cond: {
               if: { $ne: ["$amount", undefined] },
@@ -1242,12 +1275,18 @@ export const getDashboardAnalytics = async (req, res) => {
               else: { $ifNull: ["$Amount", 0] }
             }
           },
-          // Unified status field
+          // Unified status field - handle both schemas
           unifiedStatus: {
             $cond: {
               if: { $ne: ["$status", undefined] },
-              then: "$status",
-              else: { $ifNull: ["$Transaction Status", "UNKNOWN"] }
+              then: { $toUpper: { $trim: { input: "$status" } } },
+              else: { 
+                $cond: {
+                  if: { $ne: ["$Transaction Status", undefined] },
+                  then: { $toUpper: { $trim: { input: "$Transaction Status" } } },
+                  else: "UNKNOWN"
+                }
+              }
             }
           }
         }
@@ -1255,55 +1294,16 @@ export const getDashboardAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
+          // Success transactions
           totalSuccessAmount: {
             $sum: {
               $cond: {
                 if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["SUCCESS", "SUCCESSFUL", "COMPLETED"]
-                  ]
-                },
-                then: "$unifiedAmount",
-                else: 0
-              }
-            }
-          },
-          totalFailedAmount: {
-            $sum: {
-              $cond: {
-                if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["FAILED", "FAILURE", "FALLED", "REJECTED"]
-                  ]
-                },
-                then: "$unifiedAmount",
-                else: 0
-              }
-            }
-          },
-          totalPendingAmount: {
-            $sum: {
-              $cond: {
-                if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["PENDING", "INITIATED", "GENERATED", "PROCESSING"]
-                  ]
-                },
-                then: "$unifiedAmount",
-                else: 0
-              }
-            }
-          },
-          totalRefundAmount: {
-            $sum: {
-              $cond: {
-                if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["REFUND", "REFUNDED", "CANCELLED"]
+                  $or: [
+                    { $eq: ["$unifiedStatus", "SUCCESS"] },
+                    { $eq: ["$unifiedStatus", "SUCCESSFUL"] },
+                    { $eq: ["$unifiedStatus", "COMPLETED"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /SUCCESS/i } }
                   ]
                 },
                 then: "$unifiedAmount",
@@ -1315,12 +1315,32 @@ export const getDashboardAnalytics = async (req, res) => {
             $sum: {
               $cond: {
                 if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["SUCCESS", "SUCCESSFUL", "COMPLETED"]
+                  $or: [
+                    { $eq: ["$unifiedStatus", "SUCCESS"] },
+                    { $eq: ["$unifiedStatus", "SUCCESSFUL"] },
+                    { $eq: ["$unifiedStatus", "COMPLETED"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /SUCCESS/i } }
                   ]
                 },
                 then: 1,
+                else: 0
+              }
+            }
+          },
+          // Failed transactions
+          totalFailedAmount: {
+            $sum: {
+              $cond: {
+                if: {
+                  $or: [
+                    { $eq: ["$unifiedStatus", "FAILED"] },
+                    { $eq: ["$unifiedStatus", "FAILURE"] },
+                    { $eq: ["$unifiedStatus", "FALLED"] },
+                    { $eq: ["$unifiedStatus", "REJECTED"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /FAIL/i } }
+                  ]
+                },
+                then: "$unifiedAmount",
                 else: 0
               }
             }
@@ -1329,12 +1349,33 @@ export const getDashboardAnalytics = async (req, res) => {
             $sum: {
               $cond: {
                 if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["FAILED", "FAILURE", "FALLED", "REJECTED"]
+                  $or: [
+                    { $eq: ["$unifiedStatus", "FAILED"] },
+                    { $eq: ["$unifiedStatus", "FAILURE"] },
+                    { $eq: ["$unifiedStatus", "FALLED"] },
+                    { $eq: ["$unifiedStatus", "REJECTED"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /FAIL/i } }
                   ]
                 },
                 then: 1,
+                else: 0
+              }
+            }
+          },
+          // Pending transactions
+          totalPendingAmount: {
+            $sum: {
+              $cond: {
+                if: {
+                  $or: [
+                    { $eq: ["$unifiedStatus", "PENDING"] },
+                    { $eq: ["$unifiedStatus", "INITIATED"] },
+                    { $eq: ["$unifiedStatus", "GENERATED"] },
+                    { $eq: ["$unifiedStatus", "PROCESSING"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /PENDING/i } }
+                  ]
+                },
+                then: "$unifiedAmount",
                 else: 0
               }
             }
@@ -1343,12 +1384,32 @@ export const getDashboardAnalytics = async (req, res) => {
             $sum: {
               $cond: {
                 if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["PENDING", "INITIATED", "GENERATED", "PROCESSING"]
+                  $or: [
+                    { $eq: ["$unifiedStatus", "PENDING"] },
+                    { $eq: ["$unifiedStatus", "INITIATED"] },
+                    { $eq: ["$unifiedStatus", "GENERATED"] },
+                    { $eq: ["$unifiedStatus", "PROCESSING"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /PENDING/i } }
                   ]
                 },
                 then: 1,
+                else: 0
+              }
+            }
+          },
+          // Refund transactions
+          totalRefundAmount: {
+            $sum: {
+              $cond: {
+                if: {
+                  $or: [
+                    { $eq: ["$unifiedStatus", "REFUND"] },
+                    { $eq: ["$unifiedStatus", "REFUNDED"] },
+                    { $eq: ["$unifiedStatus", "CANCELLED"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /REFUND/i } }
+                  ]
+                },
+                then: "$unifiedAmount",
                 else: 0
               }
             }
@@ -1357,9 +1418,11 @@ export const getDashboardAnalytics = async (req, res) => {
             $sum: {
               $cond: {
                 if: {
-                  $in: [
-                    { $toUpper: "$unifiedStatus" },
-                    ["REFUND", "REFUNDED", "CANCELLED"]
+                  $or: [
+                    { $eq: ["$unifiedStatus", "REFUND"] },
+                    { $eq: ["$unifiedStatus", "REFUNDED"] },
+                    { $eq: ["$unifiedStatus", "CANCELLED"] },
+                    { $regexMatch: { input: "$unifiedStatus", regex: /REFUND/i } }
                   ]
                 },
                 then: 1,
@@ -1371,6 +1434,8 @@ export const getDashboardAnalytics = async (req, res) => {
         }
       }
     ];
+
+    console.log('🔍 Analytics Pipeline:', JSON.stringify(aggregationPipeline, null, 2));
 
     const analyticsResult = await Transaction.aggregate(aggregationPipeline);
     
@@ -1386,40 +1451,64 @@ export const getDashboardAnalytics = async (req, res) => {
       totalTransactions: 0
     };
 
-    console.log('✅ Final Analytics Result:', analytics);
+    console.log('✅ Final Analytics Result:', {
+      success: {
+        amount: analytics.totalSuccessAmount,
+        orders: analytics.totalSuccessOrders
+      },
+      failed: {
+        amount: analytics.totalFailedAmount,
+        orders: analytics.totalFailedOrders
+      },
+      pending: {
+        amount: analytics.totalPendingAmount,
+        orders: analytics.totalPendingOrders
+      },
+      refund: {
+        amount: analytics.totalRefundAmount,
+        orders: analytics.totalRefundOrders
+      },
+      totalTransactions: analytics.totalTransactions
+    });
+
+    // ✅ ADD: Debug query to check what statuses actually exist in database
+    const statusDebugPipeline = [
+      {
+        $match: matchQuery
+      },
+      {
+        $addFields: {
+          unifiedStatus: {
+            $cond: {
+              if: { $ne: ["$status", undefined] },
+              then: { $toUpper: { $trim: { input: "$status" } } },
+              else: { 
+                $cond: {
+                  if: { $ne: ["$Transaction Status", undefined] },
+                  then: { $toUpper: { $trim: { input: "$Transaction Status" } } },
+                  else: "UNKNOWN"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$unifiedStatus",
+          count: { $sum: 1 },
+          totalAmount: { $sum: { $cond: { if: { $ne: ["$amount", undefined] }, then: "$amount", else: { $ifNull: ["$Amount", 0] } } } }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      }
+    ];
+
+    const statusBreakdown = await Transaction.aggregate(statusDebugPipeline);
+    console.log('🔍 Actual Status Breakdown in Database:', statusBreakdown);
+
     res.json(analytics);
-    // controllers/dashboardController.js - getDashboardAnalytics मध्ये
-
-console.log('✅ Final Analytics Result:', {
-  success: {
-    amount: analytics.totalSuccessAmount,
-    orders: analytics.totalSuccessOrders
-  },
-  failed: {
-    amount: analytics.totalFailedAmount,
-    orders: analytics.totalFailedOrders
-  },
-  pending: {
-    amount: analytics.totalPendingAmount,
-    orders: analytics.totalPendingOrders
-  },
-  refund: {
-    amount: analytics.totalRefundAmount,
-    orders: analytics.totalRefundOrders
-  },
-  totalTransactions: analytics.totalTransactions
-});
-
-// ✅ ADD: Sample data for testing if needed
-if (analytics.totalTransactions === 0) {
-  console.log('📊 No transactions found, checking sample data...');
-  // Add sample data for testing
-  const sampleTransactions = await Transaction.find(matchQuery).limit(5);
-  console.log('🔍 Sample transactions:', sampleTransactions.map(t => ({
-    status: t.status || t.TransactionStatus,
-    amount: t.amount || t.Amount
-  })));
-}
 
   } catch (error) {
     console.error('❌ Analytics error:', error);
