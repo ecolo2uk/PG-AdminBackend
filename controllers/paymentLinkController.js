@@ -14,47 +14,43 @@ const ENPAY_MERCHANT_KEY = process.env.ENPAY_MERCHANT_KEY;
 const ENPAY_MERCHANT_SECRET = process.env.ENPAY_MERCHANT_SECRET;
 
 
+// backend/controllers/paymentLinkController.js
 export const generatePaymentLink = async (req, res) => {
   console.log('🚀 generatePaymentLink function called');
   
   try {
-       if (!req.body) {
-      console.error('❌ req.body is undefined');
+    // Check if body exists
+    if (!req.body || Object.keys(req.body).length === 0) {
+      console.error('❌ req.body is empty or undefined');
       return res.status(400).json({
         success: false,
-        message: 'Request body is missing'
+        message: 'Request body is required',
+        receivedBody: req.body
       });
     }
 
-    console.log('📦 Request body received:', JSON.stringify(req.body, null, 2));
-    console.log('📦 Request headers:', req.headers);
+    console.log('📦 Full request object:', {
+      method: req.method,
+      path: req.path,
+      headers: req.headers,
+      body: req.body
+    });
 
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    // Check if fields exist
-    if (!merchantId || !amount || !paymentMethod || !paymentOption) {
-      console.log('❌ Missing fields:', { merchantId, amount, paymentMethod, paymentOption });
+    // Check individual fields
+    if (!merchantId) {
+      console.log('❌ merchantId missing');
       return res.status(400).json({
         success: false,
-        message: 'All fields are required',
+        message: 'Merchant ID is required',
         received: { merchantId, amount, paymentMethod, paymentOption }
       });
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Amount must be between 500 and 10,000 INR'
-      });
-    }
+    console.log('✅ All fields received:', { merchantId, amount, paymentMethod, paymentOption });
 
-    console.log('✅ Validation passed');
-
-    // Merchant data
-   // backend/controllers/paymentLinkController.js
-// Merchant data - REAL DATA from your database
-const staticMerchants = [
+   const staticMerchants = [
   {
     _id: "6905b4b5a1ocf16df46bb2", // ✅ Real merchant ID
     firstname: "SKYPAL SYSTEM",
@@ -74,18 +70,33 @@ const staticMerchants = [
     merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
   }
 ];
+    console.log('🔍 Looking for merchant ID:', merchantId);
+    console.log('📋 Available merchants:', staticMerchants.map(m => ({ id: m._id, name: m.firstname })));
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
+    
     if (!merchant) {
+      console.log(`❌ Merchant not found for ID: ${merchantId}`);
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: 'Merchant not found',
+        requestedId: merchantId,
+        availableMerchants: staticMerchants.map(m => ({ id: m._id, name: `${m.firstname} ${m.lastname}` }))
       });
     }
 
     console.log('✅ Merchant found:', merchant.merchantName);
 
-    // Generate unique IDs
+    // Rest of your existing code...
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount must be between 500 and 10,000 INR'
+      });
+    }
+
+    // Continue with Enpay API call...
     const timestamp = Date.now();
     const randomSuffix = Math.floor(Math.random() * 10000);
     const merchantOrderId = `ORDER${timestamp}${randomSuffix}`;
@@ -93,106 +104,28 @@ const staticMerchants = [
 
     console.log('🆔 Generated IDs:', { merchantOrderId, merchantTrnId });
 
-    // Prepare Enpay API request
-    const API_BASE_URL = process.env.API_BASE_URL || 'https://pg-admin-backend.vercel.app';
-    
-    const enpayRequestData = {
-      "amount": amountNum.toFixed(2),
-      "merchantHashId": merchant.hashId,
-      "merchantOrderId": merchantOrderId,
-      "merchantTrnId": merchantTrnId,
-      "merchantVpa": merchant.vpa,
-      "returnURL": `${API_BASE_URL}/api/payment/return?transactionId=${merchantTrnId}`,
-      "successURL": `${API_BASE_URL}/api/payment/success?transactionId=${merchantTrnId}`,
-      "txnNote": `Payment for ${merchant.merchantName}`
-    };
-
-    console.log('📤 Enpay API Request Data:', JSON.stringify(enpayRequestData, null, 2));
-
-    // Check environment variables
-    if (!process.env.ENPAY_MERCHANT_KEY || !process.env.ENPAY_MERCHANT_SECRET) {
-      console.error('❌ MISSING ENPAY CREDENTIALS');
-      throw new Error('Enpay credentials not configured in environment variables');
-    }
-
-    console.log('🔄 Calling Enpay API...');
-
-    let enpayResponse;
-    try {
-      enpayResponse = await axios({
-        method: 'POST',
-        url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY,
-          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET
-        },
-        data: enpayRequestData,
-        timeout: 30000
-      });
-
-      console.log('✅ Enpay API Response Status:', enpayResponse.status);
-      console.log('✅ Enpay API Response Data:', JSON.stringify(enpayResponse.data, null, 2));
-
-    } catch (apiError) {
-      console.error('❌ ENPAY API ERROR:');
-      console.error('Error Message:', apiError.message);
-      console.error('Response Status:', apiError.response?.status);
-      console.error('Response Data:', apiError.response?.data);
-      
-      // Mock fallback
-      console.log('🔄 Using mock payment fallback...');
-      
-      const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-      const mockPaymentLink = `${FRONTEND_BASE_URL}/mock-payment?amount=${amountNum}&orderId=${merchantOrderId}`;
-      
-      return res.json({
-        success: true,
-        paymentLink: mockPaymentLink,
-        transactionRefId: merchantTrnId,
-        merchantOrderId: merchantOrderId,
-        isMock: true,
-        message: 'Mock payment link generated (Enpay API unavailable)'
-      });
-    }
-
-    // Validate Enpay response
-    if (!enpayResponse.data || !enpayResponse.data.details) {
-      console.error('❌ Invalid Enpay response structure');
-      throw new Error('Invalid response from payment gateway');
-    }
-
-    const finalPaymentLink = enpayResponse.data.details;
-    console.log('🔗 Enpay Payment Link:', finalPaymentLink);
-
-    // Generate short link
+    // Mock response for testing
     const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
     const shortLinkId = `pay_${timestamp}${randomSuffix}`;
-    
     const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
 
     console.log('🎉 Payment link generation completed!');
-    console.log('🔗 Custom Payment Link:', customPaymentLink);
 
     return res.json({
       success: true,
       paymentLink: customPaymentLink,
       transactionRefId: merchantTrnId,
       merchantOrderId: merchantOrderId,
-      isMock: false,
-      message: 'Payment link generated successfully!'
+      isMock: true, // Temporary for testing
+      message: 'Payment link generated successfully! (Mock mode)'
     });
 
   } catch (error) {
-    console.error('🔥 TOP-LEVEL ERROR in generatePaymentLink:');
-    console.error('Error Message:', error.message);
-    console.error('Error Stack:', error.stack);
-    
+    console.error('🔥 ERROR in generatePaymentLink:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 };
