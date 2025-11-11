@@ -308,6 +308,7 @@ export const handleSuccess = async (req, res) => {
       );
     }
 
+    // Direct redirect to frontend success page
     res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${transactionId || ''}`);
   } catch (error) {
     console.error('Success callback error:', error);
