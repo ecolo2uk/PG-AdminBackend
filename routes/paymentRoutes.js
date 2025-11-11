@@ -32,52 +32,29 @@ router.post('/decrypt-payload', (req, res) => {
 });
 
 // backend/routes/paymentRoutes.js
+// backend/routes/paymentRoutes.js मध्ये हे बदला
 router.get('/process/:shortLinkId', async (req, res) => {
   try {
     const { shortLinkId } = req.params;
-    console.log(`[Backend Debug] 1. Short link handler entered for shortLinkId: ${shortLinkId}`);
+    console.log('Short link handler called for:', shortLinkId);
 
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
 
-    if (!transaction) {
-      console.error(`[Backend Debug] ❌ 2. Transaction not found for shortLinkId: ${shortLinkId}`);
+    if (!transaction || !transaction.encryptedPaymentPayload) {
       return res.status(404).send('Payment link not found or expired.');
     }
-    console.log(`[Backend Debug] ✅ 2. Transaction found. Transaction ID: ${transaction.transactionId}`);
-
-    if (!transaction.encryptedPaymentPayload) {
-      console.error(`[Backend Debug] ❌ 3. encryptedPaymentPayload missing for transaction ID: ${transaction.transactionId}`);
-      return res.status(404).send('Payment link payload missing.');
-    }
-    console.log(`[Backend Debug] ✅ 3. encryptedPaymentPayload found.`);
 
     const decryptedData = decrypt(transaction.encryptedPaymentPayload);
-    console.log(`[Backend Debug] ✅ 4. Decrypted Payload (raw): ${decryptedData}`);
+    const { enpayLink, transactionId } = JSON.parse(decryptedData);
 
-    let enpayLink;
-    try {
-        const parsedPayload = JSON.parse(decryptedData);
-        enpayLink = parsedPayload.enpayLink;
-        console.log(`[Backend Debug] ✅ 5. Parsed payload. Extracted enpayLink: ${enpayLink}`);
-        if (!enpayLink) {
-            console.error(`[Backend Debug] ❌ 5a. enpayLink is null or undefined after parsing.`);
-            return res.status(500).send('Enpay payment URL not found in payload.');
-        }
-    } catch (parseError) {
-        console.error(`[Backend Debug] ❌ 5b. Error parsing decryptedData as JSON: ${parseError.message}`);
-        console.error(`[Backend Debug]    Decrypted data content: ${decryptedData}`);
-        return res.status(500).send('Invalid payment payload format.');
-    }
-
-    // THIS IS THE CRUCIAL REDIRECTION
-    console.log(`[Backend Debug] ➡️ 6. Attempting to redirect to Enpay: ${enpayLink}`);
-    res.redirect(enpayLink);
-    console.log(`[Backend Debug] ✅ 7. Redirect command issued.`); // Note: This might not always log if redirect happens immediately.
+    console.log(`Redirecting to Enpay: ${enpayLink}`);
+    
+    // Direct redirect to Enpay
+    return res.redirect(302, enpayLink);
 
   } catch (error) {
-    console.error(`[Backend Debug] 🔥 8. Error in /process/:shortLinkId: ${error.message}`);
-    console.error(error.stack); // Log the full stack trace for better debugging
-    res.status(500).send('An error occurred while processing your payment link.');
+    console.error('Error processing payment link:', error);
+    res.status(500).send('Error processing payment link');
   }
 });
 
