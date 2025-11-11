@@ -18,24 +18,26 @@ export const generatePaymentLink = async (req, res) => {
   console.log('🚀 generatePaymentLink function called');
   
   try {
-    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
-    
-    // Environment variables check
-    console.log('🔑 Environment Variables:', {
-      ENPAY_MERCHANT_KEY: process.env.ENPAY_MERCHANT_KEY ? 'SET' : 'MISSING',
-      ENPAY_MERCHANT_SECRET: process.env.ENPAY_MERCHANT_SECRET ? 'SET' : 'MISSING',
-      API_BASE_URL: process.env.API_BASE_URL,
-      FRONTEND_URL: process.env.FRONTEND_URL,
-      NODE_ENV: process.env.NODE_ENV
-    });
+       if (!req.body) {
+      console.error('❌ req.body is undefined');
+      return res.status(400).json({
+        success: false,
+        message: 'Request body is missing'
+      });
+    }
+
+    console.log('📦 Request body received:', JSON.stringify(req.body, null, 2));
+    console.log('📦 Request headers:', req.headers);
 
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    // Basic validation
+    // Check if fields exist
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
+      console.log('❌ Missing fields:', { merchantId, amount, paymentMethod, paymentOption });
       return res.status(400).json({
         success: false,
-        message: 'All fields are required'
+        message: 'All fields are required',
+        received: { merchantId, amount, paymentMethod, paymentOption }
       });
     }
 
@@ -50,17 +52,28 @@ export const generatePaymentLink = async (req, res) => {
     console.log('✅ Validation passed');
 
     // Merchant data
-    const staticMerchants = [
-      {
-        _id: "68fb0322970e105debcc26e7",
-        firstname: "John",
-        lastname: "Doe",
-        mid: "MID123456",
-        hashId: "MERCDSH51Y7CD4YJLFIZR8NF",
-        vpa: "enpay1.skypal@fino",
-        merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
-      }
-    ];
+   // backend/controllers/paymentLinkController.js
+// Merchant data - REAL DATA from your database
+const staticMerchants = [
+  {
+    _id: "6905b4b5a1ocf16df46bb2", // ✅ Real merchant ID
+    firstname: "SKYPAL SYSTEM",
+    lastname: "PRIVATE LIMITED", 
+    mid: "M1761981621943857",
+    hashId: "MERCDSH51Y7CD4YJLFIZR8NF", // Enpay hash ID
+    vpa: "enpay1.skypal@fino",
+    merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
+  },
+  {
+    _id: "690af75c8ca79a8525c0ba03",
+    firstname: "abc",
+    lastname: "efd",
+    mid: "M1762326364850484",
+    hashId: "MERCDSH51Y7CD4YJLFIZR8NF",
+    vpa: "enpay1.skypal@fino", 
+    merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
+  }
+];
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
@@ -185,14 +198,26 @@ export const generatePaymentLink = async (req, res) => {
 };
 export const getMerchants = async (req, res) => {
   try {
-   const staticMerchants = [
-      {
-        _id: "68fb0322970e105debcc26e7", // ✅ Update this too
-        firstname: "John",
-        lastname: "Doe", 
-        mid: "MID123456"
-      }
-    ];
+ const staticMerchants = [
+  {
+    _id: "6905b4b5a1ocf16df46bb2", // ✅ Real merchant ID
+    firstname: "SKYPAL SYSTEM",
+    lastname: "PRIVATE LIMITED", 
+    mid: "M1761981621943857",
+    hashId: "MERCDSH51Y7CD4YJLFIZR8NF", // Enpay hash ID
+    vpa: "enpay1.skypal@fino",
+    merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
+  },
+  {
+    _id: "690af75c8ca79a8525c0ba03",
+    firstname: "abc",
+    lastname: "efd",
+    mid: "M1762326364850484",
+    hashId: "MERCDSH51Y7CD4YJLFIZR8NF",
+    vpa: "enpay1.skypal@fino", 
+    merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
+  }
+];
 
     res.json({
       success: true,
