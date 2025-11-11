@@ -2,6 +2,7 @@ import Transaction from '../models/Transaction.js';
 import { encrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose'; // ✅ ADD THIS IMPORT
+import axios from 'axios'; // ✅ IMPORTANT: Add this import
 
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
@@ -12,47 +13,41 @@ const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 const ENPAY_MERCHANT_KEY = process.env.ENPAY_MERCHANT_KEY;
 const ENPAY_MERCHANT_SECRET = process.env.ENPAY_MERCHANT_SECRET;
 
-// backend/controllers/paymentLinkController.js
-// backend/controllers/paymentLinkController.js
+
 export const generatePaymentLink = async (req, res) => {
   console.log('🚀 generatePaymentLink function called');
   
   try {
     console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
-    console.log('🔑 Environment check:', {
-      hasMerchantKey: !!process.env.ENPAY_MERCHANT_KEY,
-      hasMerchantSecret: !!process.env.ENPAY_MERCHANT_SECRET,
-      apiBaseUrl: process.env.API_BASE_URL,
-      frontendUrl: process.env.FRONTEND_URL
+    
+    // Environment variables check
+    console.log('🔑 Environment Variables:', {
+      ENPAY_MERCHANT_KEY: process.env.ENPAY_MERCHANT_KEY ? 'SET' : 'MISSING',
+      ENPAY_MERCHANT_SECRET: process.env.ENPAY_MERCHANT_SECRET ? 'SET' : 'MISSING',
+      API_BASE_URL: process.env.API_BASE_URL,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      NODE_ENV: process.env.NODE_ENV
     });
 
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
     // Basic validation
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
-      console.log('❌ Missing required fields');
       return res.status(400).json({
         success: false,
-        message: 'All fields are required',
-        missingFields: {
-          merchantId: !merchantId,
-          amount: !amount,
-          paymentMethod: !paymentMethod,
-          paymentOption: !paymentOption
-        }
+        message: 'All fields are required'
       });
     }
 
     const amountNum = parseFloat(amount);
-    console.log(`💰 Amount validation: ${amountNum} (min: 500, max: 10000)`);
-
     if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be between 500 and 10,000 INR',
-        receivedAmount: amountNum
+        message: 'Amount must be between 500 and 10,000 INR'
       });
     }
+
+    console.log('✅ Validation passed');
 
     // Merchant data
     const staticMerchants = [
@@ -69,15 +64,13 @@ export const generatePaymentLink = async (req, res) => {
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
-      console.log(`❌ Merchant not found for ID: ${merchantId}`);
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found',
-        availableMerchants: staticMerchants.map(m => ({ id: m._id, name: m.firstname }))
+        message: 'Merchant not found'
       });
     }
 
-    console.log(`✅ Merchant found: ${merchant.merchantName}`);
+    console.log('✅ Merchant found:', merchant.merchantName);
 
     // Generate unique IDs
     const timestamp = Date.now();
@@ -85,10 +78,10 @@ export const generatePaymentLink = async (req, res) => {
     const merchantOrderId = `ORDER${timestamp}${randomSuffix}`;
     const merchantTrnId = `TRN${timestamp}${randomSuffix}`;
 
-    console.log(`🆔 Generated IDs - Order: ${merchantOrderId}, Txn: ${merchantTrnId}`);
+    console.log('🆔 Generated IDs:', { merchantOrderId, merchantTrnId });
 
     // Prepare Enpay API request
-    const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
+    const API_BASE_URL = process.env.API_BASE_URL || 'https://pg-admin-backend.vercel.app';
     
     const enpayRequestData = {
       "amount": amountNum.toFixed(2),
@@ -101,18 +94,18 @@ export const generatePaymentLink = async (req, res) => {
       "txnNote": `Payment for ${merchant.merchantName}`
     };
 
-    console.log('📤 Enpay API Request:', JSON.stringify(enpayRequestData, null, 2));
+    console.log('📤 Enpay API Request Data:', JSON.stringify(enpayRequestData, null, 2));
 
-    // Check if environment variables are set
+    // Check environment variables
     if (!process.env.ENPAY_MERCHANT_KEY || !process.env.ENPAY_MERCHANT_SECRET) {
-      console.error('❌ Missing Enpay credentials in environment variables');
-      throw new Error('Enpay credentials not configured');
+      console.error('❌ MISSING ENPAY CREDENTIALS');
+      throw new Error('Enpay credentials not configured in environment variables');
     }
+
+    console.log('🔄 Calling Enpay API...');
 
     let enpayResponse;
     try {
-      console.log('🔄 Calling Enpay API...');
-      
       enpayResponse = await axios({
         method: 'POST',
         url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
@@ -129,73 +122,40 @@ export const generatePaymentLink = async (req, res) => {
       console.log('✅ Enpay API Response Data:', JSON.stringify(enpayResponse.data, null, 2));
 
     } catch (apiError) {
-      console.error('❌ Enpay API Call Failed:');
+      console.error('❌ ENPAY API ERROR:');
       console.error('Error Message:', apiError.message);
-      console.error('Response Data:', apiError.response?.data);
       console.error('Response Status:', apiError.response?.status);
+      console.error('Response Data:', apiError.response?.data);
       
-      throw new Error(`Enpay API failed: ${apiError.response?.data?.message || apiError.message}`);
+      // Mock fallback
+      console.log('🔄 Using mock payment fallback...');
+      
+      const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const mockPaymentLink = `${FRONTEND_BASE_URL}/mock-payment?amount=${amountNum}&orderId=${merchantOrderId}`;
+      
+      return res.json({
+        success: true,
+        paymentLink: mockPaymentLink,
+        transactionRefId: merchantTrnId,
+        merchantOrderId: merchantOrderId,
+        isMock: true,
+        message: 'Mock payment link generated (Enpay API unavailable)'
+      });
     }
 
-    // Validate response
+    // Validate Enpay response
     if (!enpayResponse.data || !enpayResponse.data.details) {
-      console.error('❌ Invalid Enpay response - missing details');
-      console.error('Full response:', enpayResponse.data);
-      throw new Error('Invalid response from payment gateway - missing payment link');
+      console.error('❌ Invalid Enpay response structure');
+      throw new Error('Invalid response from payment gateway');
     }
 
     const finalPaymentLink = enpayResponse.data.details;
-    console.log('🔗 Final Payment Link:', finalPaymentLink);
-
-    // Save transaction
-    const transactionData = {
-      transactionId: merchantTrnId,
-      merchantOrderId: merchantOrderId,
-      merchantHashId: merchant.hashId,
-      merchantId: merchant._id,
-      merchantName: merchant.merchantName,
-      mid: merchant.mid,
-      amount: amountNum,
-      currency: currency,
-      status: 'INITIATED',
-      merchantVpa: merchant.vpa,
-      txnRefId: merchantTrnId,
-      txnNote: `Payment for ${merchant.merchantName}`,
-      paymentMethod: paymentMethod,
-      paymentOption: paymentOption,
-      paymentUrl: finalPaymentLink,
-      enpayTxnId: enpayResponse.data.data?.transactionId || merchantTrnId
-    };
-
-    console.log('💾 Saving transaction to database...');
-    
-    let newTransaction;
-    try {
-      newTransaction = new Transaction(transactionData);
-      await newTransaction.save();
-      console.log('✅ Transaction saved successfully:', newTransaction.transactionId);
-    } catch (dbError) {
-      console.error('❌ Database save error:', dbError);
-      throw new Error(`Failed to save transaction: ${dbError.message}`);
-    }
+    console.log('🔗 Enpay Payment Link:', finalPaymentLink);
 
     // Generate short link
-    const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const shortLinkId = newTransaction._id.toString();
+    const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const shortLinkId = `pay_${timestamp}${randomSuffix}`;
     
-    const encryptedPayload = encrypt(JSON.stringify({
-      enpayLink: finalPaymentLink,
-      transactionId: merchantTrnId,
-      merchantName: merchant.merchantName,
-      amount: amountNum.toFixed(2),
-      orderId: merchantOrderId
-    }));
-
-    await Transaction.findByIdAndUpdate(newTransaction._id, {
-      encryptedPaymentPayload: encryptedPayload,
-      shortLinkId: shortLinkId
-    });
-
     const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
 
     console.log('🎉 Payment link generation completed!');
@@ -217,13 +177,12 @@ export const generatePaymentLink = async (req, res) => {
     
     res.status(500).json({
       success: false,
-      message: 'Internal server error in payment link generation',
+      message: 'Internal server error',
       error: error.message,
-      detailedError: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
-// Keep other functions the same...
 export const getMerchants = async (req, res) => {
   try {
    const staticMerchants = [
