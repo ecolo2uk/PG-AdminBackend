@@ -384,22 +384,29 @@ export const getMerchantTransactionSummary = async (req, res) => {
     }
 
     const dateRange = getDateRange(timeFilter, startDate, endDate);
-    matchQuery = { ...matchQuery,
-      ...(dateRange.createdAt && {
-        unifiedCreatedAt: dateRange.createdAt
-      })
+    matchQuery = { 
+      ...matchQuery,
+      ...dateRange 
     };
-
 
     console.log('🔍 Match Query:', JSON.stringify(matchQuery, null, 2));
 
+    // ✅ FIXED: Correct status counting with proper field names
     const merchantSummary = await Transaction.aggregate([
-      // First, normalize status, amount, and ID fields
+      // First, normalize all fields
       {
         $addFields: {
           unifiedStatus: getTransactionStatusField,
           unifiedAmount: getTransactionAmountField,
-          unifiedCreatedAt: getCreatedAtField
+          unifiedCreatedAt: getCreatedAtField,
+          // ✅ ADD: Ensure we have merchantId for grouping
+          merchantGroupId: {
+            $cond: {
+              if: { $ne: ["$merchantId", null] },
+              then: "$merchantId",
+              else: "$merchantRefId" // Fallback for old schema
+            }
+          }
         }
       },
       {
@@ -407,47 +414,47 @@ export const getMerchantTransactionSummary = async (req, res) => {
       },
       {
         $group: {
-          _id: "$merchantId", // Group by the actual merchantId field (ObjectId)
-          totalTransactions: {
-            $sum: 1
+          _id: "$merchantGroupId",
+          totalTransactions: { $sum: 1 },
+          // ✅ FIXED: Correct status counting
+          successCount: {
+            $sum: {
+              $cond: [
+                { $in: ["$unifiedStatus", ["SUCCESS", "Success", "success"]] },
+                1, 0
+              ]
+            }
           },
-          // In your sales report aggregation, make sure to include:
-successCount: {
-  $sum: { 
-    $cond: [{
-      $in: ["$unifiedStatus", getUnifiedStatusMatch("SUCCESS")]
-    }, 1, 0] 
-  }
-},
-failedCount: {
-  $sum: { 
-    $cond: [{
-      $in: ["$unifiedStatus", getUnifiedStatusMatch("FAILED")]
-    }, 1, 0] 
-  }
-},
-pendingCount: {
-  $sum: { 
-    $cond: [{
-      $in: ["$unifiedStatus", getUnifiedStatusMatch("PENDING")]
-    }, 1, 0] 
-  }
-},
-refundCount: {
-  $sum: { 
-    $cond: [{
-      $in: ["$unifiedStatus", getUnifiedStatusMatch("REFUND")]
-    }, 1, 0] 
-  }
-},
-          totalAmount: {
-            $sum: "$unifiedAmount"
-          }
+          failedCount: {
+            $sum: {
+              $cond: [
+                { $in: ["$unifiedStatus", ["FAILED", "Failed", "failed", "FALLED"]] },
+                1, 0
+              ]
+            }
+          },
+          pendingCount: {
+            $sum: {
+              $cond: [
+                { $in: ["$unifiedStatus", ["PENDING", "Pending", "pending", "GENERATED", "INITIATED"]] },
+                1, 0
+              ]
+            }
+          },
+          refundCount: {
+            $sum: {
+              $cond: [
+                { $in: ["$unifiedStatus", ["REFUND", "Refund", "refund"]] },
+                1, 0
+              ]
+            }
+          },
+          totalAmount: { $sum: "$unifiedAmount" }
         }
       },
       {
         $lookup: {
-          from: 'users', // Assuming your User model is in 'users' collection
+          from: 'users',
           localField: '_id',
           foreignField: '_id',
           as: 'merchantInfo'
@@ -462,18 +469,25 @@ refundCount: {
       {
         $project: {
           merchantId: "$_id",
+          // ✅ FIXED: Better merchant name resolution
           merchantName: {
             $cond: {
               if: {
-                $and: ["$merchantInfo", "$merchantInfo.company", {
-                  $ne: ["$merchantInfo.company", ""]
-                }]
+                $and: [
+                  "$merchantInfo",
+                  "$merchantInfo.company",
+                  { $ne: ["$merchantInfo.company", ""] }
+                ]
               },
               then: "$merchantInfo.company",
               else: {
                 $cond: {
                   if: {
-                    $and: ["$merchantInfo", "$merchantInfo.firstname", "$merchantInfo.lastname"]
+                    $and: [
+                      "$merchantInfo", 
+                      "$merchantInfo.firstname",
+                      "$merchantInfo.lastname"
+                    ]
                   },
                   then: {
                     $concat: ["$merchantInfo.firstname", " ", "$merchantInfo.lastname"]
@@ -498,17 +512,23 @@ refundCount: {
         }
       },
       {
-        $sort: {
-          totalAmount: -1
-        }
+        $sort: { totalAmount: -1 }
       }
     ]);
 
     console.log('✅ Merchant summary fetched:', merchantSummary.length, 'merchants');
+    
+    // ✅ DEBUG: Log first merchant data for verification
     if (merchantSummary.length > 0) {
-      console.log('📊 Sample merchant data:', merchantSummary[0]);
+      console.log('📊 Sample merchant with counts:', {
+        name: merchantSummary[0].merchantName,
+        success: merchantSummary[0].successCount,
+        failed: merchantSummary[0].failedCount, 
+        pending: merchantSummary[0].pendingCount,
+        refund: merchantSummary[0].refundCount,
+        total: merchantSummary[0].totalTransactions
+      });
     }
-
 
     res.status(200).json(merchantSummary);
   } catch (error) {
