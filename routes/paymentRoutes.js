@@ -32,30 +32,31 @@ router.post('/decrypt-payload', (req, res) => {
 });
 
 // backend/routes/paymentRoutes.js
-// backend/routes/paymentRoutes.js मध्ये हे बदला
 router.get('/process/:shortLinkId', async (req, res) => {
   try {
     const { shortLinkId } = req.params;
-    console.log('Short link handler called for:', shortLinkId);
+    console.log('Processing short link:', shortLinkId);
 
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
-
-    if (!transaction || !transaction.encryptedPaymentPayload) {
-      return res.status(404).send('Payment link not found or expired.');
+    
+    if (!transaction) {
+      console.error('Transaction not found for shortLinkId:', shortLinkId);
+      return res.status(404).send('Payment link not found');
     }
 
-    const decryptedData = decrypt(transaction.encryptedPaymentPayload);
-    const { enpayLink, transactionId } = JSON.parse(decryptedData);
+    if (!transaction.paymentUrl) {
+      console.error('Payment URL missing for transaction:', transaction.transactionId);
+      return res.status(404).send('Payment URL not available');
+    }
 
-    console.log(`Redirecting to Enpay: ${enpayLink}`);
+    console.log('Redirecting to Enpay:', transaction.paymentUrl);
     
     // Direct redirect to Enpay
-    return res.redirect(302, enpayLink);
+    res.redirect(302, transaction.paymentUrl);
 
   } catch (error) {
-    console.error('Error processing payment link:', error);
-    res.status(500).send('Error processing payment link');
+    console.error('Error in process route:', error);
+    res.status(500).send('Error processing payment');
   }
 });
-
 export default router;
