@@ -1388,6 +1388,38 @@ export const getDashboardAnalytics = async (req, res) => {
 
     console.log('✅ Final Analytics Result:', analytics);
     res.json(analytics);
+    // controllers/dashboardController.js - getDashboardAnalytics मध्ये
+
+console.log('✅ Final Analytics Result:', {
+  success: {
+    amount: analytics.totalSuccessAmount,
+    orders: analytics.totalSuccessOrders
+  },
+  failed: {
+    amount: analytics.totalFailedAmount,
+    orders: analytics.totalFailedOrders
+  },
+  pending: {
+    amount: analytics.totalPendingAmount,
+    orders: analytics.totalPendingOrders
+  },
+  refund: {
+    amount: analytics.totalRefundAmount,
+    orders: analytics.totalRefundOrders
+  },
+  totalTransactions: analytics.totalTransactions
+});
+
+// ✅ ADD: Sample data for testing if needed
+if (analytics.totalTransactions === 0) {
+  console.log('📊 No transactions found, checking sample data...');
+  // Add sample data for testing
+  const sampleTransactions = await Transaction.find(matchQuery).limit(5);
+  console.log('🔍 Sample transactions:', sampleTransactions.map(t => ({
+    status: t.status || t.TransactionStatus,
+    amount: t.amount || t.Amount
+  })));
+}
 
   } catch (error) {
     console.error('❌ Analytics error:', error);
