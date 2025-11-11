@@ -13,30 +13,48 @@ const ENPAY_MERCHANT_KEY = process.env.ENPAY_MERCHANT_KEY;
 const ENPAY_MERCHANT_SECRET = process.env.ENPAY_MERCHANT_SECRET;
 
 // backend/controllers/paymentLinkController.js
+// backend/controllers/paymentLinkController.js
 export const generatePaymentLink = async (req, res) => {
+  console.log('🚀 generatePaymentLink function called');
+  
   try {
-    console.log('🚀 Starting payment link generation...');
-    console.log('📦 Request body:', req.body);
+    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
+    console.log('🔑 Environment check:', {
+      hasMerchantKey: !!process.env.ENPAY_MERCHANT_KEY,
+      hasMerchantSecret: !!process.env.ENPAY_MERCHANT_SECRET,
+      apiBaseUrl: process.env.API_BASE_URL,
+      frontendUrl: process.env.FRONTEND_URL
+    });
 
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    // 1. Validation
+    // Basic validation
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({
         success: false,
-        message: 'All fields are required'
+        message: 'All fields are required',
+        missingFields: {
+          merchantId: !merchantId,
+          amount: !amount,
+          paymentMethod: !paymentMethod,
+          paymentOption: !paymentOption
+        }
       });
     }
 
     const amountNum = parseFloat(amount);
+    console.log(`💰 Amount validation: ${amountNum} (min: 500, max: 10000)`);
+
     if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be between 500 and 10,000 INR'
+        message: 'Amount must be between 500 and 10,000 INR',
+        receivedAmount: amountNum
       });
     }
 
-    // 2. Merchant data
+    // Merchant data
     const staticMerchants = [
       {
         _id: "68fb0322970e105debcc26e7",
@@ -45,27 +63,33 @@ export const generatePaymentLink = async (req, res) => {
         mid: "MID123456",
         hashId: "MERCDSH51Y7CD4YJLFIZR8NF",
         vpa: "enpay1.skypal@fino",
-        merchantName: "SKYPAL SYSTEM PRIVATE LIMITED" // ✅ ADD THIS
+        merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
       }
     ];
 
     const merchant = staticMerchants.find(m => m._id === merchantId);
     if (!merchant) {
+      console.log(`❌ Merchant not found for ID: ${merchantId}`);
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: 'Merchant not found',
+        availableMerchants: staticMerchants.map(m => ({ id: m._id, name: m.firstname }))
       });
     }
 
-    // 3. Generate unique IDs
+    console.log(`✅ Merchant found: ${merchant.merchantName}`);
+
+    // Generate unique IDs
     const timestamp = Date.now();
     const randomSuffix = Math.floor(Math.random() * 10000);
     const merchantOrderId = `ORDER${timestamp}${randomSuffix}`;
     const merchantTrnId = `TRN${timestamp}${randomSuffix}`;
 
-    console.log('🆔 Generated IDs:', { merchantOrderId, merchantTrnId });
+    console.log(`🆔 Generated IDs - Order: ${merchantOrderId}, Txn: ${merchantTrnId}`);
 
-    // 4. Prepare Enpay API request with PROPER DATA
+    // Prepare Enpay API request
+    const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
+    
     const enpayRequestData = {
       "amount": amountNum.toFixed(2),
       "merchantHashId": merchant.hashId,
@@ -74,45 +98,56 @@ export const generatePaymentLink = async (req, res) => {
       "merchantVpa": merchant.vpa,
       "returnURL": `${API_BASE_URL}/api/payment/return?transactionId=${merchantTrnId}`,
       "successURL": `${API_BASE_URL}/api/payment/success?transactionId=${merchantTrnId}`,
-      "txnNote": `Payment for ${merchant.merchantName}`,
-      "merchantName": merchant.merchantName, // ✅ ADD MERCHANT NAME
-      "currency": currency // ✅ ADD CURRENCY
+      "txnNote": `Payment for ${merchant.merchantName}`
     };
 
-    console.log('📤 Enpay Request Data:', JSON.stringify(enpayRequestData, null, 2));
+    console.log('📤 Enpay API Request:', JSON.stringify(enpayRequestData, null, 2));
 
-    // 5. Enpay API call
+    // Check if environment variables are set
+    if (!process.env.ENPAY_MERCHANT_KEY || !process.env.ENPAY_MERCHANT_SECRET) {
+      console.error('❌ Missing Enpay credentials in environment variables');
+      throw new Error('Enpay credentials not configured');
+    }
+
     let enpayResponse;
     try {
+      console.log('🔄 Calling Enpay API...');
+      
       enpayResponse = await axios({
         method: 'POST',
         url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
         headers: {
           'Content-Type': 'application/json',
-          'X-Merchant-Key': ENPAY_MERCHANT_KEY,
-          'X-Merchant-Secret': ENPAY_MERCHANT_SECRET
+          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY,
+          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET
         },
         data: enpayRequestData,
         timeout: 30000
       });
 
-      console.log('✅ Enpay API Response:', JSON.stringify(enpayResponse.data, null, 2));
+      console.log('✅ Enpay API Response Status:', enpayResponse.status);
+      console.log('✅ Enpay API Response Data:', JSON.stringify(enpayResponse.data, null, 2));
 
     } catch (apiError) {
-      console.error('❌ Enpay API Error:', apiError.response?.data || apiError.message);
+      console.error('❌ Enpay API Call Failed:');
+      console.error('Error Message:', apiError.message);
+      console.error('Response Data:', apiError.response?.data);
+      console.error('Response Status:', apiError.response?.status);
+      
       throw new Error(`Enpay API failed: ${apiError.response?.data?.message || apiError.message}`);
     }
 
-    // 6. Validate Enpay response
+    // Validate response
     if (!enpayResponse.data || !enpayResponse.data.details) {
-      console.error('❌ Invalid Enpay response structure');
-      throw new Error('Invalid response from payment gateway');
+      console.error('❌ Invalid Enpay response - missing details');
+      console.error('Full response:', enpayResponse.data);
+      throw new Error('Invalid response from payment gateway - missing payment link');
     }
 
     const finalPaymentLink = enpayResponse.data.details;
-    console.log('🔗 Enpay Payment Link:', finalPaymentLink);
+    console.log('🔗 Final Payment Link:', finalPaymentLink);
 
-    // 7. Save transaction
+    // Save transaction
     const transactionData = {
       transactionId: merchantTrnId,
       merchantOrderId: merchantOrderId,
@@ -132,11 +167,22 @@ export const generatePaymentLink = async (req, res) => {
       enpayTxnId: enpayResponse.data.data?.transactionId || merchantTrnId
     };
 
-    const newTransaction = new Transaction(transactionData);
-    await newTransaction.save();
+    console.log('💾 Saving transaction to database...');
+    
+    let newTransaction;
+    try {
+      newTransaction = new Transaction(transactionData);
+      await newTransaction.save();
+      console.log('✅ Transaction saved successfully:', newTransaction.transactionId);
+    } catch (dbError) {
+      console.error('❌ Database save error:', dbError);
+      throw new Error(`Failed to save transaction: ${dbError.message}`);
+    }
 
-    // 8. Generate short link
+    // Generate short link
+    const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
     const shortLinkId = newTransaction._id.toString();
+    
     const encryptedPayload = encrypt(JSON.stringify({
       enpayLink: finalPaymentLink,
       transactionId: merchantTrnId,
@@ -152,6 +198,9 @@ export const generatePaymentLink = async (req, res) => {
 
     const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
 
+    console.log('🎉 Payment link generation completed!');
+    console.log('🔗 Custom Payment Link:', customPaymentLink);
+
     return res.json({
       success: true,
       paymentLink: customPaymentLink,
@@ -162,11 +211,15 @@ export const generatePaymentLink = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('🔥 Error in generatePaymentLink:', error);
+    console.error('🔥 TOP-LEVEL ERROR in generatePaymentLink:');
+    console.error('Error Message:', error.message);
+    console.error('Error Stack:', error.stack);
+    
     res.status(500).json({
       success: false,
-      message: 'Internal server error',
-      error: error.message
+      message: 'Internal server error in payment link generation',
+      error: error.message,
+      detailedError: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
