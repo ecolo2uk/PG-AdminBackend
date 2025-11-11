@@ -32,29 +32,98 @@ router.post('/decrypt-payload', (req, res) => {
 });
 
 // backend/routes/paymentRoutes.js
-// backend/routes/paymentRoutes.js मध्ये हे बदला
 router.get('/process/:shortLinkId', async (req, res) => {
   try {
     const { shortLinkId } = req.params;
-    console.log('Short link handler called for:', shortLinkId);
+    console.log('🔄 Process route called for shortLinkId:', shortLinkId);
 
+    // Check database connection
+    console.log('📊 Database state:', {
+      connectionState: mongoose.connection.readyState,
+      dbName: mongoose.connection.name
+    });
+
+    // Find transaction
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
+    console.log('🔍 Transaction search result:', transaction);
 
-    if (!transaction || !transaction.encryptedPaymentPayload) {
-      return res.status(404).send('Payment link not found or expired.');
+    if (!transaction) {
+      console.error('❌ Transaction not found for shortLinkId:', shortLinkId);
+      
+      // Check all transactions for debugging
+      const allTransactions = await Transaction.find({}).limit(5);
+      console.log('📋 Recent transactions:', allTransactions.map(t => ({
+        shortLinkId: t.shortLinkId,
+        transactionId: t.transactionId,
+        merchantName: t.merchantName
+      })));
+      
+      return res.status(404).send(`
+        <html>
+          <body>
+            <h2>Payment Link Not Found</h2>
+            <p>Short Link ID: ${shortLinkId}</p>
+            <p>This payment link may have expired or is invalid.</p>
+            <a href="/">Return to Home</a>
+          </body>
+        </html>
+      `);
     }
 
-    const decryptedData = decrypt(transaction.encryptedPaymentPayload);
-    const { enpayLink, transactionId } = JSON.parse(decryptedData);
+    if (!transaction.encryptedPaymentPayload) {
+      console.error('❌ Encrypted payload missing for transaction:', transaction.transactionId);
+      return res.status(404).send('Payment link payload missing.');
+    }
 
-    console.log(`Redirecting to Enpay: ${enpayLink}`);
+    console.log('✅ Transaction found:', transaction.transactionId);
+    console.log('🔐 Encrypted payload exists');
+
+    // Decrypt payload
+    let decryptedData;
+    try {
+      decryptedData = decrypt(transaction.encryptedPaymentPayload);
+      console.log('✅ Decrypted payload:', decryptedData);
+    } catch (decryptError) {
+      console.error('❌ Decryption error:', decryptError);
+      return res.status(500).send('Error processing payment link.');
+    }
+
+    let enpayLink;
+    try {
+      const parsedPayload = JSON.parse(decryptedData);
+      enpayLink = parsedPayload.enpayLink;
+      console.log('🔗 Enpay Link extracted:', enpayLink);
+    } catch (parseError) {
+      console.error('❌ JSON parse error:', parseError);
+      return res.status(500).send('Invalid payment payload.');
+    }
+
+    if (!enpayLink) {
+      console.error('❌ Enpay link is empty');
+      return res.status(500).send('Payment URL not available.');
+    }
+
+    console.log('➡️ Redirecting to Enpay:', enpayLink);
     
-    // Direct redirect to Enpay
-    return res.redirect(302, enpayLink);
+    // Update transaction status
+    await Transaction.findOneAndUpdate(
+      { shortLinkId: shortLinkId },
+      { status: 'REDIRECTED' }
+    );
+
+    res.redirect(302, enpayLink);
 
   } catch (error) {
-    console.error('Error processing payment link:', error);
-    res.status(500).send('Error processing payment link');
+    console.error('🔥 ERROR in process route:', error);
+    res.status(500).send(`
+      <html>
+        <body>
+          <h2>Payment Processing Error</h2>
+          <p>An error occurred while processing your payment.</p>
+          <a href="/">Return to Home</a>
+        </body>
+      </html>
+    `);
   }
 });
 
