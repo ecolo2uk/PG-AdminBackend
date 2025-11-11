@@ -6,7 +6,9 @@ import {
   getTransactionsByMerchantStatus,
   getSalesReport,
   getAllTransactions ,
-  checkTransaction
+  checkTransaction,
+  debugTransactionStatus,
+  checkPendingTransactions
   // Assuming you want this too, it's defined in the controller
 } from '../controllers/dashboardController.js';
 
