@@ -19,5 +19,7 @@ router.get('/transactions-by-merchant', getTransactionsByMerchantStatus);
 router.get('/sales-report', getSalesReport);
 router.get('/all-transactions', getAllTransactions); // Added route for getAllTransactions
 router.get('/checkTransaction', checkTransaction); // Added route for checkTransactionData
-
+// routes.js मध्ये
+router.get('/transactions/debug-status', debugTransactionStatus);
+router.get('/transactions/check-pending', checkPendingTransactions);
 export default router;

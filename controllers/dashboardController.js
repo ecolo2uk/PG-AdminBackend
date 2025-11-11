@@ -77,12 +77,12 @@ const getDateRange = (filter, startDate, endDate) => {
 const getUnifiedStatusMatch = (status) => {
   console.log('🔍 Checking status mapping for:', status);
   
-  const statusMappings = {
-    'SUCCESS': ['SUCCESS', 'Success', 'success', 'SUCCESSFUL', 'successful'],
-    'FAILED': ['FAILED', 'Failed', 'failed', 'FAILURE', 'failure', 'REJECTED', 'rejected'],
-    'PENDING': ['PENDING', 'Pending', 'pending', 'INITIATED', 'Initiated', 'initiated', 'GENERATED', 'Generated', 'generated'],
-    'REFUND': ['REFUND', 'Refund', 'refund', 'REFUNDED', 'refunded']
-  };
+ const statusMappings = {
+  'SUCCESS': ['SUCCESS', 'Success', 'success', 'SUCCESSFUL', 'successful'],
+  'FAILED': ['FAILED', 'Failed', 'failed', 'FAILURE', 'failure', 'REJECTED', 'rejected'],
+  'PENDING': ['PENDING', 'Pending', 'pending', 'INITIATED', 'Initiated', 'initiated', 'GENERATED', 'Generated', 'generated'],
+  'REFUND': ['REFUND', 'Refund', 'refund', 'REFUNDED', 'refunded']
+};
   
   const upperStatus = status?.toUpperCase();
   const matchedStatuses = statusMappings[upperStatus] || [status];
@@ -871,45 +871,34 @@ export const getDashboardAnalytics = async (req, res) => {
       endDate
     });
 
-    // ✅ FIXED: Build proper date filter
+    // Date filter
     const dateFilter = getDateRange(timeFilter, startDate, endDate);
     
-    // ✅ FIXED: Handle mixed merchantId types
+    // Merchant filter
     let merchantFilter = {};
     if (merchantId && merchantId !== 'all') {
-      // Check if merchantId is valid ObjectId
-      if (mongoose.Types.ObjectId.isValid(merchantId)) {
-        merchantFilter.merchantId = new mongoose.Types.ObjectId(merchantId);
-      } else {
-        // If it's a string, use string comparison
-        merchantFilter.merchantId = merchantId;
-      }
+      merchantFilter.merchantId = mongoose.Types.ObjectId.isValid(merchantId) 
+        ? new mongoose.Types.ObjectId(merchantId)
+        : merchantId;
     }
 
-    console.log('🔍 Final filters:', {
-      dateFilter,
-      merchantFilter
-    });
-
-    // ✅ FIXED: Use direct MongoDB queries instead of aggregation
     const matchQuery = {
       ...dateFilter,
       ...merchantFilter
     };
 
-    console.log('🔍 Match Query:', JSON.stringify(matchQuery, null, 2));
+    console.log('🔍 Analytics Match Query:', JSON.stringify(matchQuery, null, 2));
 
-    // Get all transactions with the filter
+    // Get all transactions
     const transactions = await Transaction.find(matchQuery);
-
     console.log(`📊 Found ${transactions.length} transactions for analytics`);
 
-    // ✅ FIXED: Manual counting with proper status mapping
+    // Enhanced status mapping with more variations
     const statusMapping = {
-      'SUCCESS': ['SUCCESS', 'Success', 'success'],
-      'FAILED': ['FAILED', 'Failed', 'failed', 'FALLED'],
-      'PENDING': ['PENDING', 'Pending', 'pending', 'GENERATED', 'INITIATED'],
-      'REFUND': ['REFUND', 'Refund', 'refund', 'REFUNDED']
+      'SUCCESS': ['SUCCESS', 'Success', 'success', 'SUCCESSFUL', 'successful', 'COMPLETED', 'completed'],
+      'FAILED': ['FAILED', 'Failed', 'failed', 'FAILURE', 'failure', 'FALLED', 'falled', 'REJECTED', 'rejected'],
+      'PENDING': ['PENDING', 'Pending', 'pending', 'INITIATED', 'Initiated', 'initiated', 'GENERATED', 'Generated', 'generated', 'PROCESSING', 'processing'],
+      'REFUND': ['REFUND', 'Refund', 'refund', 'REFUNDED', 'refunded', 'CANCELLED', 'cancelled']
     };
 
     let analytics = {
@@ -921,38 +910,56 @@ export const getDashboardAnalytics = async (req, res) => {
       totalFailedOrders: 0,
       totalPendingOrders: 0,
       totalRefundOrders: 0,
-      totalTransactions: transactions.length
+      totalTransactions: transactions.length,
+      statusBreakdown: {} // For debugging
     };
 
-    // Manual counting for each transaction
-    transactions.forEach(transaction => {
-      const amount = Number(transaction.amount) || 0;
-      const status = String(transaction.status).toUpperCase().trim();
+    // Process each transaction
+    transactions.forEach((transaction, index) => {
+      const amount = Number(transaction.amount || transaction.Amount || 0);
+      const status = String(transaction.status || transaction.TransactionStatus || 'UNKNOWN').toUpperCase().trim();
 
-      // Debug log for first few transactions
-      if (analytics.totalTransactions < 5) {
-        console.log(`🔍 Sample Transaction - Status: "${status}", Amount: ${amount}`);
-      }
+      // Store status breakdown for debugging
+      analytics.statusBreakdown[status] = (analytics.statusBreakdown[status] || 0) + 1;
 
       // Map to unified status
+      let foundStatus = false;
+      
       if (statusMapping.SUCCESS.includes(status)) {
         analytics.totalSuccessAmount += amount;
         analytics.totalSuccessOrders += 1;
-      } else if (statusMapping.FAILED.includes(status)) {
+        foundStatus = true;
+      } 
+      else if (statusMapping.FAILED.includes(status)) {
         analytics.totalFailedAmount += amount;
         analytics.totalFailedOrders += 1;
-      } else if (statusMapping.PENDING.includes(status)) {
+        foundStatus = true;
+      }
+      else if (statusMapping.PENDING.includes(status)) {
         analytics.totalPendingAmount += amount;
         analytics.totalPendingOrders += 1;
-      } else if (statusMapping.REFUND.includes(status)) {
+        foundStatus = true;
+      }
+      else if (statusMapping.REFUND.includes(status)) {
         analytics.totalRefundAmount += amount;
         analytics.totalRefundOrders += 1;
-      } else {
-        console.log(`⚠️ Unknown status: ${status}`);
+        foundStatus = true;
+      }
+
+      // Log first 5 transactions for debugging
+      if (index < 5) {
+        console.log(`🔍 Sample ${index + 1}: Status="${status}", Amount=${amount}, Mapped=${foundStatus}`);
       }
     });
 
-    console.log('✅ Final Analytics Result:', analytics);
+    console.log('📊 Status Breakdown:', analytics.statusBreakdown);
+    console.log('✅ Final Analytics:', {
+      success: analytics.totalSuccessOrders,
+      failed: analytics.totalFailedOrders,
+      pending: analytics.totalPendingOrders,
+      refund: analytics.totalRefundOrders
+    });
+
     res.json(analytics);
 
   } catch (error) {
@@ -983,13 +990,13 @@ export const checkTransaction = async (req, res) => {
 
     console.log(`📊 Found ${transactions.length} transactions for status check`);
 
-    // ✅ FIXED: Unified status aggregation
-    const statusMapping = {
-      'SUCCESS': ['SUCCESS', 'Success', 'success'],
-      'FAILED': ['FAILED', 'Failed', 'failed', 'FALLED'],
-      'PENDING': ['PENDING', 'Pending', 'pending', 'GENERATED', 'INITIATED'],
-      'REFUND': ['REFUND', 'Refund', 'refund']
-    };
+ // controllers/dashboardController.js मध्ये
+const statusMappings = {
+  'SUCCESS': ['SUCCESS', 'Success', 'success', 'SUCCESSFUL', 'successful'],
+  'FAILED': ['FAILED', 'Failed', 'failed', 'FAILURE', 'failure', 'REJECTED', 'rejected'],
+  'PENDING': ['PENDING', 'Pending', 'pending', 'INITIATED', 'Initiated', 'initiated', 'GENERATED', 'Generated', 'generated'],
+  'REFUND': ['REFUND', 'Refund', 'refund', 'REFUNDED', 'refunded']
+};
 
     const result = {};
 
@@ -1028,6 +1035,51 @@ export const checkTransaction = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Check transaction error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// controllers/dashboardController.js मध्ये add करा
+export const debugTransactionStatus = async (req, res) => {
+  try {
+    const transactions = await Transaction.find({});
+    
+    const statusCount = {};
+    transactions.forEach(transaction => {
+      const status = transaction.status || transaction.TransactionStatus;
+      statusCount[status] = (statusCount[status] || 0) + 1;
+    });
+    
+    console.log('📊 All Statuses in Database:', statusCount);
+    res.json(statusCount);
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Temporary debugging endpoint
+export const checkPendingTransactions = async (req, res) => {
+  try {
+    const { timeFilter = 'this_month' } = req.query;
+    const dateRange = getDateRange(timeFilter);
+    
+    const pendingTransactions = await Transaction.find({
+      ...dateRange,
+      $or: [
+        { status: { $in: ['PENDING', 'Pending', 'pending', 'INITIATED', 'GENERATED'] } },
+        { TransactionStatus: { $in: ['PENDING', 'Pending', 'pending', 'INITIATED', 'GENERATED'] } }
+      ]
+    });
+    
+    console.log(`📊 Found ${pendingTransactions.length} pending transactions`);
+    
+    res.json({
+      count: pendingTransactions.length,
+      transactions: pendingTransactions.slice(0, 5) // First 5 for sample
+    });
+  } catch (error) {
+    console.error('Pending check error:', error);
     res.status(500).json({ error: error.message });
   }
 };
