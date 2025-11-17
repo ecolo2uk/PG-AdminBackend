@@ -1,9 +1,15 @@
-// backend/routes/paymentRoutes.js (Consolidated file)
 import express from 'express';
-import { generatePaymentLink, handleSuccess, handleReturn, getMerchants, getPaymentMethods } from '../controllers/paymentLinkController.js';
+import { 
+  generatePaymentLink, 
+  handleSuccess, 
+  handleReturn, 
+  getMerchants, 
+  getPaymentMethods ,
+  getMerchantConnectors,
+  debugMerchantData
+} from '../controllers/paymentLinkController.js';
 import { decrypt } from '../utils/encryption.js';
-import Transaction from '../models/Transaction.js'; // Needed for the short link route
-import { encrypt } from '../utils/encryption.js'; // Ensure encrypt is also available if needed for short link generation logic
+import Transaction from '../models/Transaction.js';
 
 const router = express.Router();
 
@@ -11,12 +17,14 @@ const router = express.Router();
 router.get('/merchants', getMerchants);
 router.get('/methods', getPaymentMethods);
 router.post('/generate-link', generatePaymentLink);
+router.get('/:merchantId/connector-accounts', getMerchantConnectors);
+// Payment callbacks
+router.get('/debug/:merchantId', debugMerchantData);
 
-// Enpay callbacks (these are called by Enpay, not directly by your frontend)
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
 
-// Decryption endpoint for frontend (used by PaymentProcessPage to get enpayLink)
+// Decryption endpoint for frontend
 router.post('/decrypt-payload', (req, res) => {
   try {
     const { payload } = req.body;
@@ -31,30 +39,16 @@ router.post('/decrypt-payload', (req, res) => {
   }
 });
 
-// backend/routes/paymentRoutes.js
+// Process short link
 router.get('/process/:shortLinkId', async (req, res) => {
   try {
     const { shortLinkId } = req.params;
     console.log('🔄 Process route called for shortLinkId:', shortLinkId);
 
-    // Find transaction with detailed logging
-    console.log('🔍 Searching for transaction with shortLinkId:', shortLinkId);
-    
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
     
     if (!transaction) {
       console.error('❌ Transaction not found in database');
-      
-      // List all transactions for debugging
-      const allTransactions = await Transaction.find({}).sort({ createdAt: -1 }).limit(5);
-      console.log('📋 Recent transactions:', allTransactions.map(t => ({
-        id: t._id,
-        shortLinkId: t.shortLinkId,
-        transactionId: t.transactionId,
-        merchantName: t.merchantName,
-        createdAt: t.createdAt
-      })));
-      
       return res.status(404).send(`
         <html>
           <head><title>Payment Link Not Found</title></head>
@@ -68,20 +62,11 @@ router.get('/process/:shortLinkId', async (req, res) => {
       `);
     }
 
-    console.log('✅ Transaction found:', {
-      id: transaction._id,
-      transactionId: transaction.transactionId,
-      shortLinkId: transaction.shortLinkId,
-      merchantName: transaction.merchantName,
-      amount: transaction.amount,
-      paymentUrl: transaction.paymentUrl,
-      hasEncryptedPayload: !!transaction.encryptedPaymentPayload
-    });
+    console.log('✅ Transaction found:', transaction.transactionId);
 
     if (!transaction.encryptedPaymentPayload) {
       console.error('❌ Encrypted payload missing');
       
-      // If no encrypted payload but has direct payment URL, use that
       if (transaction.paymentUrl) {
         console.log('🔄 Using direct payment URL:', transaction.paymentUrl);
         return res.redirect(302, transaction.paymentUrl);
@@ -117,13 +102,11 @@ router.get('/process/:shortLinkId', async (req, res) => {
 
     console.log('➡️ Redirecting to Enpay:', enpayLink);
     
-    // Update transaction status
     await Transaction.findOneAndUpdate(
       { shortLinkId: shortLinkId },
       { status: 'REDIRECTED', redirectedAt: new Date() }
     );
 
-    // Final redirect to Enpay
     res.redirect(302, enpayLink);
 
   } catch (error) {
