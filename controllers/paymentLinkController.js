@@ -55,29 +55,38 @@ const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, pa
   }
 };
 
-// 🎯 MAIN PAYMENT LINK GENERATION FUNCTION - GENERIC FOR ALL CONNECTORS
+
 export const generatePaymentLink = async (req, res) => {
   try {
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
     console.log('🔄 Received payment link request:', req.body);
 
-    // Validation
+    // Enhanced Validation
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
       return res.status(400).json({
         success: false,
-        message: 'All fields are required'
+        message: 'All fields are required: merchantId, amount, paymentMethod, paymentOption'
       });
     }
 
     // Amount validation
     const amountNum = parseFloat(amount);
+    if (isNaN(amountNum)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid amount format'
+      });
+    }
+
     if (amountNum < 500 || amountNum > 10000) {
       return res.status(400).json({
         success: false,
         message: 'Amount must be between 500 and 10,000 INR'
       });
     }
+
+    console.log('🔍 STEP 1: Looking for active connector account for merchant:', merchantId);
 
     // ✅ STEP 1: Get merchant's ANY ACTIVE connector account FROM DATABASE
     const activeAccount = await MerchantConnectorAccount.findOne({
@@ -88,18 +97,20 @@ export const generatePaymentLink = async (req, res) => {
     .populate('connectorAccountId');
 
     if (!activeAccount) {
+      console.log('❌ No active connector account found for merchant:', merchantId);
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found for this merchant'
+        message: 'No active connector account found for this merchant. Please assign a connector account first.'
       });
     }
 
-    console.log('🔗 Found Connector from DB:', activeAccount.connectorId?.name);
+    console.log('✅ Found Connector from DB:', activeAccount.connectorId?.name);
     console.log('💰 Using Account from DB:', activeAccount.connectorAccountId?.name);
 
     // ✅ STEP 2: Get merchant details FROM DATABASE
     const merchant = await User.findById(merchantId);
     if (!merchant) {
+      console.log('❌ Merchant not found in database:', merchantId);
       return res.status(404).json({
         success: false,
         message: 'Merchant not found in database'
@@ -113,6 +124,7 @@ export const generatePaymentLink = async (req, res) => {
     });
 
     // ✅ STEP 3: USE GENERIC PAYMENT LINK FOR ALL CONNECTORS
+    console.log('🔗 Generating payment link...');
     const paymentLink = await generateGenericPaymentLink({
       merchant,
       amount: amountNum,
@@ -121,9 +133,10 @@ export const generatePaymentLink = async (req, res) => {
       paymentOption
     });
 
-    console.log('✅ Generated Payment Link for ALL connectors:', paymentLink);
+    console.log('✅ Generated Payment Link:', paymentLink);
 
     // ✅ STEP 4: Create transaction record IN DATABASE
+    console.log('💾 Creating transaction record...');
     const transactionData = {
       transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
       merchantOrderId: `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`,
@@ -145,7 +158,7 @@ export const generatePaymentLink = async (req, res) => {
     const newTransaction = new Transaction(transactionData);
     await newTransaction.save();
 
-    console.log('💾 Transaction saved to database:', transactionData.transactionId);
+    console.log('✅ Transaction saved to database:', transactionData.transactionId);
 
     // ✅ SUCCESS RESPONSE
     res.json({
@@ -160,12 +173,69 @@ export const generatePaymentLink = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error generating payment link:', error);
+    console.error('❌ ERROR in generatePaymentLink:', error);
+    
+    // Detailed error logging
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+
     res.status(500).json({
       success: false,
-      message: 'Internal server error',
-      error: error.message
+      message: 'Internal server error while generating payment link',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Please try again later'
     });
+  }
+};
+
+// Add this debug route to check what's happening
+export const debugPaymentLink = async (req, res) => {
+  try {
+    const { merchantId } = req.body;
+    
+    console.log('🔍 DEBUG: Checking payment link generation for merchant:', merchantId);
+    
+    // Check merchant exists
+    const merchant = await User.findById(merchantId);
+    console.log('🔍 DEBUG: Merchant found:', merchant ? `${merchant.firstname} ${merchant.lastname}` : 'NOT FOUND');
+    
+    // Check connector accounts
+    const connectors = await MerchantConnectorAccount.find({ merchantId: merchantId, status: 'Active' })
+      .populate('connectorId')
+      .populate('connectorAccountId');
+    
+    console.log('🔍 DEBUG: Active connectors found:', connectors.length);
+    connectors.forEach((conn, index) => {
+      console.log(`🔍 DEBUG: Connector ${index + 1}:`, {
+        connector: conn.connectorId?.name,
+        account: conn.connectorAccountId?.name,
+        terminalId: conn.terminalId,
+        status: conn.status
+      });
+    });
+    
+    res.json({
+      success: true,
+      merchant: merchant ? {
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid,
+        email: merchant.email
+      } : null,
+      connectors: connectors.map(conn => ({
+        connector: conn.connectorId?.name,
+        account: conn.connectorAccountId?.name,
+        terminalId: conn.terminalId,
+        status: conn.status,
+        isPrimary: conn.isPrimary
+      })),
+      totalConnectors: connectors.length
+    });
+    
+  } catch (error) {
+    console.error('❌ DEBUG Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
