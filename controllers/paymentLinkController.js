@@ -240,7 +240,7 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
-// Separate function for the actual processing
+
 const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paymentMethod, paymentOption }) => {
   console.log('🔍 Step 1: Finding active connector account');
   
@@ -289,48 +289,87 @@ const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paym
     });
   }
 
-  console.log('💾 Step 4: Creating transaction with Enpay required fields');
+  console.log('💾 Step 4: Creating transaction with ALL required fields');
   
-  // Generate all required IDs
+  // Generate ALL required IDs - make sure these match your Transaction schema
   const txnRefId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const merchantOrderId = `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const merchantHashId = activeAccount.connectorAccountId?.integrationKeys?.merchantHashId || merchant.mid;
   const merchantVpa = `${merchant.mid?.toLowerCase() || 'merchant'}@skypal`;
+  const transactionId = `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
+  console.log('📝 Generated IDs:', {
+    txnRefId,
+    merchantOrderId, 
+    merchantHashId,
+    merchantVpa,
+    transactionId
+  });
+
+  // Create transaction data with EXACT field names from your schema
   const transactionData = {
-    // Required fields for Enpay/Transaction model
-    txnRefId: txnRefId,
-    merchantVpa: merchantVpa,
-    merchantHashId: merchantHashId,
+    // ✅ REQUIRED FIELDS from your Transaction schema
+    transactionId: transactionId,
     merchantOrderId: merchantOrderId,
+    merchantHashId: merchantHashId,
+    merchantVpa: merchantVpa,
+    txnRefId: txnRefId,
     
-    // Customer details for Enpay
-    customerFirstName: merchant.firstname,
-    customerLastName: merchant.lastname,
-    customerEmail: merchant.email,
-    customerPhone: merchant.contact,
-    
-    // Your existing fields
-    transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+    // Merchant information
     merchantId: merchant._id,
     merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
     mid: merchant.mid,
+    
+    // Payment details
     amount: parseFloat(amount),
     currency: currency,
     status: 'INITIATED',
     paymentMethod: paymentMethod,
     paymentOption: paymentOption,
     paymentUrl: paymentLink,
+    
+    // Connector information
     connectorId: activeAccount.connectorId?._id,
     connectorAccountId: activeAccount.connectorAccountId?._id,
-    terminalId: activeAccount.terminalId || 'N/A'
+    terminalId: activeAccount.terminalId || 'N/A',
+    
+    // Customer information
+    "Customer Name": merchant.firstname + ' ' + merchant.lastname,
+    "Customer VPA": merchantVpa,
+    "Customer Contact No": merchant.contact || '',
+    
+    // Default values for other required fields
+    "Commission Amount": 0,
+    "Settlement Status": "Pending",
+    "Vendor Ref ID": "",
+    "Vendor Txn ID": "",
+    upiId: "",
+    txnNote: `Payment for ${merchant.company || merchant.firstname}`,
+    source: "enpay",
+    isMock: false,
+    qrCode: "",
+    enpayTxnId: "",
+    encryptedPaymentPayload: ""
   };
 
-  console.log('📝 Saving transaction with complete data');
-  const newTransaction = new Transaction(transactionData);
-  await newTransaction.save();
+  console.log('📦 Transaction data to save:', {
+    transactionId: transactionData.transactionId,
+    txnRefId: transactionData.txnRefId,
+    merchantOrderId: transactionData.merchantOrderId,
+    merchantHashId: transactionData.merchantHashId,
+    merchantVpa: transactionData.merchantVpa
+  });
 
-  console.log('✅ Transaction saved successfully with ID:', transactionData.transactionId);
+  try {
+    console.log('💾 Attempting to save transaction...');
+    const newTransaction = new Transaction(transactionData);
+    await newTransaction.save();
+    console.log('✅ Transaction saved successfully with ID:', transactionData.transactionId);
+  } catch (saveError) {
+    console.error('❌ Transaction save error:', saveError);
+    console.error('❌ Validation errors:', saveError.errors);
+    throw new Error(`Failed to save transaction: ${saveError.message}`);
+  }
 
   return {
     paymentLink: paymentLink,
