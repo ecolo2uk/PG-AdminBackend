@@ -11,9 +11,13 @@ const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
 
+// In your generateGenericPaymentLink function, add timeout
 const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, paymentMethod, paymentOption }) => {
   try {
     console.log('🔗 STEP 3.1: Generating Generic Payment Link...');
+    
+    // Add small delay to simulate processing (remove this in production)
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Get basic details from database
     const terminalId = primaryAccount.terminalId || 'N/A';
@@ -21,22 +25,14 @@ const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, pa
     const merchantName = merchant.company || `${merchant.firstname} ${merchant.lastname}`;
     const merchantMID = merchant.mid;
     
-    console.log('📦 Payment Details from DB:', {
-      merchant: merchantName,
-      merchantId: merchantMID,
-      terminalId: terminalId,
-      connector: connectorName,
-      amount: amount,
-      paymentMethod: paymentMethod,
-      paymentOption: paymentOption
-    });
+    console.log('📦 Payment Details:', { merchant: merchantName, terminalId, connector: connectorName, amount });
 
     // Validate required fields
     if (!merchantMID) {
       throw new Error('Merchant MID is required');
     }
 
-    // ✅ GENERIC PAYMENT LINK STRUCTURE FOR ALL CONNECTORS
+    // ✅ GENERIC PAYMENT LINK
     const genericLink = `https://pay.skypal.com/process?` + 
       `mid=${encodeURIComponent(merchantMID)}` +
       `&amount=${amount}` +
@@ -47,14 +43,14 @@ const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, pa
       `&option=${encodeURIComponent(paymentOption)}` +
       `&timestamp=${Date.now()}`;
     
-    console.log('✅ Generated Generic Payment URL for ALL connectors:', genericLink);
+    console.log('✅ Generated Generic Payment URL:', genericLink);
     
     return genericLink;
     
   } catch (error) {
     console.error('❌ Error in generateGenericPaymentLink:', error);
     
-    // Ultra simple fallback
+    // Simple fallback
     const fallbackUrl = `https://pay.skypal.com/pay?mid=${merchant.mid}&amount=${amount}`;
     console.log('🔄 Using fallback URL:', fallbackUrl);
     return fallbackUrl;
@@ -170,53 +166,29 @@ export const debugRequestBody = async (req, res) => {
 };
 
 export const generatePaymentLink = async (req, res) => {
+  const startTime = Date.now();
+  let currentStep = 'START';
+  
   try {
-    console.log('🔄 STEP 0: Received request body:', req.body);
-    console.log('🔄 STEP 0: Request headers:', req.headers);
-
-    // Check if body is empty
-    if (!req.body || Object.keys(req.body).length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Request body is empty. Check if body parser middleware is configured.'
-      });
-    }
-
+    console.log('🔄 STEP 0: Starting payment link generation');
+    currentStep = 'VALIDATION';
+    
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    // Enhanced validation with better error messages
-    if (!merchantId) {
+    console.log('📦 Request data:', { merchantId, amount, currency, paymentMethod, paymentOption });
+
+    // Enhanced Validation
+    if (!merchantId || !amount || !paymentMethod || !paymentOption) {
+      console.log('❌ Validation failed: Missing required fields');
       return res.status(400).json({
         success: false,
-        message: 'merchantId is required'
-      });
-    }
-    if (!amount) {
-      return res.status(400).json({
-        success: false,
-        message: 'amount is required'
-      });
-    }
-    if (!paymentMethod) {
-      return res.status(400).json({
-        success: false,
-        message: 'paymentMethod is required'
-      });
-    }
-    if (!paymentOption) {
-      return res.status(400).json({
-        success: false,
-        message: 'paymentOption is required'
+        message: 'All fields are required: merchantId, amount, paymentMethod, paymentOption'
       });
     }
 
-    console.log('✅ All required fields present:', {
-      merchantId, amount, currency, paymentMethod, paymentOption
-    });
-
-    // Rest of your existing code continues here...
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum)) {
+      console.log('❌ Validation failed: Invalid amount format');
       return res.status(400).json({
         success: false,
         message: 'Invalid amount format'
@@ -224,36 +196,139 @@ export const generatePaymentLink = async (req, res) => {
     }
 
     if (amountNum < 500 || amountNum > 10000) {
+      console.log('❌ Validation failed: Amount out of range');
       return res.status(400).json({
         success: false,
         message: 'Amount must be between 500 and 10,000 INR'
       });
     }
 
-    // Continue with your existing logic...
-    console.log('🔍 STEP 1: Looking for active connector account for merchant:', merchantId);
+    console.log('✅ Validation passed');
+    currentStep = 'FINDING_CONNECTOR';
 
+    // ✅ STEP 1: Get merchant's active connector account
+    console.log('🔍 STEP 1: Looking for active connector account for merchant:', merchantId);
+    
+    const connectorStartTime = Date.now();
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
       status: 'Active'
     })
     .populate('connectorId')
-    .populate('connectorAccountId');
+    .populate('connectorAccountId')
+    .maxTimeMS(10000); // Add timeout for database query
 
-    // ... rest of your existing code
+    console.log(`✅ Connector query completed in ${Date.now() - connectorStartTime}ms`);
+    
+    if (!activeAccount) {
+      console.log('❌ No active connector account found');
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found for this merchant.'
+      });
+    }
+
+    console.log('✅ Found connector:', activeAccount.connectorId?.name);
+    currentStep = 'FINDING_MERCHANT';
+
+    // ✅ STEP 2: Get merchant details
+    console.log('🔍 STEP 2: Fetching merchant details');
+    
+    const merchantStartTime = Date.now();
+    const merchant = await User.findById(merchantId).maxTimeMS(10000);
+    
+    console.log(`✅ Merchant query completed in ${Date.now() - merchantStartTime}ms`);
+
+    if (!merchant) {
+      console.log('❌ Merchant not found');
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    console.log('✅ Found merchant:', merchant.firstname, merchant.lastname);
+    currentStep = 'GENERATING_LINK';
+
+    // ✅ STEP 3: Generate payment link
+    console.log('🔗 STEP 3: Generating payment link...');
+    
+    const linkStartTime = Date.now();
+    const paymentLink = await generateGenericPaymentLink({
+      merchant,
+      amount: amountNum,
+      primaryAccount: activeAccount,
+      paymentMethod,
+      paymentOption
+    });
+    
+    console.log(`✅ Link generation completed in ${Date.now() - linkStartTime}ms`);
+    console.log('✅ Generated Payment Link:', paymentLink);
+    currentStep = 'CREATING_TRANSACTION';
+
+    // ✅ STEP 4: Create transaction record
+    console.log('💾 STEP 4: Creating transaction record...');
+    
+    const transactionData = {
+      transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      merchantOrderId: `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      merchantHashId: merchant.mid,
+      merchantId: merchant._id,
+      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      mid: merchant.mid,
+      amount: amountNum,
+      currency: currency,
+      status: 'INITIATED',
+      paymentMethod: paymentMethod,
+      paymentOption: paymentOption,
+      paymentUrl: paymentLink,
+      connectorId: activeAccount.connectorId?._id,
+      connectorAccountId: activeAccount.connectorAccountId?._id,
+      terminalId: activeAccount.terminalId || 'N/A'
+    };
+
+    const transactionStartTime = Date.now();
+    const newTransaction = new Transaction(transactionData);
+    await newTransaction.save();
+    
+    console.log(`✅ Transaction saved in ${Date.now() - transactionStartTime}ms`);
+    console.log('✅ Transaction ID:', transactionData.transactionId);
+    currentStep = 'SENDING_RESPONSE';
+
+    // ✅ SUCCESS RESPONSE
+    const totalTime = Date.now() - startTime;
+    console.log(`🎉 SUCCESS: Payment link generated in ${totalTime}ms`);
+    
+    res.json({
+      success: true,
+      paymentLink: paymentLink,
+      transactionRefId: transactionData.transactionId,
+      connector: activeAccount.connectorId?.name || 'Unknown',
+      connectorAccount: activeAccount.connectorAccountId?.name || 'Unknown',
+      terminalId: activeAccount.terminalId || 'N/A',
+      merchantName: `${merchant.firstname} ${merchant.lastname}`,
+      processingTime: `${totalTime}ms`,
+      message: `Payment link generated successfully using ${activeAccount.connectorId?.name || 'Generic'} connector`
+    });
 
   } catch (error) {
-    console.error('❌ FINAL ERROR in generatePaymentLink:', error);
-    console.error('Error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    });
+    const totalTime = Date.now() - startTime;
+    console.error(`❌ ERROR at step ${currentStep} after ${totalTime}ms:`, error);
+    
+    // Check if it's a timeout error
+    if (error.name === 'TimeoutError' || error.message.includes('timeout')) {
+      return res.status(408).json({
+        success: false,
+        message: 'Request timeout - operation took too long',
+        step: currentStep
+      });
+    }
 
     res.status(500).json({
       success: false,
       message: 'Internal server error while generating payment link',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Please try again later'
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Please try again later',
+      step: currentStep
     });
   }
 };
