@@ -8,6 +8,8 @@ import {
   getMerchantConnectors,
   debugMerchantData,
   debugPaymentLink,
+    debugRequestBody,
+
   testPaymentGeneration,
    healthCheck
 } from '../controllers/paymentLinkController.js';
@@ -24,6 +26,8 @@ router.get('/:merchantId/connector-accounts', getMerchantConnectors);
 router.post('/test-payment', testPaymentGeneration);
 router.get('/health', healthCheck);
 // Payment callbacks
+router.post('/debug-request', debugRequestBody);
+
 router.get('/debug/:merchantId', debugMerchantData);
 router.post('/debug-payment', debugPaymentLink);
 router.get('/success', handleSuccess);
