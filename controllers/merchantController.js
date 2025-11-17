@@ -5,6 +5,7 @@ import PayoutTransaction from '../models/PayoutTransaction.js';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
+import MerchantConnectorAccount from '../models/MerchantConnectorAccount.js';
 
 // Helper to generate MID
 const generateMid = () => {
@@ -1682,22 +1683,28 @@ export const getMerchantPayoutBalance = async (req, res) => {
 export const getMerchantConnectors = async (req, res) => {
   try {
     const { merchantId } = req.params;
+    
+    console.log('🔍 Fetching connector accounts for merchant:', merchantId);
 
     const connectorAccounts = await MerchantConnectorAccount.find({
       merchantId: merchantId,
       status: 'Active'
     })
     .populate('connectorId', 'name connectorType')
-    .populate('connectorAccountId', 'name currency integrationKeys')
-    .select('terminalId industry percentage isPrimary status');
+    .populate('connectorAccountId', 'name currency')
+    .select('terminalId industry percentage isPrimary status')
+    .lean();
+
+    console.log(`✅ Found ${connectorAccounts.length} connector accounts`);
 
     const formattedAccounts = connectorAccounts.map(account => ({
       _id: account._id,
       terminalId: account.terminalId,
-      connectorName: account.connectorId.name,
-      connectorType: account.connectorId.connectorType,
-      accountName: account.connectorAccountId.name,
-      currency: account.connectorAccountId.currency,
+      connector: account.connectorId?.name || 'Unknown',
+      assignedAccount: account.connectorAccountId?.name || 'Unknown',
+      connectorName: account.connectorId?.name || 'Unknown',
+      accountName: account.connectorAccountId?.name || 'Unknown',
+      currency: account.connectorAccountId?.currency || 'INR',
       industry: account.industry,
       percentage: account.percentage,
       isPrimary: account.isPrimary,
@@ -1710,10 +1717,10 @@ export const getMerchantConnectors = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching merchant connectors:', error);
+    console.error('❌ Error fetching merchant connectors:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
+      message: 'Server error while fetching connector accounts',
       error: error.message
     });
   }

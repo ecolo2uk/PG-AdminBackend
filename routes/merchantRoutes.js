@@ -26,7 +26,7 @@ router.post('/users', createMerchantUser); // Create merchant user
 router.put('/users/:id', updateMerchantUser); // Update merchant user
 router.delete('/users/:id', deleteMerchantUser); // Delete merchant user
 router.get('/users/:id', getMerchantById); // Get single merchant user
-router.get('/:merchantId/connector-accounts',getMerchantConnectors);
+router.get('/:merchantId/connector-accounts', getMerchantConnectors);
 
 // New Merchant Table routes
 router.get('/:merchantId', getMerchantDetails); // Get merchant with all details
