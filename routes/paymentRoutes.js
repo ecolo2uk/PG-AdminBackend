@@ -7,7 +7,9 @@ import {
   getPaymentMethods ,
   getMerchantConnectors,
   debugMerchantData,
-  debugPaymentLink
+  debugPaymentLink,
+  testPaymentGeneration,
+   healthCheck
 } from '../controllers/paymentLinkController.js';
 import { decrypt } from '../utils/encryption.js';
 import Transaction from '../models/Transaction.js';
@@ -19,6 +21,8 @@ router.get('/merchants', getMerchants);
 router.get('/methods', getPaymentMethods);
 router.post('/generate-link', generatePaymentLink);
 router.get('/:merchantId/connector-accounts', getMerchantConnectors);
+router.post('/test-payment', testPaymentGeneration);
+router.get('/health', healthCheck);
 // Payment callbacks
 router.get('/debug/:merchantId', debugMerchantData);
 router.post('/debug-payment', debugPaymentLink);

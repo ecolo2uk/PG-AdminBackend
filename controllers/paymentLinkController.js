@@ -10,10 +10,10 @@ import User from '../models/User.js';
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
-// 🎯 GENERIC PAYMENT LINK FOR ALL CONNECTORS
+
 const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, paymentMethod, paymentOption }) => {
   try {
-    console.log('🔗 Generating Generic Payment Link for ALL connectors...');
+    console.log('🔗 STEP 3.1: Generating Generic Payment Link...');
     
     // Get basic details from database
     const terminalId = primaryAccount.terminalId || 'N/A';
@@ -31,6 +31,11 @@ const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, pa
       paymentOption: paymentOption
     });
 
+    // Validate required fields
+    if (!merchantMID) {
+      throw new Error('Merchant MID is required');
+    }
+
     // ✅ GENERIC PAYMENT LINK STRUCTURE FOR ALL CONNECTORS
     const genericLink = `https://pay.skypal.com/process?` + 
       `mid=${encodeURIComponent(merchantMID)}` +
@@ -47,11 +52,93 @@ const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, pa
     return genericLink;
     
   } catch (error) {
-    console.error('❌ Error generating generic payment link:', error);
+    console.error('❌ Error in generateGenericPaymentLink:', error);
     
     // Ultra simple fallback
     const fallbackUrl = `https://pay.skypal.com/pay?mid=${merchant.mid}&amount=${amount}`;
+    console.log('🔄 Using fallback URL:', fallbackUrl);
     return fallbackUrl;
+  }
+};
+
+// Add to paymentLinkController.js
+export const testPaymentGeneration = async (req, res) => {
+  try {
+    const { merchantId, amount = '1000', paymentMethod = 'upi', paymentOption = 'gpay' } = req.body;
+    
+    console.log('🧪 TEST: Testing payment generation for merchant:', merchantId);
+    
+    // Test data
+    const testData = {
+      merchantId,
+      amount,
+      currency: 'INR',
+      paymentMethod,
+      paymentOption
+    };
+    
+    console.log('🧪 Test data:', testData);
+    
+    // Check merchant exists
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+    
+    // Check connector accounts
+    const connectors = await MerchantConnectorAccount.find({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId')
+    .populate('connectorAccountId');
+    
+    console.log('🧪 Found connectors:', connectors.length);
+    
+    if (connectors.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connectors found'
+      });
+    }
+    
+    // Test generic link generation
+    const testLink = await generateGenericPaymentLink({
+      merchant,
+      amount: parseFloat(amount),
+      primaryAccount: connectors[0],
+      paymentMethod,
+      paymentOption
+    });
+    
+    res.json({
+      success: true,
+      testResults: {
+        merchant: {
+          name: `${merchant.firstname} ${merchant.lastname}`,
+          mid: merchant.mid
+        },
+        connector: {
+          name: connectors[0].connectorId?.name,
+          account: connectors[0].connectorAccountId?.name,
+          terminalId: connectors[0].terminalId
+        },
+        generatedLink: testLink,
+        step: 'Test completed successfully'
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ TEST Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message,
+      stack: error.stack
+    });
   }
 };
 
@@ -60,10 +147,11 @@ export const generatePaymentLink = async (req, res) => {
   try {
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    console.log('🔄 Received payment link request:', req.body);
+    console.log('🔄 STEP 0: Starting payment link generation with data:', req.body);
 
     // Enhanced Validation
     if (!merchantId || !amount || !paymentMethod || !paymentOption) {
+      console.log('❌ Validation failed: Missing required fields');
       return res.status(400).json({
         success: false,
         message: 'All fields are required: merchantId, amount, paymentMethod, paymentOption'
@@ -73,6 +161,7 @@ export const generatePaymentLink = async (req, res) => {
     // Amount validation
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum)) {
+      console.log('❌ Validation failed: Invalid amount format');
       return res.status(400).json({
         success: false,
         message: 'Invalid amount format'
@@ -80,6 +169,7 @@ export const generatePaymentLink = async (req, res) => {
     }
 
     if (amountNum < 500 || amountNum > 10000) {
+      console.log('❌ Validation failed: Amount out of range');
       return res.status(400).json({
         success: false,
         message: 'Amount must be between 500 and 10,000 INR'
@@ -96,6 +186,18 @@ export const generatePaymentLink = async (req, res) => {
     .populate('connectorId')
     .populate('connectorAccountId');
 
+    console.log('🔍 STEP 1 Result:', {
+      foundAccount: !!activeAccount,
+      accountDetails: activeAccount ? {
+        connectorId: activeAccount.connectorId?._id,
+        connectorName: activeAccount.connectorId?.name,
+        connectorAccountId: activeAccount.connectorAccountId?._id,
+        connectorAccountName: activeAccount.connectorAccountId?.name,
+        terminalId: activeAccount.terminalId,
+        status: activeAccount.status
+      } : 'No account found'
+    });
+
     if (!activeAccount) {
       console.log('❌ No active connector account found for merchant:', merchantId);
       return res.status(404).json({
@@ -108,7 +210,18 @@ export const generatePaymentLink = async (req, res) => {
     console.log('💰 Using Account from DB:', activeAccount.connectorAccountId?.name);
 
     // ✅ STEP 2: Get merchant details FROM DATABASE
+    console.log('🔍 STEP 2: Fetching merchant details for:', merchantId);
     const merchant = await User.findById(merchantId);
+    
+    console.log('🔍 STEP 2 Result:', {
+      foundMerchant: !!merchant,
+      merchantDetails: merchant ? {
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid,
+        email: merchant.email
+      } : 'Merchant not found'
+    });
+
     if (!merchant) {
       console.log('❌ Merchant not found in database:', merchantId);
       return res.status(404).json({
@@ -117,14 +230,8 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    console.log('🎯 Merchant from DB:', {
-      name: `${merchant.firstname} ${merchant.lastname}`,
-      mid: merchant.mid,
-      email: merchant.email
-    });
-
     // ✅ STEP 3: USE GENERIC PAYMENT LINK FOR ALL CONNECTORS
-    console.log('🔗 Generating payment link...');
+    console.log('🔗 STEP 3: Generating payment link...');
     const paymentLink = await generateGenericPaymentLink({
       merchant,
       amount: amountNum,
@@ -136,7 +243,7 @@ export const generatePaymentLink = async (req, res) => {
     console.log('✅ Generated Payment Link:', paymentLink);
 
     // ✅ STEP 4: Create transaction record IN DATABASE
-    console.log('💾 Creating transaction record...');
+    console.log('💾 STEP 4: Creating transaction record...');
     const transactionData = {
       transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
       merchantOrderId: `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`,
@@ -155,12 +262,15 @@ export const generatePaymentLink = async (req, res) => {
       terminalId: activeAccount.terminalId || 'N/A'
     };
 
+    console.log('📝 Transaction data to save:', transactionData);
+
     const newTransaction = new Transaction(transactionData);
     await newTransaction.save();
 
     console.log('✅ Transaction saved to database:', transactionData.transactionId);
 
     // ✅ SUCCESS RESPONSE
+    console.log('🎉 STEP 5: Sending success response');
     res.json({
       success: true,
       paymentLink: paymentLink,
@@ -173,7 +283,7 @@ export const generatePaymentLink = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ ERROR in generatePaymentLink:', error);
+    console.error('❌ FINAL ERROR in generatePaymentLink:', error);
     
     // Detailed error logging
     console.error('Error details:', {
@@ -468,5 +578,39 @@ export const debugMerchantData = async (req, res) => {
   } catch (error) {
     console.error('❌ Debug error:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+
+// Add to paymentLinkController.js
+export const healthCheck = async (req, res) => {
+  try {
+    // Test database connection
+    const dbState = mongoose.connection.readyState;
+    const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+    
+    // Test User model
+    const userCount = await User.countDocuments();
+    
+    // Test MerchantConnectorAccount model
+    const connectorCount = await MerchantConnectorAccount.countDocuments();
+    
+    res.json({
+      success: true,
+      database: {
+        state: dbStates[dbState],
+        userCount,
+        connectorCount
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Health check failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Health check failed',
+      error: error.message
+    });
   }
 };
