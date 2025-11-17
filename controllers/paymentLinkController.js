@@ -10,87 +10,50 @@ import User from '../models/User.js';
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
-// 🔧 MISSING FUNCTIONS - ADD THESE
+// 🎯 GENERIC PAYMENT LINK FOR ALL CONNECTORS
+const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, paymentMethod, paymentOption }) => {
+  try {
+    console.log('🔗 Generating Generic Payment Link for ALL connectors...');
+    
+    // Get basic details from database
+    const terminalId = primaryAccount.terminalId || 'N/A';
+    const connectorName = primaryAccount.connectorId?.name || 'Unknown';
+    const merchantName = merchant.company || `${merchant.firstname} ${merchant.lastname}`;
+    const merchantMID = merchant.mid;
+    
+    console.log('📦 Payment Details from DB:', {
+      merchant: merchantName,
+      merchantId: merchantMID,
+      terminalId: terminalId,
+      connector: connectorName,
+      amount: amount,
+      paymentMethod: paymentMethod,
+      paymentOption: paymentOption
+    });
 
-// const generateEnpayPaymentLink = async ({ merchant, amount, connectorAccount, primaryAccount }) => {
-//   try {
-//     console.log('🔗 Generating Enpay payment link...');
+    // ✅ GENERIC PAYMENT LINK STRUCTURE FOR ALL CONNECTORS
+    const genericLink = `https://pay.skypal.com/process?` + 
+      `mid=${encodeURIComponent(merchantMID)}` +
+      `&amount=${amount}` +
+      `&currency=INR` +
+      `&terminal=${encodeURIComponent(terminalId)}` +
+      `&connector=${encodeURIComponent(connectorName)}` +
+      `&method=${encodeURIComponent(paymentMethod)}` +
+      `&option=${encodeURIComponent(paymentOption)}` +
+      `&timestamp=${Date.now()}`;
     
-//     // Get credentials from database
-//     const terminalId = primaryAccount.terminalId || connectorAccount.terminalId;
-//     const merchantHashId = connectorAccount.integrationKeys?.get('merchantHashId') || merchant.mid;
+    console.log('✅ Generated Generic Payment URL for ALL connectors:', genericLink);
     
-//     console.log('📦 Enpay Credentials:', {
-//       terminalId,
-//       merchantHashId,
-//       merchantId: merchant._id,
-//       amount
-//     });
-
-//     // Create Enpay payment link
-//     const enpayLink = `https://enpay.paymentgateway.com/pay?merchant=${merchantHashId}&terminal=${terminalId}&amount=${amount}&currency=INR`;
+    return genericLink;
     
-//     console.log('✅ Generated Enpay URL:', enpayLink);
+  } catch (error) {
+    console.error('❌ Error generating generic payment link:', error);
     
-//     return enpayLink;
-    
-//   } catch (error) {
-//     console.error('❌ Error generating Enpay link:', error);
-//     // Fallback
-//     return `https://enpay-test.com/pay?mid=${merchant.mid}&amount=${amount}`;
-//   }
-// };
-
-// const generateRazorpayPaymentLink = async ({ merchant, amount, connectorAccount, primaryAccount }) => {
-//   try {
-//     console.log('🔗 Generating Razorpay payment link...');
-    
-//     const razorpayLink = `https://razorpay.com/payment?merchant=${merchant.mid}&amount=${amount}`;
-    
-//     console.log('✅ Generated Razorpay URL:', razorpayLink);
-    
-//     return razorpayLink;
-//   } catch (error) {
-//     console.error('❌ Error generating Razorpay link:', error);
-//     throw new Error('Failed to generate Razorpay payment link');
-//   }
-// };
-
-// const generateStripePaymentLink = async ({ merchant, amount, connectorAccount, primaryAccount }) => {
-//   try {
-//     console.log('🔗 Generating Stripe payment link...');
-    
-//     const stripeLink = `https://stripe.com/pay?merchant=${merchant.mid}&amount=${amount}`;
-    
-//     console.log('✅ Generated Stripe URL:', stripeLink);
-    
-//     return stripeLink;
-//   } catch (error) {
-//     console.error('❌ Error generating Stripe link:', error);
-//     throw new Error('Failed to generate Stripe payment link');
-//   }
-// };
-
-// const generateGenericPaymentLink = async ({ merchant, amount, connectorAccount, primaryAccount, connectorName }) => {
-//   try {
-//     console.log(`🔗 Generating generic payment link for ${connectorName}...`);
-    
-//     // Use available credentials
-//     const terminalId = connectorAccount.terminalId || primaryAccount.terminalId;
-//     const merchantId = connectorAccount.integrationKeys?.get('merchantId') || merchant.mid;
-    
-//     // Create a generic payment link
-//     const genericLink = `https://${connectorName.toLowerCase()}-payment.com/pay?mid=${merchantId}&amount=${amount}&terminal=${terminalId}&currency=INR`;
-    
-//     console.log(`✅ Generated ${connectorName} URL:`, genericLink);
-    
-//     return genericLink;
-    
-//   } catch (error) {
-//     console.error(`❌ Error generating ${connectorName} link:`, error);
-//     throw new Error(`Failed to generate ${connectorName} payment link`);
-//   }
-// };
+    // Ultra simple fallback
+    const fallbackUrl = `https://pay.skypal.com/pay?mid=${merchant.mid}&amount=${amount}`;
+    return fallbackUrl;
+  }
+};
 
 // 🎯 MAIN PAYMENT LINK GENERATION FUNCTION - GENERIC FOR ALL CONNECTORS
 export const generatePaymentLink = async (req, res) => {
@@ -205,52 +168,7 @@ export const generatePaymentLink = async (req, res) => {
     });
   }
 };
-// 🎯 GENERIC PAYMENT LINK FOR ALL CONNECTORS
-const generateGenericPaymentLink = async ({ merchant, amount, primaryAccount, paymentMethod, paymentOption }) => {
-  try {
-    console.log('🔗 Generating Generic Payment Link for ALL connectors...');
-    
-    // Get basic details from database
-    const terminalId = primaryAccount.terminalId || 'N/A';
-    const connectorName = primaryAccount.connectorId?.name || 'Unknown';
-    const merchantName = merchant.company || `${merchant.firstname} ${merchant.lastname}`;
-    const merchantMID = merchant.mid;
-    
-    console.log('📦 Payment Details from DB:', {
-      merchant: merchantName,
-      merchantId: merchantMID,
-      terminalId: terminalId,
-      connector: connectorName,
-      amount: amount,
-      paymentMethod: paymentMethod,
-      paymentOption: paymentOption
-    });
 
-    // ✅ GENERIC PAYMENT LINK STRUCTURE FOR ALL CONNECTORS
-    const genericLink = `https://pay.skypal.com/process?` + 
-      `mid=${encodeURIComponent(merchantMID)}` +
-      `&amount=${amount}` +
-      `&currency=INR` +
-      `&terminal=${encodeURIComponent(terminalId)}` +
-      `&connector=${encodeURIComponent(connectorName)}` +
-      `&method=${encodeURIComponent(paymentMethod)}` +
-      `&option=${encodeURIComponent(paymentOption)}` +
-      `&timestamp=${Date.now()}`;
-    
-    console.log('✅ Generated Generic Payment URL for ALL connectors:', genericLink);
-    
-    return genericLink;
-    
-  } catch (error) {
-    console.error('❌ Error generating generic payment link:', error);
-    
-    // Ultra simple fallback
-    const fallbackUrl = `https://pay.skypal.com/pay?mid=${merchant.mid}&amount=${amount}`;
-    return fallbackUrl;
-  }
-};
-
-// 🎯 OTHER FUNCTIONS
 // 🎯 GET MERCHANTS FROM DATABASE
 export const getMerchants = async (req, res) => {
   try {
@@ -276,9 +194,8 @@ export const getMerchants = async (req, res) => {
       balance: merchant.balance,
       unsettleBalance: merchant.unsettleBalance,
       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      // Add connector account details if available
-      hashId: merchant.mid, // Using MID as hashId for now
-      vpa: `${merchant.mid.toLowerCase()}@skypal` // Generate VPA from MID
+      hashId: merchant.mid,
+      vpa: `${merchant.mid.toLowerCase()}@skypal`
     }));
 
     res.json({
@@ -331,7 +248,7 @@ export const getMerchantConnectors = async (req, res) => {
     .populate('connectorId', 'name connectorType description')
     .populate('connectorAccountId', 'name currency integrationKeys terminalId')
     .select('terminalId industry percentage isPrimary status createdAt')
-    .sort({ isPrimary: -1, createdAt: -1 }) // Primary accounts first
+    .sort({ isPrimary: -1, createdAt: -1 })
     .lean();
 
     console.log(`✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchant.firstname} ${merchant.lastname}`);
@@ -378,7 +295,6 @@ export const getMerchantConnectors = async (req, res) => {
     });
   }
 };
-
 
 export const getPaymentMethods = async (req, res) => {
   try {
