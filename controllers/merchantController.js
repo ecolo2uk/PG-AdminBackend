@@ -1152,6 +1152,7 @@ export const getMerchantUsers = async (req, res) => {
 };
 
 // Create Merchant User
+// controllers/merchantController.js - COMPLETELY FIXED VERSION
 export const createMerchantUser = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1159,76 +1160,155 @@ export const createMerchantUser = async (req, res) => {
   try {
     const { firstname, lastname, company, email, password, contact } = req.body;
 
-    console.log("💰 Creating merchant user in BOTH tables:", req.body);
+    console.log("🔄 STEP 1: Starting merchant creation process...", req.body);
 
-    // Validation
-    if (!firstname || !lastname || !email || !password || !contact) {
+    // Enhanced Validation
+    if (!firstname?.trim() || !lastname?.trim() || !email?.trim() || !password || !contact?.trim()) {
       await session.abortTransaction();
+      console.log("❌ Validation failed: Missing required fields");
       return res.status(400).json({ 
         success: false,
         message: 'Please enter all required fields.' 
       });
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email }).session(session);
-    if (existingUser) {
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
       await session.abortTransaction();
+      console.log("❌ Validation failed: Invalid email format");
       return res.status(400).json({ 
         success: false,
-        message: 'User with this email already exists.' 
+        message: 'Please enter a valid email address.' 
       });
     }
+
+    console.log("🔄 STEP 2: Checking for existing user...");
+
+    // Check if user already exists (case insensitive)
+    const existingUser = await User.findOne({ 
+      email: { $regex: new RegExp(`^${email}$`, 'i') } 
+    }).session(session);
+    
+    if (existingUser) {
+      await session.abortTransaction();
+      console.log("❌ User already exists:", email);
+      return res.status(400).json({ 
+        success: false,
+        message: 'A user with this email already exists.' 
+      });
+    }
+
+    console.log("🔄 STEP 3: Generating MID and hashing password...");
 
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Generate MID
-    const mid = generateMid();
+    const mid = 'M' + Date.now().toString() + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
 
-    // 1. FIRST CREATE USER
-    const user = new User({
-      firstname,
-      lastname,
-      company: company || '',
-      email,
+    console.log("🔄 STEP 4: Creating User document...");
+
+    // 1. FIRST CREATE USER - WITH ALL REQUIRED FIELDS
+    const userData = {
+      firstname: firstname.trim(),
+      lastname: lastname.trim(),
+      company: company?.trim() || '',
+      email: email.toLowerCase().trim(),
       password: hashedPassword,
       role: 'merchant',
-      contact,
-      mid,
+      contact: contact.trim(),
+      mid: mid,
       balance: 0,
-      unsettleBalance: 0
-    });
+      unsettleBalance: 0,
+      status: 'Active'
+    };
+
+    console.log("📝 User data to be saved:", userData);
+
+    const user = new User(userData);
+
+    // Validate user document before saving
+    const userValidationError = user.validateSync();
+    if (userValidationError) {
+      await session.abortTransaction();
+      console.log("❌ User validation failed:", userValidationError.errors);
+      return res.status(400).json({ 
+        success: false,
+        message: `User validation failed: ${Object.values(userValidationError.errors).map(err => err.message).join(', ')}` 
+      });
+    }
 
     const savedUser = await user.save({ session });
+    console.log("✅ STEP 5: User created successfully:", savedUser._id);
 
-    // 2. THEN AUTOMATICALLY CREATE MERCHANT
-    const merchant = new Merchant({
+    console.log("🔄 STEP 6: Creating Merchant document...");
+
+    // 2. THEN CREATE MERCHANT RECORD
+    const merchantName = company?.trim() || `${firstname.trim()} ${lastname.trim()}`;
+    
+    const merchantData = {
       userId: savedUser._id,
-      merchantName: company || `${firstname} ${lastname}`,
-      company: company || '',
-      email,
-      contact,
-      mid,
+      merchantName: merchantName,
+      company: company?.trim() || '',
+      email: email.toLowerCase().trim(),
+      contact: contact.trim(),
+      mid: mid,
       availableBalance: 0,
       unsettledBalance: 0,
       totalCredits: 0,
       totalDebits: 0,
       netEarnings: 0,
-      status: 'Active'
-    });
+      status: 'Active',
+      paymentTransactions: [],
+      payoutTransactions: [],
+      recentTransactions: [],
+      transactionSummary: {
+        today: { credits: 0, debits: 0, count: 0 },
+        last7Days: { credits: 0, debits: 0, count: 0 },
+        last30Days: { credits: 0, debits: 0, count: 0 }
+      },
+      totalTransactions: 0,
+      successfulTransactions: 0,
+      failedTransactions: 0
+    };
+
+    console.log("📝 Merchant data to be saved:", merchantData);
+
+    const merchant = new Merchant(merchantData);
+
+    // Validate merchant document before saving
+    const merchantValidationError = merchant.validateSync();
+    if (merchantValidationError) {
+      await session.abortTransaction();
+      console.log("❌ Merchant validation failed:", merchantValidationError.errors);
+      return res.status(400).json({ 
+        success: false,
+        message: `Merchant validation failed: ${Object.values(merchantValidationError.errors).map(err => err.message).join(', ')}` 
+      });
+    }
 
     const savedMerchant = await merchant.save({ session });
+    console.log("✅ STEP 7: Merchant created successfully:", savedMerchant._id);
+
+    console.log("🔄 STEP 8: Updating user with merchant reference...");
 
     // 3. UPDATE USER WITH MERCHANT REFERENCE
     savedUser.merchantRef = savedMerchant._id;
     await savedUser.save({ session });
 
     await session.commitTransaction();
+    session.endSession();
 
-    console.log("✅ Merchant user created in BOTH tables successfully");
+    console.log("🎉 STEP 9: Transaction committed successfully!");
+    console.log("📊 Final Results:");
+    console.log("   👤 User ID:", savedUser._id);
+    console.log("   🏪 Merchant ID:", savedMerchant._id);
+    console.log("   📧 Email:", savedUser.email);
+    console.log("   🆔 MID:", savedUser.mid);
 
+    // Prepare response without password
     const userResponse = savedUser.toObject();
     delete userResponse.password;
 
@@ -1243,12 +1323,27 @@ export const createMerchantUser = async (req, res) => {
 
   } catch (error) {
     await session.abortTransaction();
-    console.error('❌ Error creating merchant user:', error);
+    session.endSession();
     
+    console.error('❌ FINAL ERROR creating merchant user:', error);
+    
+    // Handle duplicate key errors
     if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      console.log(`❌ Duplicate key error on field: ${field}`);
       return res.status(400).json({ 
         success: false,
-        message: 'A user with this email or MID already exists.' 
+        message: `A user with this ${field} already exists.` 
+      });
+    }
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      console.log(`❌ Validation error: ${messages.join(', ')}`);
+      return res.status(400).json({ 
+        success: false,
+        message: messages.join(', ') 
       });
     }
     
@@ -1257,8 +1352,6 @@ export const createMerchantUser = async (req, res) => {
       message: 'Server error while creating merchant user.',
       error: error.message 
     });
-  } finally {
-    session.endSession();
   }
 };
 

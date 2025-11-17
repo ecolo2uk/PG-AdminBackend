@@ -1231,6 +1231,8 @@ const fillMissingDatesManual = (existingData, timeFilter) => {
 
 // controllers/dashboardController.js मध्ये getDashboardAnalytics update करा
 // controllers/dashboardController.js - Fix getDashboardAnalytics function
+// controllers/dashboardController.js - Fix the analytics function
+
 export const getDashboardAnalytics = async (req, res) => {
   try {
     const { timeFilter, merchantId, startDate, endDate } = req.query;
@@ -1260,7 +1262,7 @@ export const getDashboardAnalytics = async (req, res) => {
 
     console.log('🔍 Analytics Match Query:', JSON.stringify(matchQuery, null, 2));
 
-    // ✅ FIXED: Enhanced aggregation with better status mapping
+    // ✅ FIXED: Use the SAME aggregation pipeline for ALL analytics
     const aggregationPipeline = [
       {
         $match: matchQuery
@@ -1470,43 +1472,6 @@ export const getDashboardAnalytics = async (req, res) => {
       },
       totalTransactions: analytics.totalTransactions
     });
-
-    // ✅ ADD: Debug query to check what statuses actually exist in database
-    const statusDebugPipeline = [
-      {
-        $match: matchQuery
-      },
-      {
-        $addFields: {
-          unifiedStatus: {
-            $cond: {
-              if: { $ne: ["$status", undefined] },
-              then: { $toUpper: { $trim: { input: "$status" } } },
-              else: { 
-                $cond: {
-                  if: { $ne: ["$Transaction Status", undefined] },
-                  then: { $toUpper: { $trim: { input: "$Transaction Status" } } },
-                  else: "UNKNOWN"
-                }
-              }
-            }
-          }
-        }
-      },
-      {
-        $group: {
-          _id: "$unifiedStatus",
-          count: { $sum: 1 },
-          totalAmount: { $sum: { $cond: { if: { $ne: ["$amount", undefined] }, then: "$amount", else: { $ifNull: ["$Amount", 0] } } } }
-        }
-      },
-      {
-        $sort: { count: -1 }
-      }
-    ];
-
-    const statusBreakdown = await Transaction.aggregate(statusDebugPipeline);
-    console.log('🔍 Actual Status Breakdown in Database:', statusBreakdown);
 
     res.json(analytics);
 
