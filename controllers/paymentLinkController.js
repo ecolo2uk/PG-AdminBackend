@@ -244,13 +244,12 @@ export const generatePaymentLink = async (req, res) => {
 const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paymentMethod, paymentOption }) => {
   console.log('🔍 Step 1: Finding active connector account');
   
-  // Add query timeouts
   const activeAccount = await MerchantConnectorAccount.findOne({
     merchantId: merchantId,
     status: 'Active'
   })
   .populate('connectorId', 'name')
-  .populate('connectorAccountId', 'name terminalId')
+  .populate('connectorAccountId', 'name terminalId integrationKeys')
   .maxTimeMS(10000)
   .lean();
 
@@ -260,7 +259,7 @@ const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paym
 
   console.log('🔍 Step 2: Finding merchant');
   const merchant = await User.findById(merchantId)
-    .select('firstname lastname company mid')
+    .select('firstname lastname company mid email contact')
     .maxTimeMS(10000)
     .lean();
 
@@ -269,16 +268,49 @@ const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paym
   }
 
   console.log('🔗 Step 3: Generating payment link');
-  const paymentLink = await generateGenericPaymentLink({
-    merchant,
-    amount: parseFloat(amount),
-    primaryAccount: activeAccount,
-    paymentMethod,
-    paymentOption
-  });
+  let paymentLink;
+  const connectorName = activeAccount.connectorId?.name;
 
-  console.log('💾 Step 4: Creating transaction');
+  if (connectorName === 'Enpay') {
+    paymentLink = await generateEnpayPaymentLink({
+      merchant,
+      amount: parseFloat(amount),
+      primaryAccount: activeAccount,
+      paymentMethod,
+      paymentOption
+    });
+  } else {
+    paymentLink = await generateGenericPaymentLink({
+      merchant,
+      amount: parseFloat(amount),
+      primaryAccount: activeAccount,
+      paymentMethod,
+      paymentOption
+    });
+  }
+
+  console.log('💾 Step 4: Creating transaction with Enpay required fields');
+  
+  // Generate all required IDs
+  const txnRefId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const merchantOrderId = `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const merchantHashId = activeAccount.connectorAccountId?.integrationKeys?.merchantHashId || merchant.mid;
+  const merchantVpa = `${merchant.mid?.toLowerCase() || 'merchant'}@skypal`;
+
   const transactionData = {
+    // Required fields for Enpay/Transaction model
+    txnRefId: txnRefId,
+    merchantVpa: merchantVpa,
+    merchantHashId: merchantHashId,
+    merchantOrderId: merchantOrderId,
+    
+    // Customer details for Enpay
+    customerFirstName: merchant.firstname,
+    customerLastName: merchant.lastname,
+    customerEmail: merchant.email,
+    customerPhone: merchant.contact,
+    
+    // Your existing fields
     transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
     merchantId: merchant._id,
     merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
@@ -290,16 +322,21 @@ const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paym
     paymentOption: paymentOption,
     paymentUrl: paymentLink,
     connectorId: activeAccount.connectorId?._id,
+    connectorAccountId: activeAccount.connectorAccountId?._id,
     terminalId: activeAccount.terminalId || 'N/A'
   };
 
+  console.log('📝 Saving transaction with complete data');
   const newTransaction = new Transaction(transactionData);
   await newTransaction.save();
+
+  console.log('✅ Transaction saved successfully with ID:', transactionData.transactionId);
 
   return {
     paymentLink: paymentLink,
     transactionRefId: transactionData.transactionId,
-    connector: activeAccount.connectorId?.name || 'Unknown',
+    txnRefId: txnRefId,
+    connector: connectorName || 'Unknown',
     terminalId: activeAccount.terminalId || 'N/A',
     merchantName: `${merchant.firstname} ${merchant.lastname}`,
     message: 'Payment link generated successfully'
@@ -636,5 +673,96 @@ export const healthCheck = async (req, res) => {
       message: 'Health check failed',
       error: error.message
     });
+  }
+};
+
+const generateEnpayPaymentLink = async ({ merchant, amount, primaryAccount, paymentMethod, paymentOption }) => {
+  try {
+    console.log('🔗 Generating Enpay payment link...');
+    
+    const integrationKeys = primaryAccount.connectorAccountId?.integrationKeys || {};
+    const terminalId = primaryAccount.terminalId;
+    
+    // Generate unique transaction references
+    const txnRefId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const merchantOrderId = `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    
+    console.log('📦 Enpay transaction details:', {
+      txnRefId,
+      merchantOrderId,
+      terminalId,
+      amount,
+      merchantHashId: integrationKeys.merchantHashId
+    });
+
+    // Prepare request data for Enpay API
+    const requestData = {
+      merchantHashId: integrationKeys.merchantHashId,
+      txnAmount: parseFloat(amount),
+      txnNote: `Payment to ${merchant.company || merchant.firstname}`,
+      txnRefId: txnRefId,
+      // Add required customer fields
+      customerDetails: {
+        firstName: merchant.firstname || "Customer",
+        lastName: merchant.lastname || "User", 
+        email: merchant.email || "customer@example.com",
+        phone: merchant.contact || "9999999999"
+      }
+    };
+
+    console.log('📤 Sending request to Enpay API:', requestData);
+
+    // Call Enpay API to create dynamic QR/payment link
+    const enpayResponse = await axios.post(
+      `${integrationKeys.baseUrl}/dynamicQR`,
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret']
+        },
+        timeout: 15000
+      }
+    );
+    
+    console.log('✅ Enpay API response received:', enpayResponse.data);
+    
+    // Check if response contains QR code or payment link
+    if (enpayResponse.data && enpayResponse.data.qrCode) {
+      console.log('🎯 Enpay QR code generated successfully');
+      return enpayResponse.data.qrCode;
+    } else if (enpayResponse.data && enpayResponse.data.paymentLink) {
+      console.log('🎯 Enpay payment link generated successfully');
+      return enpayResponse.data.paymentLink;
+    } else {
+      throw new Error('Enpay API did not return payment link or QR code');
+    }
+    
+  } catch (error) {
+    console.error('❌ Enpay payment link generation failed:', error);
+    
+    if (error.response) {
+      console.error('Enpay API error response:', {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      });
+    }
+    
+    // Fallback to generic payment link
+    const fallbackLink = `https://pay.skypal.com/process?` + 
+      `mid=${encodeURIComponent(merchant.mid)}` +
+      `&amount=${amount}` +
+      `&currency=INR` +
+      `&terminal=${encodeURIComponent(primaryAccount.terminalId || 'N/A')}` +
+      `&connector=Enpay` +
+      `&method=${encodeURIComponent(paymentMethod)}` +
+      `&option=${encodeURIComponent(paymentOption)}` +
+      `&txnRefId=TXN${Date.now()}` +
+      `&timestamp=${Date.now()}`;
+    
+    console.log('🔄 Using fallback URL:', fallbackLink);
+    return fallbackLink;
   }
 };

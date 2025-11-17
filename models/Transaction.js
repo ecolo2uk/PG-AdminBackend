@@ -66,9 +66,10 @@ merchantId: {
     type: String,
     required: true
   },
-  txnRefId: {
+   txnRefId: {
     type: String,
-    required: true
+    required: true,
+    unique: true
   },
   txnNote: {
     type: String,
@@ -122,7 +123,16 @@ merchantId: {
     type: String,
     unique: true,
     sparse: true
-  }
+  },
+   connectorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Connector'
+  },
+  connectorAccountId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ConnectorAccount'
+  },
+  terminalId: String
 }, { 
   timestamps: true 
 });
