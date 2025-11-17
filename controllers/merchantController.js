@@ -1677,3 +1677,44 @@ export const getMerchantPayoutBalance = async (req, res) => {
     });
   }
 };
+
+// controllers/merchantController.js
+export const getMerchantConnectors = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    const connectorAccounts = await MerchantConnectorAccount.find({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name connectorType')
+    .populate('connectorAccountId', 'name currency integrationKeys')
+    .select('terminalId industry percentage isPrimary status');
+
+    const formattedAccounts = connectorAccounts.map(account => ({
+      _id: account._id,
+      terminalId: account.terminalId,
+      connectorName: account.connectorId.name,
+      connectorType: account.connectorId.connectorType,
+      accountName: account.connectorAccountId.name,
+      currency: account.connectorAccountId.currency,
+      industry: account.industry,
+      percentage: account.percentage,
+      isPrimary: account.isPrimary,
+      status: account.status
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedAccounts
+    });
+
+  } catch (error) {
+    console.error('Error fetching merchant connectors:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};

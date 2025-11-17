@@ -3,7 +3,10 @@ import { encrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose'; // ✅ ADD THIS IMPORT
 import axios from 'axios'; // ✅ IMPORTANT: Add this import
-
+import MerchantConnectorAccount from '../models/MerchantConnectorAccount.js';
+import ConnectorAccount from '../models/ConnectorAccount.js';
+import User from '../models/User.js';
+ 
 const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 
@@ -13,14 +16,8 @@ const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
 const ENPAY_MERCHANT_KEY = process.env.ENPAY_MERCHANT_KEY;
 const ENPAY_MERCHANT_SECRET = process.env.ENPAY_MERCHANT_SECRET;
 
-// backend/controllers/paymentLinkController.js
-// backend/controllers/paymentLinkController.js
 export const generatePaymentLink = async (req, res) => {
-  console.log('🚀 generatePaymentLink function called');
-  
   try {
-    console.log('📦 Request body:', req.body);
-
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
     // Validation
@@ -31,36 +28,27 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
-      return res.status(400).json({
+    // ✅ STEP 1: Get merchant's PRIMARY connector account
+    const primaryAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      isPrimary: true,
+      status: 'Active'
+    })
+    .populate('connectorId')
+    .populate('connectorAccountId');
+
+    if (!primaryAccount) {
+      return res.status(404).json({
         success: false,
-        message: 'Amount must be between 500 and 10,000 INR'
+        message: 'No active primary connector account found for this merchant'
       });
     }
 
-    const staticMerchants = [
-  {
-    _id: "6905b4b5a1ocf16df46bb2", // ✅ Real merchant ID
-    firstname: "SKYPAL SYSTEM",
-    lastname: "PRIVATE LIMITED", 
-    mid: "M1761981621943857",
-    hashId: "MERCDSH51Y7CD4YJLFIZR8NF", // Enpay hash ID
-    vpa: "enpay1.skypal@fino",
-    merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
-  },
-  {
-    _id: "690af75c8ca79a8525c0ba03",
-    firstname: "abc",
-    lastname: "efd",
-    mid: "M1762326364850484",
-    hashId: "MERCDSH51Y7CD4YJLFIZR8NF",
-    vpa: "enpay1.skypal@fino", 
-    merchantName: "SKYPAL SYSTEM PRIVATE LIMITED"
-  }
-];
+    console.log('🔗 Using Connector:', primaryAccount.connectorId.name);
+    console.log('💰 Using Account:', primaryAccount.connectorAccountId.name);
 
-    const merchant = staticMerchants.find(m => m._id === merchantId);
+    // ✅ STEP 2: Get merchant details
+    const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
@@ -68,141 +56,76 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    // Generate unique IDs
-    const timestamp = Date.now();
-    const randomSuffix = Math.floor(Math.random() * 10000);
-    const merchantOrderId = `ORDER${timestamp}${randomSuffix}`;
-    const merchantTrnId = `TRN${timestamp}${randomSuffix}`;
-    const shortLinkId = `pay_${timestamp}${randomSuffix}`;
+    // ✅ STEP 3: Get connector account credentials
+    const connectorAccount = await ConnectorAccount.findById(primaryAccount.connectorAccountId._id);
+    if (!connectorAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'Connector account not found'
+      });
+    }
 
-    console.log('🆔 Generated IDs:', { merchantOrderId, merchantTrnId, shortLinkId });
-
-    // ✅ REAL ENPAY API CALL
-    const API_BASE_URL = process.env.API_BASE_URL || 'https://pg-admin-backend.vercel.app';
-    const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-
-    const enpayRequestData = {
-      "amount": amountNum.toFixed(2),
-      "merchantHashId": merchant.hashId,
-      "merchantOrderId": merchantOrderId,
-      "merchantTrnId": merchantTrnId,
-      "merchantVpa": merchant.vpa,
-      "returnURL": `${API_BASE_URL}/api/payment/return?transactionId=${merchantTrnId}`,
-      "successURL": `${API_BASE_URL}/api/payment/success?transactionId=${merchantTrnId}`,
-      "txnNote": `Payment for ${merchant.merchantName}`
-    };
-
-    console.log('📤 Enpay API Request Data:', JSON.stringify(enpayRequestData, null, 2));
-
-    let enpayResponse;
-    let finalPaymentLink = '';
+    // ✅ STEP 4: Dynamic API call based on connector type
+    let paymentLink;
     let isMock = false;
 
-    try {
-      console.log('🔄 Calling REAL Enpay API...');
-      
-      enpayResponse = await axios({
-        method: 'POST',
-        url: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': process.env.ENPAY_MERCHANT_KEY,
-          'X-Merchant-Secret': process.env.ENPAY_MERCHANT_SECRET
-        },
-        data: enpayRequestData,
-        timeout: 30000
+    if (primaryAccount.connectorId.name === 'Enpay') {
+      paymentLink = await generateEnpayPaymentLink({
+        merchant,
+        amount,
+        connectorAccount,
+        primaryAccount
       });
-
-      console.log('✅ Enpay API Response Status:', enpayResponse.status);
-      console.log('✅ Enpay API Response Data:', JSON.stringify(enpayResponse.data, null, 2));
-
-      // Validate Enpay response
-      if (enpayResponse.data && enpayResponse.data.details) {
-        finalPaymentLink = enpayResponse.data.details;
-        console.log('🔗 Real Enpay Payment Link:', finalPaymentLink);
-        isMock = false;
-      } else {
-        throw new Error('Invalid response from Enpay API');
-      }
-
-    } catch (apiError) {
-      console.error('❌ Enpay API Error:', apiError.response?.data || apiError.message);
-      
-      // Fallback to mock
-      console.log('🔄 Falling back to mock payment...');
-      finalPaymentLink = "https://enpay.in/payment-page"; // Mock Enpay URL
-      isMock = true;
+    } 
+    // Add other connectors here
+    else if (primaryAccount.connectorId.name === 'Razorpay') {
+      paymentLink = await generateRazorpayPaymentLink({
+        merchant,
+        amount,
+        connectorAccount,
+        primaryAccount
+      });
+    }
+    else {
+      return res.status(400).json({
+        success: false,
+        message: `Unsupported connector: ${primaryAccount.connectorId.name}`
+      });
     }
 
-    // ✅ CRITICAL: Create transaction record in database
+    // ✅ STEP 5: Create transaction record
     const transactionData = {
-      transactionId: merchantTrnId,
-      merchantOrderId: merchantOrderId,
-      merchantHashId: merchant.hashId,
+      transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      merchantOrderId: `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      merchantHashId: connectorAccount.integrationKeys.get('merchantHashId') || merchant.mid,
       merchantId: merchant._id,
-      merchantName: merchant.merchantName,
+      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
       mid: merchant.mid,
-      amount: amountNum,
+      amount: parseFloat(amount),
       currency: currency,
       status: 'INITIATED',
-      merchantVpa: merchant.vpa,
-      txnRefId: merchantTrnId,
-      txnNote: `Payment for ${merchant.merchantName}`,
       paymentMethod: paymentMethod,
       paymentOption: paymentOption,
-      paymentUrl: finalPaymentLink,
-      shortLinkId: shortLinkId,
-      isMock: isMock,
-      enpayTxnId: enpayResponse?.data?.data?.transactionId || merchantTrnId
+      paymentUrl: paymentLink,
+      connectorId: primaryAccount.connectorId._id,
+      connectorAccountId: primaryAccount.connectorAccountId._id,
+      isMock: isMock
     };
 
-    console.log('💾 Saving transaction to database...');
-    
-    let newTransaction;
-    try {
-      newTransaction = new Transaction(transactionData);
-      await newTransaction.save();
-      console.log('✅ Transaction saved with ID:', newTransaction._id);
-    } catch (dbError) {
-      console.error('❌ Database save error:', dbError);
-      throw new Error(`Failed to save transaction: ${dbError.message}`);
-    }
+    const newTransaction = new Transaction(transactionData);
+    await newTransaction.save();
 
-    // ✅ Encrypt and save payment payload
-    const encryptedPayload = encrypt(JSON.stringify({
-      enpayLink: finalPaymentLink,
-      transactionId: merchantTrnId,
-      merchantName: merchant.merchantName,
-      amount: amountNum.toFixed(2),
-      orderId: merchantOrderId,
-      isMock: isMock
-    }));
-
-    // Update transaction with encrypted payload
-    await Transaction.findByIdAndUpdate(newTransaction._id, {
-      encryptedPaymentPayload: encryptedPayload
-    });
-
-    const customPaymentLink = `${FRONTEND_BASE_URL}/payments/process/${shortLinkId}`;
-
-    console.log('🎉 Payment link generation completed!');
-    console.log('🔗 Custom Payment Link:', customPaymentLink);
-    console.log('🔗 Final Enpay Link:', finalPaymentLink);
-    console.log('📱 Is Mock:', isMock);
-
-    return res.json({
+    res.json({
       success: true,
-      paymentLink: customPaymentLink,
-      transactionRefId: merchantTrnId,
-      merchantOrderId: merchantOrderId,
-      isMock: isMock,
-      message: isMock ? 
-        'Mock payment link generated (Enpay API issue)' : 
-        'Real payment link generated successfully!'
+      paymentLink: paymentLink,
+      transactionRefId: transactionData.transactionId,
+      connector: primaryAccount.connectorId.name,
+      connectorAccount: primaryAccount.connectorAccountId.name,
+      isMock: isMock
     });
 
   } catch (error) {
-    console.error('🔥 ERROR in generatePaymentLink:', error);
+    console.error('Error generating payment link:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -210,6 +133,7 @@ export const generatePaymentLink = async (req, res) => {
     });
   }
 };
+
 
 
 export const getMerchants = async (req, res) => {
