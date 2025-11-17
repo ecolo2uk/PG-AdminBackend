@@ -138,6 +138,35 @@ export const testPaymentGeneration = async (req, res) => {
   }
 };
 
+
+const testSimpleEndpoint = async () => {
+  try {
+    console.log('🧪 Testing simple endpoint...');
+    
+    const response = await axios.post(
+      `${import.meta.env.VITE_API_BASE_URL}/payment/simple-test`,
+      {
+        merchantId: "691aad24b2de5f1f7c80dbd1",
+        amount: "1000",
+        paymentMethod: "upi",
+        paymentOption: "gpay"
+      },
+      {
+        timeout: 10000, // 10 second timeout
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log('✅ Simple test response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Simple test failed:', error);
+    throw error;
+  }
+};
+
 // Add this to your paymentLinkController.js
 export const debugRequestBody = async (req, res) => {
   try {
@@ -166,170 +195,52 @@ export const debugRequestBody = async (req, res) => {
 };
 
 export const generatePaymentLink = async (req, res) => {
-  const startTime = Date.now();
-  let currentStep = 'START';
+  console.log('🚀 generatePaymentLink CALLED at:', new Date().toISOString());
   
   try {
-    console.log('🔄 STEP 0: Starting payment link generation');
-    currentStep = 'VALIDATION';
+    console.log('📦 Request body received:', req.body);
     
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
 
-    console.log('📦 Request data:', { merchantId, amount, currency, paymentMethod, paymentOption });
-
-    // Enhanced Validation
-    if (!merchantId || !amount || !paymentMethod || !paymentOption) {
-      console.log('❌ Validation failed: Missing required fields');
-      return res.status(400).json({
-        success: false,
-        message: 'All fields are required: merchantId, amount, paymentMethod, paymentOption'
-      });
-    }
-
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum)) {
-      console.log('❌ Validation failed: Invalid amount format');
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid amount format'
-      });
-    }
-
-    if (amountNum < 500 || amountNum > 10000) {
-      console.log('❌ Validation failed: Amount out of range');
-      return res.status(400).json({
-        success: false,
-        message: 'Amount must be between 500 and 10,000 INR'
-      });
-    }
-
-    console.log('✅ Validation passed');
-    currentStep = 'FINDING_CONNECTOR';
-
-    // ✅ STEP 1: Get merchant's active connector account
-    console.log('🔍 STEP 1: Looking for active connector account for merchant:', merchantId);
+    // Immediate response to test if function is called
+    console.log('✅ Immediately returning test response');
     
-    const connectorStartTime = Date.now();
-    const activeAccount = await MerchantConnectorAccount.findOne({
-      merchantId: merchantId,
-      status: 'Active'
-    })
-    .populate('connectorId')
-    .populate('connectorAccountId')
-    .maxTimeMS(10000); // Add timeout for database query
-
-    console.log(`✅ Connector query completed in ${Date.now() - connectorStartTime}ms`);
-    
-    if (!activeAccount) {
-      console.log('❌ No active connector account found');
-      return res.status(404).json({
-        success: false,
-        message: 'No active connector account found for this merchant.'
-      });
-    }
-
-    console.log('✅ Found connector:', activeAccount.connectorId?.name);
-    currentStep = 'FINDING_MERCHANT';
-
-    // ✅ STEP 2: Get merchant details
-    console.log('🔍 STEP 2: Fetching merchant details');
-    
-    const merchantStartTime = Date.now();
-    const merchant = await User.findById(merchantId).maxTimeMS(10000);
-    
-    console.log(`✅ Merchant query completed in ${Date.now() - merchantStartTime}ms`);
-
-    if (!merchant) {
-      console.log('❌ Merchant not found');
-      return res.status(404).json({
-        success: false,
-        message: 'Merchant not found'
-      });
-    }
-
-    console.log('✅ Found merchant:', merchant.firstname, merchant.lastname);
-    currentStep = 'GENERATING_LINK';
-
-    // ✅ STEP 3: Generate payment link
-    console.log('🔗 STEP 3: Generating payment link...');
-    
-    const linkStartTime = Date.now();
-    const paymentLink = await generateGenericPaymentLink({
-      merchant,
-      amount: amountNum,
-      primaryAccount: activeAccount,
-      paymentMethod,
-      paymentOption
-    });
-    
-    console.log(`✅ Link generation completed in ${Date.now() - linkStartTime}ms`);
-    console.log('✅ Generated Payment Link:', paymentLink);
-    currentStep = 'CREATING_TRANSACTION';
-
-    // ✅ STEP 4: Create transaction record
-    console.log('💾 STEP 4: Creating transaction record...');
-    
-    const transactionData = {
-      transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
-      merchantOrderId: `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`,
-      merchantHashId: merchant.mid,
-      merchantId: merchant._id,
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
-      mid: merchant.mid,
-      amount: amountNum,
-      currency: currency,
-      status: 'INITIATED',
-      paymentMethod: paymentMethod,
-      paymentOption: paymentOption,
-      paymentUrl: paymentLink,
-      connectorId: activeAccount.connectorId?._id,
-      connectorAccountId: activeAccount.connectorAccountId?._id,
-      terminalId: activeAccount.terminalId || 'N/A'
-    };
-
-    const transactionStartTime = Date.now();
-    const newTransaction = new Transaction(transactionData);
-    await newTransaction.save();
-    
-    console.log(`✅ Transaction saved in ${Date.now() - transactionStartTime}ms`);
-    console.log('✅ Transaction ID:', transactionData.transactionId);
-    currentStep = 'SENDING_RESPONSE';
-
-    // ✅ SUCCESS RESPONSE
-    const totalTime = Date.now() - startTime;
-    console.log(`🎉 SUCCESS: Payment link generated in ${totalTime}ms`);
-    
-    res.json({
+    return res.json({
       success: true,
-      paymentLink: paymentLink,
-      transactionRefId: transactionData.transactionId,
-      connector: activeAccount.connectorId?.name || 'Unknown',
-      connectorAccount: activeAccount.connectorAccountId?.name || 'Unknown',
-      terminalId: activeAccount.terminalId || 'N/A',
-      merchantName: `${merchant.firstname} ${merchant.lastname}`,
-      processingTime: `${totalTime}ms`,
-      message: `Payment link generated successfully using ${activeAccount.connectorId?.name || 'Generic'} connector`
+      message: 'TEST - Backend is working',
+      testData: {
+        merchantId,
+        amount, 
+        paymentMethod,
+        paymentOption
+      },
+      testLink: 'https://pay.skypal.com/test?mid=' + merchantId
     });
 
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`❌ ERROR at step ${currentStep} after ${totalTime}ms:`, error);
-    
-    // Check if it's a timeout error
-    if (error.name === 'TimeoutError' || error.message.includes('timeout')) {
-      return res.status(408).json({
-        success: false,
-        message: 'Request timeout - operation took too long',
-        step: currentStep
-      });
-    }
-
+    console.error('❌ Error in generatePaymentLink:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error while generating payment link',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Please try again later',
-      step: currentStep
+      message: 'Error: ' + error.message
     });
+  }
+};
+
+// Add this to your paymentLinkController.js
+export const simpleTest = async (req, res) => {
+  console.log('🧪 SIMPLE TEST ROUTE CALLED');
+  
+  try {
+    // Just return a simple response immediately
+    res.json({
+      success: true,
+      message: 'Simple test route is working!',
+      timestamp: new Date().toISOString(),
+      data: req.body
+    });
+  } catch (error) {
+    console.error('Simple test error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
