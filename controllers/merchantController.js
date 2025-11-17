@@ -5,8 +5,9 @@ import PayoutTransaction from '../models/PayoutTransaction.js';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
-import MerchantConnectorAccount from '../models/MerchantConnectorAccount.js';
 
+// ✅ CORRECT IMPORT - Make sure this path is correct
+import MerchantConnectorAccount from '../models/MerchantConnectorAccount.js';
 // Helper to generate MID
 const generateMid = () => {
   return 'M' + Date.now().toString() + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -1686,6 +1687,23 @@ export const getMerchantConnectors = async (req, res) => {
     
     console.log('🔍 Fetching connector accounts for merchant:', merchantId);
 
+    // Validate merchantId
+    if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid merchant ID'
+      });
+    }
+
+    // Check if merchant exists
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
     const connectorAccounts = await MerchantConnectorAccount.find({
       merchantId: merchantId,
       status: 'Active'
@@ -1695,13 +1713,13 @@ export const getMerchantConnectors = async (req, res) => {
     .select('terminalId industry percentage isPrimary status')
     .lean();
 
-    console.log(`✅ Found ${connectorAccounts.length} connector accounts`);
+    console.log(`✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchantId}`);
 
     const formattedAccounts = connectorAccounts.map(account => ({
       _id: account._id,
       terminalId: account.terminalId,
       connector: account.connectorId?.name || 'Unknown',
-      assignedAccount: account.connectorAccountId?.name || 'Unknown',
+      assignedAccount: account.connectorAccountId?.name || 'Unknown', 
       connectorName: account.connectorId?.name || 'Unknown',
       accountName: account.connectorAccountId?.name || 'Unknown',
       currency: account.connectorAccountId?.currency || 'INR',
