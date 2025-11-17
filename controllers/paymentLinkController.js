@@ -195,35 +195,115 @@ export const debugRequestBody = async (req, res) => {
 };
 
 export const generatePaymentLink = async (req, res) => {
-  console.log('🚀 generatePaymentLink CALLED at:', new Date().toISOString());
+  const startTime = Date.now();
+  console.log('🚀 generatePaymentLink STARTED');
   
-  try {
-    console.log('📦 Request body received:', req.body);
-    
-    const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
+  // Set timeout for the entire function
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Function timeout after 25s')), 25000);
+  });
 
-    // Immediate response to test if function is called
-    console.log('✅ Immediately returning test response');
+  try {
+    const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
     
-    return res.json({
+    console.log('📦 Processing request for merchant:', merchantId);
+
+    // Validate input quickly
+    if (!merchantId || !amount || !paymentMethod || !paymentOption) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Use Promise.race to handle timeouts
+    const result = await Promise.race([
+      processPaymentLinkGeneration({ merchantId, amount, currency, paymentMethod, paymentOption }),
+      timeoutPromise
+    ]);
+
+    console.log(`✅ Completed in ${Date.now() - startTime}ms`);
+    
+    res.json({
       success: true,
-      message: 'TEST - Backend is working',
-      testData: {
-        merchantId,
-        amount, 
-        paymentMethod,
-        paymentOption
-      },
-      testLink: 'https://pay.skypal.com/test?mid=' + merchantId
+      ...result
     });
 
   } catch (error) {
-    console.error('❌ Error in generatePaymentLink:', error);
+    console.error(`❌ Failed after ${Date.now() - startTime}ms:`, error);
+    
     res.status(500).json({
       success: false,
-      message: 'Error: ' + error.message
+      message: 'Payment link generation failed',
+      error: error.message
     });
   }
+};
+
+// Separate function for the actual processing
+const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paymentMethod, paymentOption }) => {
+  console.log('🔍 Step 1: Finding active connector account');
+  
+  // Add query timeouts
+  const activeAccount = await MerchantConnectorAccount.findOne({
+    merchantId: merchantId,
+    status: 'Active'
+  })
+  .populate('connectorId', 'name')
+  .populate('connectorAccountId', 'name terminalId')
+  .maxTimeMS(10000)
+  .lean();
+
+  if (!activeAccount) {
+    throw new Error('No active connector account found');
+  }
+
+  console.log('🔍 Step 2: Finding merchant');
+  const merchant = await User.findById(merchantId)
+    .select('firstname lastname company mid')
+    .maxTimeMS(10000)
+    .lean();
+
+  if (!merchant) {
+    throw new Error('Merchant not found');
+  }
+
+  console.log('🔗 Step 3: Generating payment link');
+  const paymentLink = await generateGenericPaymentLink({
+    merchant,
+    amount: parseFloat(amount),
+    primaryAccount: activeAccount,
+    paymentMethod,
+    paymentOption
+  });
+
+  console.log('💾 Step 4: Creating transaction');
+  const transactionData = {
+    transactionId: `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+    merchantId: merchant._id,
+    merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+    mid: merchant.mid,
+    amount: parseFloat(amount),
+    currency: currency,
+    status: 'INITIATED',
+    paymentMethod: paymentMethod,
+    paymentOption: paymentOption,
+    paymentUrl: paymentLink,
+    connectorId: activeAccount.connectorId?._id,
+    terminalId: activeAccount.terminalId || 'N/A'
+  };
+
+  const newTransaction = new Transaction(transactionData);
+  await newTransaction.save();
+
+  return {
+    paymentLink: paymentLink,
+    transactionRefId: transactionData.transactionId,
+    connector: activeAccount.connectorId?.name || 'Unknown',
+    terminalId: activeAccount.terminalId || 'N/A',
+    merchantName: `${merchant.firstname} ${merchant.lastname}`,
+    message: 'Payment link generated successfully'
+  };
 };
 
 // Add this to your paymentLinkController.js
