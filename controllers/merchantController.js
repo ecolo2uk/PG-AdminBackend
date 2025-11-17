@@ -1743,3 +1743,48 @@ export const getMerchantConnectors = async (req, res) => {
     });
   }
 };
+
+// Add to your merchantController.js
+export const debugRoutes = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    console.log('🔍 DEBUG: Checking routes for merchant:', merchantId);
+    
+    // Check if merchant exists
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+    
+    // Check connector accounts
+    const connectorAccounts = await MerchantConnectorAccount.find({
+      merchantId: merchantId,
+      status: 'Active'
+    });
+    
+    res.json({
+      success: true,
+      message: 'Route is working',
+      merchant: {
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid
+      },
+      connectorCount: connectorAccounts.length,
+      connectors: connectorAccounts.map(acc => ({
+        id: acc._id,
+        terminalId: acc.terminalId,
+        status: acc.status
+      }))
+    });
+    
+  } catch (error) {
+    console.error('❌ DEBUG Route error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+};
