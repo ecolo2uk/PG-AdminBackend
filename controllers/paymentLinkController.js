@@ -418,7 +418,7 @@ export const testEnpayDirect = async (req, res) => {
   }
 };
 
-// Add this to your paymentLinkController.js
+
 export const verifyEnpayCredentials = async (req, res) => {
   try {
     console.log('🔐 VERIFY: Testing Enpay Credentials Validity');
@@ -436,9 +436,7 @@ export const verifyEnpayCredentials = async (req, res) => {
     console.log('🔍 Credentials Analysis:', {
       merchantKey: integrationKeys['X-Merchant-Key'] ? `Present (${integrationKeys['X-Merchant-Key'].length} chars)` : 'Missing',
       merchantSecret: integrationKeys['X-Merchant-Secret'] ? `Present (${integrationKeys['X-Merchant-Secret'].length} chars)` : 'Missing',
-      merchantHashId: integrationKeys['merchantHashId'] ? `Present (${integrationKeys['merchantHashId']})` : 'Missing',
-      keyPrefix: integrationKeys['X-Merchant-Key']?.substring(0, 8) + '...',
-      secretPrefix: integrationKeys['X-Merchant-Secret']?.substring(0, 8) + '...'
+      merchantHashId: integrationKeys['merchantHashId'] ? `Present (${integrationKeys['merchantHashId']})` : 'Missing'
     });
 
     // Test with minimal request
