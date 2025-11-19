@@ -315,7 +315,80 @@ export const generatePaymentLink = async (req, res) => {
     });
   }
 };
+// Add this to your paymentLinkController.js
+export const testEnpayDirect = async (req, res) => {
+  try {
+    console.log('🧪 TEST: Direct Enpay Connection');
+    
+    // Direct connector account access
+    const connectorAccount = await ConnectorAccount.findOne({
+      _id: ObjectId('691aeed3384a398228320200')
+    });
 
+    if (!connectorAccount) {
+      return res.json({
+        success: false,
+        message: 'Connector account not found'
+      });
+    }
+
+    console.log('✅ Connector Account Found:', {
+      name: connectorAccount.name,
+      integrationKeys: Object.keys(connectorAccount.integrationKeys || {})
+    });
+
+    const integrationKeys = connectorAccount.integrationKeys || {};
+    
+    // Test data
+    const testData = {
+      amount: "1000.00",
+      merchantHashId: integrationKeys.merchantHashId,
+      merchantOrderId: `TEST${Date.now()}`,
+      merchantTxnId: `TXNTEST${Date.now()}`,
+      merchantVpa: "test@fino",
+      returnURL: "https://example.com/return",
+      successURL: "https://example.com/success",
+      txnnNote: "Test payment"
+    };
+
+    console.log('📤 Calling Enpay API...');
+
+    const enpayResponse = await axios.post(
+      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      testData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
+          'Accept': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ Enpay API Response:', enpayResponse.data);
+
+    res.json({
+      success: true,
+      message: 'Direct Enpay test successful',
+      paymentLink: enpayResponse.data.details,
+      connectorAccount: connectorAccount.name,
+      debug: {
+        integrationKeys: Object.keys(integrationKeys),
+        enpayResponse: enpayResponse.data
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Test failed:', error.response?.data || error.message);
+    res.json({
+      success: false,
+      error: error.response?.data || error.message,
+      message: 'Direct Enpay test failed'
+    });
+  }
+};
 const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paymentMethod, paymentOption }) => {
   console.log('🔍 Step 1: Finding merchant and active connector account');
   
