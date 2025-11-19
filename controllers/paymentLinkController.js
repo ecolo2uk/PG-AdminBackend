@@ -317,9 +317,11 @@ export const generatePaymentLink = async (req, res) => {
     });
   }
 };
+
+
 export const testEnpayDirect = async (req, res) => {
   try {
-    console.log('🧪 TEST: Enhanced Direct Enpay Connection');
+    console.log('🧪 ENHANCED: Testing Direct Enpay Connection');
     
     const connectorAccount = await ConnectorAccount.findOne({ name: 'enpay' });
     if (!connectorAccount) {
@@ -331,31 +333,26 @@ export const testEnpayDirect = async (req, res) => {
 
     const integrationKeys = connectorAccount.integrationKeys || {};
     
-    // ✅ ENHANCED VALIDATION
-    console.log('🔐 Credentials Check:', {
-      hasMerchantKey: !!integrationKeys['X-Merchant-Key'],
-      hasMerchantSecret: !!integrationKeys['X-Merchant-Secret'], 
-      hasMerchantHashId: !!integrationKeys['merchantHashId'],
-      merchantKeyLength: integrationKeys['X-Merchant-Key']?.length,
-      merchantSecretLength: integrationKeys['X-Merchant-Secret']?.length
+    // Enhanced validation
+    console.log('🔐 Current Credentials:', {
+      merchantKey: integrationKeys['X-Merchant-Key']?.substring(0, 20) + '...',
+      merchantSecret: integrationKeys['X-Merchant-Secret']?.substring(0, 20) + '...',
+      merchantHashId: integrationKeys['merchantHashId']
     });
 
     // Test data
     const testData = {
-      amount: "1000.00",
+      amount: "100.00",
       merchantHashId: integrationKeys.merchantHashId,
       merchantOrderId: `TEST${Date.now()}`,
-      merchantTxnId: `TXNTEST${Date.now()}`,
+      merchantTxnId: `TXN${Date.now()}`,
       merchantVpa: "test@fino",
       returnURL: "https://example.com/return",
-      successURL: "https://example.com/success", 
+      successURL: "https://example.com/success",
       txnnNote: "Test payment"
     };
 
-    console.log('📤 Calling Enpay API with headers:', {
-      'X-Merchant-Key': integrationKeys['X-Merchant-Key'] ? 'PRESENT' : 'MISSING',
-      'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'] ? 'PRESENT' : 'MISSING'
-    });
+    console.log('📤 Making API call...');
 
     const enpayResponse = await axios.post(
       'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
@@ -376,36 +373,138 @@ export const testEnpayDirect = async (req, res) => {
     res.json({
       success: true,
       message: 'Direct Enpay test successful!',
-      paymentLink: enpayResponse.data.details || enpayResponse.data.paymentUrl,
-      debug: {
-        credentialsValid: true,
-        headersSent: true
-      }
+      paymentLink: enpayResponse.data.details || enpayResponse.data.paymentUrl
     });
 
   } catch (error) {
-    console.error('❌ Enhanced Test failed:', error);
+    console.error('❌ Enhanced Test failed:');
     
     let errorDetails = {
-      message: error.message
+      stage: 'UNKNOWN',
+      details: {}
     };
-    
+
     if (error.response) {
-      errorDetails = {
+      console.error('🔍 Full Error Response:', {
         status: error.response.status,
+        statusText: error.response.statusText,
         data: error.response.data,
         headers: error.response.headers
+      });
+
+      errorDetails = {
+        stage: 'API_RESPONSE',
+        status: error.response.status,
+        data: error.response.data,
+        message: ''
       };
-      console.error('🔍 Full error response:', errorDetails);
+
+      // Specific error messages
+      if (error.response.status === 401) {
+        errorDetails.message = 'INVALID_CREDENTIALS - Please verify your Merchant Key and Secret with Enpay support';
+      } else if (error.response.status === 400) {
+        errorDetails.message = 'BAD_REQUEST - Check request parameters';
+      } else if (error.response.status === 403) {
+        errorDetails.message = 'FORBIDDEN - Account may be inactive or restricted';
+      }
+    }
+
+    res.json({
+      success: false,
+      message: 'Enpay connection test failed',
+      error: errorDetails,
+      recommendation: 'Contact Enpay support to verify and reset your API credentials'
+    });
+  }
+};
+
+// Add this to your paymentLinkController.js
+export const verifyEnpayCredentials = async (req, res) => {
+  try {
+    console.log('🔐 VERIFY: Testing Enpay Credentials Validity');
+    
+    const connectorAccount = await ConnectorAccount.findOne({ name: 'enpay' });
+    if (!connectorAccount) {
+      return res.json({
+        success: false,
+        message: 'Enpay connector account not found'
+      });
+    }
+
+    const integrationKeys = connectorAccount.integrationKeys || {};
+    
+    console.log('🔍 Credentials Analysis:', {
+      merchantKey: integrationKeys['X-Merchant-Key'] ? `Present (${integrationKeys['X-Merchant-Key'].length} chars)` : 'Missing',
+      merchantSecret: integrationKeys['X-Merchant-Secret'] ? `Present (${integrationKeys['X-Merchant-Secret'].length} chars)` : 'Missing',
+      merchantHashId: integrationKeys['merchantHashId'] ? `Present (${integrationKeys['merchantHashId']})` : 'Missing',
+      keyPrefix: integrationKeys['X-Merchant-Key']?.substring(0, 8) + '...',
+      secretPrefix: integrationKeys['X-Merchant-Secret']?.substring(0, 8) + '...'
+    });
+
+    // Test with minimal request
+    const testData = {
+      amount: "1.00",
+      merchantHashId: integrationKeys.merchantHashId,
+      merchantOrderId: `VALIDATE${Date.now()}`,
+      merchantTxnId: `VALIDATE${Date.now()}`,
+      merchantVpa: "test@fino",
+      returnURL: "https://example.com/return",
+      successURL: "https://example.com/success",
+      txnnNote: "Credential Validation"
+    };
+
+    console.log('📤 Testing API call with current credentials...');
+
+    const response = await axios.post(
+      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      testData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
+          'Accept': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+
+    console.log('✅ Credentials are VALID - API Response:', response.data);
+    
+    res.json({
+      success: true,
+      message: 'Credentials are valid and working!',
+      validation: 'SUCCESS',
+      response: response.data
+    });
+
+  } catch (error) {
+    console.error('❌ Credential Validation Failed:');
+    
+    let detailedError = {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: ''
+    };
+    
+    if (error.response?.status === 401) {
+      detailedError.message = 'INVALID_CREDENTIALS - The merchant key/secret are incorrect or expired';
+    } else if (error.response?.status === 403) {
+      detailedError.message = 'FORBIDDEN - Merchant account may be suspended';
+    } else {
+      detailedError.message = error.response?.data?.message || error.message;
     }
     
     res.json({
       success: false,
-      error: 'Enpay API call failed',
-      details: errorDetails
+      message: 'Credentials validation failed',
+      error: detailedError,
+      recommendation: 'Please contact Enpay support to verify and reset your API credentials'
     });
   }
 };
+
+
 const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paymentMethod, paymentOption }) => {
   console.log('🔍 Step 1: Finding merchant and active connector account');
   
