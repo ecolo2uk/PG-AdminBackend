@@ -912,33 +912,61 @@ const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paym
 
   console.log('✅ Merchant found:', `${merchant.firstname} ${merchant.lastname}`, 'MID:', merchant.mid);
 
-  // Find active connector account
+  // Find active connector account with proper population
   const activeAccount = await MerchantConnectorAccount.findOne({
     merchantId: merchantId,
     status: 'Active'
   })
-  .populate('connectorId', 'name className connectorType')
-  .populate('connectorAccountId')
+  .populate({
+    path: 'connectorId',
+    select: 'name className connectorType'
+  })
+  .populate({
+    path: 'connectorAccountId',
+    select: 'name currency integrationKeys'
+  })
   .maxTimeMS(10000);
 
   if (!activeAccount) {
     throw new Error('No active connector account found for this merchant');
   }
 
-  console.log('✅ Active connector account found:', activeAccount.connectorId?.name);
-  console.log('🔍 Connector Account Details:', {
-    terminalId: activeAccount.terminalId,
-    connectorAccountId: activeAccount.connectorAccountId?._id
+  console.log('✅ Active connector account found:', {
+    connectorName: activeAccount.connectorId?.name,
+    connectorAccountId: activeAccount.connectorAccountId?._id,
+    connectorAccountName: activeAccount.connectorAccountId?.name,
+    terminalId: activeAccount.terminalId
   });
+
+  // Check if connectorAccountId is properly populated
+  if (!activeAccount.connectorAccountId) {
+    console.error('❌ Connector Account not populated:', activeAccount);
+    throw new Error('Connector account details not found - population failed');
+  }
 
   const connectorName = activeAccount.connectorId?.name;
   const connectorAccount = activeAccount.connectorAccountId;
 
-  if (!connectorAccount) {
-    throw new Error('Connector account details not found');
-  }
-
   console.log('🔍 Connector Account Integration Keys:', connectorAccount.integrationKeys);
+  console.log('🔍 Connector Account Details:', {
+    name: connectorAccount.name,
+    currency: connectorAccount.currency,
+    hasIntegrationKeys: !!connectorAccount.integrationKeys
+  });
+
+  // If integrationKeys is empty, try to fetch the connector account separately
+  if (!connectorAccount.integrationKeys || Object.keys(connectorAccount.integrationKeys).length === 0) {
+    console.log('🔄 Integration keys empty, fetching connector account separately...');
+    
+    const freshConnectorAccount = await ConnectorAccount.findById(connectorAccount._id);
+    if (freshConnectorAccount && freshConnectorAccount.integrationKeys) {
+      console.log('✅ Found integration keys in fresh fetch:', freshConnectorAccount.integrationKeys);
+      connectorAccount.integrationKeys = freshConnectorAccount.integrationKeys;
+    } else {
+      console.error('❌ No integration keys found even after fresh fetch');
+      throw new Error('Connector account integration keys not found');
+    }
+  }
 
   console.log('🔗 Step 2: Generating payment link based on connector type');
   
@@ -1009,7 +1037,7 @@ const processPaymentLinkGeneration = async ({ merchantId, amount, currency, paym
     status: 'INITIATED',
     paymentMethod,
     paymentOption,
-    paymentUrl: paymentLink, // Store actual payment link
+    paymentUrl: paymentLink,
     
     // Connector information
     connectorId: activeAccount.connectorId?._id,
@@ -1524,5 +1552,91 @@ export const handleReturn = async (req, res) => {
   } catch (error) {
     console.error('Return callback error:', error);
     res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
+  }
+};
+
+// Add this to paymentLinkController.js
+export const debugConnectorAccount = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🔍 DEBUG: Checking connector account for merchant:', merchantId);
+
+    // Check merchant
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
+
+    // Check connector accounts
+    const connectorAccounts = await MerchantConnectorAccount.find({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId')
+    .populate('connectorAccountId');
+
+    console.log(`🔍 Found ${connectorAccounts.length} connector accounts`);
+
+    // Detailed logging
+    connectorAccounts.forEach((account, index) => {
+      console.log(`🔍 Connector Account ${index + 1}:`, {
+        _id: account._id,
+        connectorId: account.connectorId?._id,
+        connectorName: account.connectorId?.name,
+        connectorAccountId: account.connectorAccountId?._id,
+        connectorAccountName: account.connectorAccountId?.name,
+        terminalId: account.terminalId,
+        status: account.status,
+        isPrimary: account.isPrimary
+      });
+
+      // Check if connectorAccountId exists and has integrationKeys
+      if (account.connectorAccountId) {
+        console.log(`🔍 Connector Account Details ${index + 1}:`, {
+          name: account.connectorAccountId.name,
+          currency: account.connectorAccountId.currency,
+          integrationKeys: account.connectorAccountId.integrationKeys,
+          hasIntegrationKeys: !!account.connectorAccountId.integrationKeys
+        });
+      } else {
+        console.log(`❌ Connector Account ${index + 1}: connectorAccountId is null or not populated`);
+      }
+    });
+
+    res.json({
+      success: true,
+      merchant: {
+        _id: merchant._id,
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid
+      },
+      connectorAccounts: connectorAccounts.map(acc => ({
+        _id: acc._id,
+        connectorId: acc.connectorId?._id,
+        connectorName: acc.connectorId?.name,
+        connectorAccountId: acc.connectorAccountId?._id,
+        connectorAccountName: acc.connectorAccountId?.name,
+        terminalId: acc.terminalId,
+        status: acc.status,
+        isPrimary: acc.isPrimary,
+        hasConnectorAccount: !!acc.connectorAccountId,
+        hasIntegrationKeys: acc.connectorAccountId?.integrationKeys ? true : false
+      })),
+      totalAccounts: connectorAccounts.length
+    });
+
+  } catch (error) {
+    console.error('❌ Debug error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack 
+    });
   }
 };
