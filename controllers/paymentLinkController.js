@@ -34,6 +34,7 @@ function generateMerchantOrderId() {
 }
 
 // Main payment link generation function
+// Main payment link generation function
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
   console.log('🚀 generatePaymentLink STARTED');
@@ -62,28 +63,137 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    // Process payment link generation
-    const result = await processPaymentLinkGeneration({
-      merchantId, 
-      amount: paymentAmount, 
-      currency, 
-      paymentMethod, 
-      paymentOption
-    });
+    // Find merchant
+    const merchant = await User.findById(merchantId)
+      .select('firstname lastname company mid email contact')
+      .maxTimeMS(10000);
 
-    console.log(`✅ Payment link generated in ${Date.now() - startTime}ms`);
-    
-    res.json({
-      success: true,
-      ...result
-    });
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    // Find active connector account
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name className connectorType')
+    .populate('connectorAccountId', 'name currency integrationKeys terminalId')
+    .maxTimeMS(10000);
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found for this merchant'
+      });
+    }
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const connectorName = activeAccount.connectorId?.name;
+
+    // 🔥 DIRECT Enpay Link Generation - Encryption नाही, Short Link नाही
+    if (connectorName === 'Enpay') {
+      console.log('🎯 Generating DIRECT Enpay payment link');
+      
+      const integrationKeys = connectorAccount?.integrationKeys || {};
+      
+      // Validate credentials
+      if (!integrationKeys['X-Merchant-Key'] || !integrationKeys['X-Merchant-Secret'] || !integrationKeys['merchantHashId']) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enpay credentials missing or incomplete'
+        });
+      }
+
+      // Generate unique IDs
+      const merchantOrderId = `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      const txnRefId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+      // Prepare Enpay API request
+      const requestData = {
+        amount: paymentAmount.toFixed(2),
+        merchantHashId: integrationKeys.merchantHashId,
+        merchantOrderId: merchantOrderId,
+        merchantTxnId: txnRefId,
+        merchantVpa: `${merchant.mid?.toLowerCase() || 'merchant'}@fino`,
+        returnURL: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
+        successURL: `${API_BASE_URL}/api/payment/success?transactionId=${txnRefId}`,
+        txnnNote: `Payment for ${merchant.company || merchant.firstname}`
+      };
+
+      console.log('📤 Calling Enpay API with:', requestData);
+
+      // Call Enpay API
+      const enpayResponse = await axios.post(
+        'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+        requestData,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+            'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
+            'Accept': '*/*'
+          },
+          timeout: 30000
+        }
+      );
+
+      console.log('✅ Enpay API Response:', enpayResponse.data);
+
+      let paymentLink = '';
+
+      // Extract payment link from response
+      if (enpayResponse.data && enpayResponse.data.details) {
+        paymentLink = enpayResponse.data.details;
+      } else if (enpayResponse.data && enpayResponse.data.paymentUrl) {
+        paymentLink = enpayResponse.data.paymentUrl;
+      } else {
+        console.warn('⚠️ Unexpected Enpay response:', enpayResponse.data);
+        return res.status(500).json({
+          success: false,
+          message: 'Enpay API did not return payment link'
+        });
+      }
+
+      console.log('🎯 DIRECT Enpay Payment Link:', paymentLink);
+
+      // 🔥 DIRECT RESPONSE - No encryption, no short links
+      return res.json({
+        success: true,
+        paymentLink: paymentLink, // ✅ Direct Enpay link
+        transactionRefId: txnRefId,
+        connector: 'Enpay',
+        terminalId: activeAccount.terminalId || 'N/A',
+        merchantName: `${merchant.firstname} ${merchant.lastname}`,
+        amount: paymentAmount,
+        currency: currency,
+        message: 'Direct Enpay payment link generated successfully',
+        isDirectLink: true // ✅ New flag to identify direct links
+      });
+
+    } else {
+      // Other connectors...
+      return res.status(400).json({
+        success: false,
+        message: 'Only Enpay connector supported for direct links'
+      });
+    }
 
   } catch (error) {
     console.error(`❌ Payment link generation failed after ${Date.now() - startTime}ms:`, error);
     
+    let errorMessage = 'Payment link generation failed';
+    if (error.response) {
+      console.error('Enpay API error:', error.response.data);
+      errorMessage = `Enpay API Error: ${error.response.data.message || error.response.status}`;
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Payment link generation failed',
+      message: errorMessage,
       error: error.message
     });
   }
