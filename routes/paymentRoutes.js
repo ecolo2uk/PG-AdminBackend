@@ -9,7 +9,7 @@ import {
   getMerchantConnectors,
   processShortLink,
   debugEnpayCredentials,
-  debugConnectorAccount  // Add this
+  debugConnectorAccount
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -20,7 +20,7 @@ router.get('/methods', getPaymentMethods);
 router.post('/generate-link', generatePaymentLink);
 router.get('/:merchantId/connector-accounts', getMerchantConnectors);
 router.get('/debug/enpay/:merchantId', debugEnpayCredentials);
-router.get('/debug/connector/:merchantId', debugConnectorAccount); // Add this route
+router.get('/debug/connector/:merchantId', debugConnectorAccount);
 
 // Payment processing routes
 router.get('/process/:shortLinkId', processShortLink);
