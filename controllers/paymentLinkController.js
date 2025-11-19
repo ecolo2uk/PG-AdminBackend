@@ -318,29 +318,36 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 // Add this to your paymentLinkController.js
+// Simple test without ObjectId
 export const testEnpayDirect = async (req, res) => {
   try {
     console.log('🧪 TEST: Direct Enpay Connection');
     
-    // Use the correct connector account ID
-    const connectorAccountId = '691aeed3384a398228320200';
-    
-    console.log('🔍 Looking for connector account:', connectorAccountId);
-    
-    // Direct connector account access
+    // ✅ SIMPLE APPROACH - Find by name instead of ID
     const connectorAccount = await ConnectorAccount.findOne({
-      _id: new ObjectId(connectorAccountId) // ✅ Use new ObjectId()
+      name: 'enpay'
     });
 
     if (!connectorAccount) {
-      console.log('❌ Connector account not found with ID:', connectorAccountId);
+      console.log('❌ Enpay connector account not found');
+      
+      // List all available connector accounts
+      const allAccounts = await ConnectorAccount.find({});
+      console.log('🔍 All connector accounts:', allAccounts.map(acc => ({
+        id: acc._id,
+        name: acc.name,
+        currency: acc.currency
+      })));
+      
       return res.json({
         success: false,
-        message: 'Connector account not found'
+        message: 'Enpay connector account not found',
+        availableAccounts: allAccounts.map(acc => ({ id: acc._id, name: acc.name }))
       });
     }
 
     console.log('✅ Connector Account Found:', {
+      id: connectorAccount._id,
       name: connectorAccount.name,
       currency: connectorAccount.currency,
       integrationKeys: Object.keys(connectorAccount.integrationKeys || {})
@@ -348,27 +355,33 @@ export const testEnpayDirect = async (req, res) => {
 
     const integrationKeys = connectorAccount.integrationKeys || {};
     
-    // Check if credentials exist
-    if (!integrationKeys['X-Merchant-Key'] || !integrationKeys['X-Merchant-Secret'] || !integrationKeys['merchantHashId']) {
-      console.log('❌ Missing credentials:', {
-        hasKey: !!integrationKeys['X-Merchant-Key'],
-        hasSecret: !!integrationKeys['X-Merchant-Secret'],
-        hasHashId: !!integrationKeys['merchantHashId']
-      });
-      
+    // Check credentials
+    if (!integrationKeys['X-Merchant-Key']) {
       return res.json({
         success: false,
-        message: 'Enpay credentials missing in connector account',
-        missing: {
-          merchantKey: !integrationKeys['X-Merchant-Key'],
-          merchantSecret: !integrationKeys['X-Merchant-Secret'], 
-          merchantHashId: !integrationKeys['merchantHashId']
-        }
+        message: 'X-Merchant-Key missing',
+        availableKeys: Object.keys(integrationKeys)
       });
     }
 
-    console.log('✅ All credentials available');
-    
+    if (!integrationKeys['X-Merchant-Secret']) {
+      return res.json({
+        success: false,
+        message: 'X-Merchant-Secret missing',
+        availableKeys: Object.keys(integrationKeys)
+      });
+    }
+
+    if (!integrationKeys['merchantHashId']) {
+      return res.json({
+        success: false,
+        message: 'merchantHashId missing',
+        availableKeys: Object.keys(integrationKeys)
+      });
+    }
+
+    console.log('✅ All credentials verified');
+
     // Test data
     const testData = {
       amount: "1000.00",
@@ -378,15 +391,11 @@ export const testEnpayDirect = async (req, res) => {
       merchantVpa: "test@fino",
       returnURL: "https://example.com/return",
       successURL: "https://example.com/success",
-      txnnNote: "Test payment"
+      txnnNote: "Test payment from Skypal"
     };
 
-    console.log('📤 Calling Enpay API with data:', {
-      ...testData,
-      merchantHashId: 'MERCDSH51Y7CD4YJLFIZR8NF' // Hide sensitive data
-    });
+    console.log('📤 Calling Enpay API...');
 
-    // Call Enpay API
     const enpayResponse = await axios.post(
       'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
       testData,
@@ -401,7 +410,7 @@ export const testEnpayDirect = async (req, res) => {
       }
     );
 
-    console.log('✅ Enpay API Response received');
+    console.log('✅ Enpay API Response:', enpayResponse.data);
 
     let paymentLink = '';
     if (enpayResponse.data && enpayResponse.data.details) {
@@ -409,10 +418,9 @@ export const testEnpayDirect = async (req, res) => {
     } else if (enpayResponse.data && enpayResponse.data.paymentUrl) {
       paymentLink = enpayResponse.data.paymentUrl;
     } else {
-      console.log('❌ Unexpected Enpay response:', enpayResponse.data);
       return res.json({
         success: false,
-        message: 'Enpay API response format unexpected',
+        message: 'No payment link in response',
         enpayResponse: enpayResponse.data
       });
     }
@@ -425,28 +433,26 @@ export const testEnpayDirect = async (req, res) => {
       paymentLink: paymentLink,
       connectorAccount: connectorAccount.name,
       debug: {
-        integrationKeys: Object.keys(integrationKeys),
-        enpayStatus: enpayResponse.data.code || 'unknown'
+        accountId: connectorAccount._id,
+        integrationKeys: Object.keys(integrationKeys)
       }
     });
 
   } catch (error) {
     console.error('❌ Test failed:', error);
     
-    let errorDetails = 'Unknown error';
+    let errorMessage = 'Unknown error';
     if (error.response) {
-      errorDetails = `Enpay API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`;
+      errorMessage = `Enpay API Error (${error.response.status}): ${JSON.stringify(error.response.data)}`;
     } else if (error.request) {
-      errorDetails = 'No response from Enpay API';
+      errorMessage = 'No response from Enpay API - network issue';
     } else {
-      errorDetails = error.message;
+      errorMessage = error.message;
     }
-    
-    console.error('🔍 Error details:', errorDetails);
     
     res.json({
       success: false,
-      error: errorDetails,
+      error: errorMessage,
       message: 'Direct Enpay test failed'
     });
   }
