@@ -196,7 +196,7 @@ export const generatePaymentLink = async (req, res) => {
 };
 
 
-// FIXED Cashfree function - Production ready
+// FIXED Cashfree function - HTTPS URLs
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
@@ -219,7 +219,6 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     }
 
     console.log('🔍 Integration Keys Found:', Object.keys(integrationKeys));
-    console.log('🔐 Integration Keys Values:', integrationKeys);
 
     // ✅ CRITICAL FIX: Extract credentials with proper fallbacks
     const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
@@ -252,6 +251,15 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Invalid amount: ' + amount);
     }
 
+    // ✅ CRITICAL FIX: Use HTTPS URLs for Cashfree (required by their API)
+    const returnUrl = `https://webhook.site/cashfree-return`; // Temporary HTTPS URL for testing
+    const notifyUrl = `https://webhook.site/cashfree-webhook`; // Temporary HTTPS URL for testing
+
+    console.log('🔐 Using HTTPS URLs for Cashfree:', {
+      return_url: returnUrl,
+      notify_url: notifyUrl
+    });
+
     const requestData = {
       order_amount: orderAmount.toFixed(2),
       order_currency: "INR",
@@ -263,8 +271,8 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
       },
       order_meta: {
-        return_url: `${process.env.API_BASE_URL || 'http://localhost:5000'}/api/payment/return?txnId=${txnRefId}`,
-        notify_url: `${process.env.API_BASE_URL || 'http://localhost:5000'}/api/payment/webhook/cashfree`
+        return_url: returnUrl, // ✅ HTTPS URL
+        notify_url: notifyUrl  // ✅ HTTPS URL
       },
       order_note: `Payment for ${merchant.company || merchant.firstname}`
     };
