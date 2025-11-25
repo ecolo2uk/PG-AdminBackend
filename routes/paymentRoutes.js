@@ -1,36 +1,34 @@
-// routes/paymentLinkRoutes.js - Add the new debug route
+// routes/paymentRoutes.js - Verify all routes
 import express from 'express';
-import { 
-  generatePaymentLink, 
-  handleSuccess, 
-  handleReturn, 
-  getMerchants, 
-  getPaymentMethods,
+import {
+  generatePaymentLink,
+  getMerchants,
   getMerchantConnectors,
-  processShortLink,
-  debugEnpayCredentials,
+  getPaymentMethods,
+  debugCashfreeCredentials,
   testCashfreeConnection,
-  debugCashfreeCredentials, // Add this
   debugConnectorAccount,
-  testEnpayDirect
+  debugEnpayCredentials,
+  testEnpayDirect,
+  processShortLink,
+  handleSuccess,
+  handleReturn
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
 
-// Public API endpoints
+// ✅ Verify all routes exist
 router.get('/merchants', getMerchants);
 router.get('/methods', getPaymentMethods);
-router.post('/generate-link', generatePaymentLink);
 router.get('/:merchantId/connector-accounts', getMerchantConnectors);
-router.get('/debug/enpay/:merchantId', debugEnpayCredentials);
-router.get('/debug/cashfree/:merchantId', debugCashfreeCredentials); // Add this route
+router.post('/generate-link', generatePaymentLink);
 router.get('/debug/connector/:merchantId', debugConnectorAccount);
-// routes/paymentRoutes.js मध्ये add करा
+router.get('/debug/cashfree/:merchantId', debugCashfreeCredentials);
+router.get('/debug/enpay/:merchantId', debugEnpayCredentials);
 router.get('/test/cashfree/:merchantId', testCashfreeConnection);
-// Payment processing routes
+router.get('/test-enpay-direct', testEnpayDirect);
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
-router.get('/test-enpay-direct', testEnpayDirect);
 
 export default router;
