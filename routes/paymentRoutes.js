@@ -9,6 +9,7 @@ import {
   getMerchantConnectors,
   processShortLink,
   debugEnpayCredentials,
+  testCashfreeConnection,
   debugCashfreeCredentials, // Add this
   debugConnectorAccount,
   testEnpayDirect
@@ -24,7 +25,8 @@ router.get('/:merchantId/connector-accounts', getMerchantConnectors);
 router.get('/debug/enpay/:merchantId', debugEnpayCredentials);
 router.get('/debug/cashfree/:merchantId', debugCashfreeCredentials); // Add this route
 router.get('/debug/connector/:merchantId', debugConnectorAccount);
-
+// routes/paymentRoutes.js मध्ये add करा
+router.get('/test/cashfree/:merchantId', testCashfreeConnection);
 // Payment processing routes
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
