@@ -30,9 +30,9 @@ const transactionSchema = new mongoose.Schema({
   // Connector information
   connectorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Connector' },
   connectorAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'ConnectorAccount' },
-  connectorName: { type: String, required: true },
-  connectorUsed: { type: String, required: true },
-  terminalId: { type: String, required: true },
+  connectorName: { type: String, required: true }, // ✅ Use this instead of connectorUsed
+  connectorUsed: { type: String }, // ✅ Make it optional if it exists in schema
+  terminalId: { type: String, default: 'N/A' },
   
   // Customer information
   customerName: { type: String, default: '' },
