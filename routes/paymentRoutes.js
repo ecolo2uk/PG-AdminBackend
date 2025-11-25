@@ -10,8 +10,7 @@ import {
   processShortLink,
   debugEnpayCredentials,
   debugConnectorAccount,
-  testEnpayDirect,
-  verifyEnpayCredentials
+  testEnpayDirect
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -29,7 +28,5 @@ router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
 // Add to your routes
-// Add to your routes file
-router.get('/verify-enpay-credentials', verifyEnpayCredentials);
 router.get('/test-enpay-direct', testEnpayDirect);
 export default router;
