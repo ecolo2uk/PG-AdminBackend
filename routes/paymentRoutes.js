@@ -1,4 +1,4 @@
-// routes/paymentLinkRoutes.js
+// routes/paymentLinkRoutes.js - Add the new debug route
 import express from 'express';
 import { 
   generatePaymentLink, 
@@ -9,6 +9,7 @@ import {
   getMerchantConnectors,
   processShortLink,
   debugEnpayCredentials,
+  debugCashfreeCredentials, // Add this
   debugConnectorAccount,
   testEnpayDirect
 } from '../controllers/paymentLinkController.js';
@@ -21,12 +22,13 @@ router.get('/methods', getPaymentMethods);
 router.post('/generate-link', generatePaymentLink);
 router.get('/:merchantId/connector-accounts', getMerchantConnectors);
 router.get('/debug/enpay/:merchantId', debugEnpayCredentials);
+router.get('/debug/cashfree/:merchantId', debugCashfreeCredentials); // Add this route
 router.get('/debug/connector/:merchantId', debugConnectorAccount);
 
 // Payment processing routes
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
-// Add to your routes
 router.get('/test-enpay-direct', testEnpayDirect);
+
 export default router;

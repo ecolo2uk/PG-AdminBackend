@@ -297,6 +297,73 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
   }
 };
 
+
+// Add this debug function to your controller
+export const debugCashfreeCredentials = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🔍 Debugging Cashfree credentials for merchant:', merchantId);
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name')
+    .populate('connectorAccountId');
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const integrationKeys = connectorAccount?.integrationKeys || {};
+
+    // Check for different possible key names
+    const clientId = integrationKeys['x-client-id'] || integrationKeys['x_client_id'] || integrationKeys['client_id'];
+    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['x_client_secret'] || integrationKeys['client_secret'];
+    const apiVersion = integrationKeys['x-api-version'] || integrationKeys['x_api_version'] || integrationKeys['api_version'];
+
+    res.json({
+      success: true,
+      merchant: {
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid,
+        email: merchant.email
+      },
+      connector: {
+        name: activeAccount.connectorId?.name,
+        terminalId: activeAccount.terminalId
+      },
+      credentials: {
+        hasClientId: !!clientId,
+        hasClientSecret: !!clientSecret,
+        hasApiVersion: !!apiVersion,
+        clientId: clientId ? `${clientId.substring(0, 10)}...` : 'Not Found',
+        clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'Not Found',
+        apiVersion: apiVersion || 'Not Found'
+      },
+      allIntegrationKeys: Object.keys(integrationKeys),
+      integrationKeys: integrationKeys
+    });
+
+  } catch (error) {
+    console.error('❌ Cashfree debug error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 // Enpay Payment Generation (तुमचा existing code)
 const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
