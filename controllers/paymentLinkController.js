@@ -64,25 +64,30 @@ export const generatePaymentLink = async (req, res) => {
     console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
 
     // ✅ CRITICAL FIX: Better connector account finding
-    const activeAccount = await MerchantConnectorAccount.findOne({
-      merchantId: merchantId,
-      status: 'Active'
-    })
-    .populate({
-      path: 'connectorId',
-      select: 'name className connectorType'
-    })
-    .populate({
-      path: 'connectorAccountId',
-      select: 'name currency integrationKeys terminalId'
-    });
+// ✅ CRITICAL FIX: Better connector account finding
+const activeAccount = await MerchantConnectorAccount.findOne({
+  merchantId: new mongoose.Types.ObjectId(merchantId), // ✅ ObjectId मध्ये convert करा
+  status: 'Active'
+})
+.populate('connectorId')
+.populate('connectorAccountId')
+.lean(); // ✅ lean() add करा for better performance
 
-    if (!activeAccount) {
-      return res.status(404).json({
-        success: false,
-        message: 'No active connector account found'
-      });
-    }
+console.log('🔍 Active Account Debug:', {
+  found: !!activeAccount,
+  merchantId: merchantId,
+  connectorId: activeAccount?.connectorId?._id,
+  connectorAccountId: activeAccount?.connectorAccountId?._id,
+  hasIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
+});
+
+if (!activeAccount) {
+  console.error('❌ No active connector account found for merchant:', merchantId);
+  return res.status(404).json({
+    success: false,
+    message: 'No active payment connector found for this merchant'
+  });
+}
 
     console.log('🔍 Active Account Details:', {
       connectorId: activeAccount.connectorId?._id,
@@ -218,21 +223,24 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     console.log('🔗 Generating Cashfree Payment...');
     
     // ✅ CRITICAL FIX: Properly handle integrationKeys
-    let integrationKeys = {};
-    if (connectorAccount?.integrationKeys) {
-      try {
-        if (connectorAccount.integrationKeys instanceof Map) {
-          integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
-        } else if (typeof connectorAccount.integrationKeys === 'object') {
-          integrationKeys = { ...connectorAccount.integrationKeys };
-        } else if (typeof connectorAccount.integrationKeys === 'string') {
-          integrationKeys = JSON.parse(connectorAccount.integrationKeys);
-        }
-      } catch (parseError) {
-        console.error('❌ Error parsing integrationKeys:', parseError);
-        integrationKeys = {};
-      }
-    }
+   // ✅ CRITICAL FIX: Proper integration keys access
+let integrationKeys = {};
+if (activeAccount.connectorAccountId?.integrationKeys) {
+  if (activeAccount.connectorAccountId.integrationKeys instanceof Map) {
+    integrationKeys = Object.fromEntries(activeAccount.connectorAccountId.integrationKeys);
+  } else {
+    integrationKeys = activeAccount.connectorAccountId.integrationKeys;
+  }
+}
+
+console.log('🔐 Integration Keys Debug:', {
+  keys: Object.keys(integrationKeys),
+  values: Object.keys(integrationKeys).map(key => ({
+    key,
+    hasValue: !!integrationKeys[key],
+    length: integrationKeys[key]?.length
+  }))
+});
 
     console.log('🔍 Integration Keys Found:', Object.keys(integrationKeys));
 
