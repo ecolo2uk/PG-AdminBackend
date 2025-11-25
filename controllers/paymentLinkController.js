@@ -35,6 +35,7 @@ function generateMerchantOrderId() {
   return `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
 }
 
+// controllers/paymentLinkController.js - CRITICAL FIX
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
   console.log('🚀 generatePaymentLink STARTED');
@@ -62,19 +63,46 @@ export const generatePaymentLink = async (req, res) => {
     }
     console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
 
-    // Find active connector account
+    // ✅ CRITICAL FIX: Better connector account finding
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
       status: 'Active'
     })
-    .populate('connectorId', 'name className connectorType')
-    .populate('connectorAccountId', 'name currency integrationKeys terminalId');
+    .populate({
+      path: 'connectorId',
+      select: 'name className connectorType'
+    })
+    .populate({
+      path: 'connectorAccountId',
+      select: 'name currency integrationKeys terminalId'
+    });
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
         message: 'No active connector account found'
       });
+    }
+
+    console.log('🔍 Active Account Details:', {
+      connectorId: activeAccount.connectorId?._id,
+      connectorName: activeAccount.connectorId?.name,
+      connectorAccountId: activeAccount.connectorAccountId?._id,
+      connectorAccountName: activeAccount.connectorAccountId?.name,
+      hasIntegrationKeys: !!activeAccount.connectorAccountId?.integrationKeys
+    });
+
+    // ✅ CRITICAL FIX: Handle case where connectorAccountId might not be populated
+    let connectorAccount = activeAccount.connectorAccountId;
+    
+    if (!connectorAccount) {
+      console.log('🔄 Connector account not populated, fetching separately...');
+      connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId);
+      
+      if (!connectorAccount) {
+        throw new Error('Connector account not found with ID: ' + activeAccount.connectorAccountId);
+      }
+      console.log('✅ Connector account fetched separately:', connectorAccount.name);
     }
 
     const connectorName = activeAccount.connectorId?.name;
@@ -90,7 +118,7 @@ export const generatePaymentLink = async (req, res) => {
         amount,
         paymentMethod,
         paymentOption,
-        connectorAccount: activeAccount.connectorAccountId
+        connectorAccount: connectorAccount // ✅ Use the fetched connector account
       });
     } else if (connectorName === 'Cashfree') {
       console.log('🔗 Using Cashfree connector');
@@ -99,7 +127,7 @@ export const generatePaymentLink = async (req, res) => {
         amount,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount.connectorAccountId
+        connectorAccount: connectorAccount // ✅ Use the fetched connector account
       });
     } else {
       return res.status(400).json({
@@ -129,7 +157,7 @@ export const generatePaymentLink = async (req, res) => {
       paymentUrl: paymentResult.paymentLink,
       
       connectorId: activeAccount.connectorId?._id,
-      connectorAccountId: activeAccount.connectorAccountId?._id,
+      connectorAccountId: connectorAccount._id, // ✅ Use the correct ID
       connectorName: connectorName,
       terminalId: activeAccount.terminalId || 'N/A',
       
