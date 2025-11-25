@@ -193,23 +193,35 @@ export const generatePaymentLink = async (req, res) => {
 };
 
 // Cashfree Payment Generation
+// controllers/paymentLinkController.js - Update the Cashfree function
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
     const integrationKeys = connectorAccount?.integrationKeys || {};
     
-    // Validate Cashfree credentials
-    const requiredCredentials = ['x-client-id', 'x-client-secret', 'x-api-version'];
-    for (const cred of requiredCredentials) {
-      if (!integrationKeys[cred]) {
-        throw new Error(`Missing required Cashfree credential: ${cred}`);
-      }
+    // Debug: Log all available integration keys
+    console.log('🔍 Available Integration Keys:', Object.keys(integrationKeys));
+    console.log('🔍 Integration Keys Values:', integrationKeys);
+
+    // Validate Cashfree credentials - check for different possible key names
+    let clientId = integrationKeys['x-client-id'] || integrationKeys['x_client_id'] || integrationKeys['client_id'];
+    let clientSecret = integrationKeys['x-client-secret'] || integrationKeys['x_client_secret'] || integrationKeys['client_secret'];
+    let apiVersion = integrationKeys['x-api-version'] || integrationKeys['x_api_version'] || integrationKeys['api_version'] || '2023-08-01';
+
+    console.log('🔐 Extracted Credentials:', {
+      clientId: clientId ? 'PRESENT' : 'MISSING',
+      clientSecret: clientSecret ? 'PRESENT' : 'MISSING',
+      apiVersion: apiVersion
+    });
+
+    if (!clientId || !clientSecret) {
+      throw new Error(`Missing required Cashfree credentials. Found keys: ${Object.keys(integrationKeys).join(', ')}`);
     }
 
     // Generate unique IDs
     const txnRefId = generateTxnRefId();
-    const merchantOrderId = generateMerchantOrderId();
+    const merchantOrderId = `order_${Date.now()}${Math.floor(Math.random() * 1000)}`;
     const cfOrderId = `CF${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
     // Prepare Cashfree API request
@@ -219,7 +231,8 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       order_id: merchantOrderId,
       customer_details: {
         customer_id: merchant.mid,
-        customer_phone: merchant.contact || "9999999999"
+        customer_phone: merchant.contact || "9999999999",
+        customer_email: merchant.email || "customer@example.com"
       },
       order_meta: {
         return_url: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
@@ -227,7 +240,12 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       }
     };
 
-    console.log('📤 Calling Cashfree API...');
+    console.log('📤 Calling Cashfree API with data:', requestData);
+    console.log('🔑 Using Credentials:', {
+      'x-client-id': clientId ? `${clientId.substring(0, 10)}...` : 'MISSING',
+      'x-client-secret': clientSecret ? `${clientSecret.substring(0, 10)}...` : 'MISSING',
+      'x-api-version': apiVersion
+    });
 
     // Call Cashfree Orders API
     const cashfreeResponse = await axios.post(
@@ -236,9 +254,9 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       {
         headers: {
           'Content-Type': 'application/json',
-          'x-client-id': integrationKeys['x-client-id'],
-          'x-client-secret': integrationKeys['x-client-secret'],
-          'x-api-version': integrationKeys['x-api-version']
+          'x-client-id': clientId,
+          'x-client-secret': clientSecret,
+          'x-api-version': apiVersion
         },
         timeout: 30000
       }
@@ -246,25 +264,33 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
 
     console.log('✅ Cashfree API response:', cashfreeResponse.data);
 
-    if (!cashfreeResponse.data || !cashfreeResponse.data.payment_link) {
-      throw new Error('Cashfree API did not return payment link');
+    if (!cashfreeResponse.data || !cashfreeResponse.data.payment_session_id) {
+      throw new Error('Cashfree API did not return payment session');
     }
 
+    // Construct payment link
+    const paymentLink = `https://payments.cashfree.com/order/#${cashfreeResponse.data.payment_session_id}`;
+
     return {
-      paymentLink: cashfreeResponse.data.payment_link,
+      paymentLink: paymentLink,
       merchantOrderId: merchantOrderId,
       txnRefId: txnRefId,
       gatewayTxnId: cfOrderId,
       gatewayOrderId: cashfreeResponse.data.order_id,
-      cfOrderId: cashfreeResponse.data.order_id,
-      cfPaymentLink: cashfreeResponse.data.payment_link
+      cfOrderId: cashfreeResponse.data.cf_order_id,
+      cfPaymentLink: paymentLink,
+      paymentSessionId: cashfreeResponse.data.payment_session_id
     };
 
   } catch (error) {
     console.error('❌ Cashfree payment generation failed:', error);
     
     if (error.response) {
-      console.error('Cashfree API error:', error.response.data);
+      console.error('Cashfree API error response:', {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      });
     }
     
     throw new Error(`Cashfree payment failed: ${error.message}`);
