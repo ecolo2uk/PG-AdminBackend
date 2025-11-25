@@ -194,20 +194,28 @@ export const generatePaymentLink = async (req, res) => {
 
 // Cashfree Payment Generation
 // controllers/paymentLinkController.js - Update the Cashfree function
+// controllers/paymentLinkController.js - Fix the main Cashfree function
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
     const integrationKeys = connectorAccount?.integrationKeys || {};
     
-    // Debug: Log all available integration keys
-    console.log('🔍 Available Integration Keys:', Object.keys(integrationKeys));
-    console.log('🔍 Integration Keys Values:', integrationKeys);
+    // FIX: Properly convert integrationKeys to plain object
+    let keysObject = {};
+    if (integrationKeys instanceof Map) {
+      keysObject = Object.fromEntries(integrationKeys);
+    } else if (typeof integrationKeys === 'object' && integrationKeys !== null) {
+      keysObject = { ...integrationKeys };
+    }
 
-    // Validate Cashfree credentials - check for different possible key names
-    let clientId = integrationKeys['x-client-id'] || integrationKeys['x_client_id'] || integrationKeys['client_id'];
-    let clientSecret = integrationKeys['x-client-secret'] || integrationKeys['x_client_secret'] || integrationKeys['client_secret'];
-    let apiVersion = integrationKeys['x-api-version'] || integrationKeys['x_api_version'] || integrationKeys['api_version'] || '2023-08-01';
+    console.log('🔍 Available Integration Keys:', Object.keys(keysObject));
+    console.log('🔍 Integration Keys Values:', keysObject);
+
+    // Validate Cashfree credentials
+    let clientId = keysObject['x-client-id'] || keysObject['x_client_id'] || keysObject['client_id'];
+    let clientSecret = keysObject['x-client-secret'] || keysObject['x_client_secret'] || keysObject['client_secret'];
+    let apiVersion = keysObject['x-api-version'] || keysObject['x_api_version'] || keysObject['api_version'] || '2023-08-01';
 
     console.log('🔐 Extracted Credentials:', {
       clientId: clientId ? 'PRESENT' : 'MISSING',
@@ -216,7 +224,7 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     });
 
     if (!clientId || !clientSecret) {
-      throw new Error(`Missing required Cashfree credentials. Found keys: ${Object.keys(integrationKeys).join(', ')}`);
+      throw new Error(`Missing required Cashfree credentials. Found keys: ${Object.keys(keysObject).join(', ')}`);
     }
 
     // Generate unique IDs
@@ -297,8 +305,8 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
   }
 };
 
-
 // Add this debug function to your controller
+// controllers/paymentLinkController.js - Fix the debug function
 export const debugCashfreeCredentials = async (req, res) => {
   try {
     const { merchantId } = req.params;
@@ -328,12 +336,27 @@ export const debugCashfreeCredentials = async (req, res) => {
     }
 
     const connectorAccount = activeAccount.connectorAccountId;
+    
+    // FIX: Properly access integrationKeys from Mongoose document
     const integrationKeys = connectorAccount?.integrationKeys || {};
+    
+    // Convert to plain JavaScript object if it's a Mongoose Map
+    let keysObject = {};
+    if (integrationKeys instanceof Map) {
+      keysObject = Object.fromEntries(integrationKeys);
+    } else if (typeof integrationKeys === 'object' && integrationKeys !== null) {
+      keysObject = { ...integrationKeys };
+    }
+
+    console.log('🔍 Raw Integration Keys:', integrationKeys);
+    console.log('🔍 Processed Keys Object:', keysObject);
+    console.log('🔍 Keys Object Type:', typeof keysObject);
+    console.log('🔍 Keys Object Keys:', Object.keys(keysObject));
 
     // Check for different possible key names
-    const clientId = integrationKeys['x-client-id'] || integrationKeys['x_client_id'] || integrationKeys['client_id'];
-    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['x_client_secret'] || integrationKeys['client_secret'];
-    const apiVersion = integrationKeys['x-api-version'] || integrationKeys['x_api_version'] || integrationKeys['api_version'];
+    const clientId = keysObject['x-client-id'] || keysObject['x_client_id'] || keysObject['client_id'];
+    const clientSecret = keysObject['x-client-secret'] || keysObject['x_client_secret'] || keysObject['client_secret'];
+    const apiVersion = keysObject['x-api-version'] || keysObject['x_api_version'] || keysObject['api_version'];
 
     res.json({
       success: true,
@@ -354,8 +377,13 @@ export const debugCashfreeCredentials = async (req, res) => {
         clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'Not Found',
         apiVersion: apiVersion || 'Not Found'
       },
-      allIntegrationKeys: Object.keys(integrationKeys),
-      integrationKeys: integrationKeys
+      allIntegrationKeys: Object.keys(keysObject),
+      integrationKeys: keysObject,
+      debug: {
+        rawIntegrationKeysType: typeof integrationKeys,
+        isMap: integrationKeys instanceof Map,
+        connectorAccountId: connectorAccount?._id
+      }
     });
 
   } catch (error) {
