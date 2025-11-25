@@ -36,6 +36,7 @@ function generateMerchantOrderId() {
 }
 
 // controllers/paymentLinkController.js - CRITICAL FIX
+// controllers/paymentLinkController.js - CRITICAL FIX
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
   console.log('🚀 generatePaymentLink STARTED');
@@ -63,51 +64,30 @@ export const generatePaymentLink = async (req, res) => {
     }
     console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
 
-    // ✅ CRITICAL FIX: Better connector account finding
-// ✅ CRITICAL FIX: Better connector account finding
-const activeAccount = await MerchantConnectorAccount.findOne({
-  merchantId: new mongoose.Types.ObjectId(merchantId), // ✅ ObjectId मध्ये convert करा
-  status: 'Active'
-})
-.populate('connectorId')
-.populate('connectorAccountId')
-.lean(); // ✅ lean() add करा for better performance
+    // ✅ CRITICAL FIX: Remove .lean() and fix population
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: new mongoose.Types.ObjectId(merchantId),
+      status: 'Active'
+    })
+    .populate('connectorId')
+    .populate('connectorAccountId'); // ✅ .lean() REMOVE करा
 
-console.log('🔍 Active Account Debug:', {
-  found: !!activeAccount,
-  merchantId: merchantId,
-  connectorId: activeAccount?.connectorId?._id,
-  connectorAccountId: activeAccount?.connectorAccountId?._id,
-  hasIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
-});
-
-if (!activeAccount) {
-  console.error('❌ No active connector account found for merchant:', merchantId);
-  return res.status(404).json({
-    success: false,
-    message: 'No active payment connector found for this merchant'
-  });
-}
-
-    console.log('🔍 Active Account Details:', {
-      connectorId: activeAccount.connectorId?._id,
-      connectorName: activeAccount.connectorId?.name,
-      connectorAccountId: activeAccount.connectorAccountId?._id,
-      connectorAccountName: activeAccount.connectorAccountId?.name,
-      hasIntegrationKeys: !!activeAccount.connectorAccountId?.integrationKeys
+    console.log('🔍 Active Account Debug:', {
+      found: !!activeAccount,
+      merchantId: merchantId,
+      connectorId: activeAccount?.connectorId?._id,
+      connectorName: activeAccount?.connectorId?.name,
+      connectorAccountId: activeAccount?.connectorAccountId?._id,
+      connectorAccountName: activeAccount?.connectorAccountId?.name,
+      hasIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
     });
 
-    // ✅ CRITICAL FIX: Handle case where connectorAccountId might not be populated
-    let connectorAccount = activeAccount.connectorAccountId;
-    
-    if (!connectorAccount) {
-      console.log('🔄 Connector account not populated, fetching separately...');
-      connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId);
-      
-      if (!connectorAccount) {
-        throw new Error('Connector account not found with ID: ' + activeAccount.connectorAccountId);
-      }
-      console.log('✅ Connector account fetched separately:', connectorAccount.name);
+    if (!activeAccount) {
+      console.error('❌ No active connector account found for merchant:', merchantId);
+      return res.status(404).json({
+        success: false,
+        message: 'No active payment connector found for this merchant'
+      });
     }
 
     const connectorName = activeAccount.connectorId?.name;
@@ -123,7 +103,7 @@ if (!activeAccount) {
         amount,
         paymentMethod,
         paymentOption,
-        connectorAccount: connectorAccount // ✅ Use the fetched connector account
+        connectorAccount: activeAccount.connectorAccountId
       });
     } else if (connectorName === 'Cashfree') {
       console.log('🔗 Using Cashfree connector');
@@ -132,7 +112,7 @@ if (!activeAccount) {
         amount,
         paymentMethod, 
         paymentOption,
-        connectorAccount: connectorAccount // ✅ Use the fetched connector account
+        connectorAccount: activeAccount.connectorAccountId // ✅ Directly pass the populated account
       });
     } else {
       return res.status(400).json({
@@ -162,7 +142,7 @@ if (!activeAccount) {
       paymentUrl: paymentResult.paymentLink,
       
       connectorId: activeAccount.connectorId?._id,
-      connectorAccountId: connectorAccount._id, // ✅ Use the correct ID
+      connectorAccountId: activeAccount.connectorAccountId?._id,
       connectorName: connectorName,
       terminalId: activeAccount.terminalId || 'N/A',
       
@@ -217,34 +197,31 @@ if (!activeAccount) {
 
 
 // FIXED Cashfree function - Production ready
-// controllers/paymentLinkController.js - UPDATED Cashfree function
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
-    // ✅ CRITICAL FIX: Properly handle integrationKeys
-   // ✅ CRITICAL FIX: Proper integration keys access
-let integrationKeys = {};
-if (activeAccount.connectorAccountId?.integrationKeys) {
-  if (activeAccount.connectorAccountId.integrationKeys instanceof Map) {
-    integrationKeys = Object.fromEntries(activeAccount.connectorAccountId.integrationKeys);
-  } else {
-    integrationKeys = activeAccount.connectorAccountId.integrationKeys;
-  }
-}
-
-console.log('🔐 Integration Keys Debug:', {
-  keys: Object.keys(integrationKeys),
-  values: Object.keys(integrationKeys).map(key => ({
-    key,
-    hasValue: !!integrationKeys[key],
-    length: integrationKeys[key]?.length
-  }))
-});
+    // ✅ CRITICAL FIX: Properly handle integrationKeys from populated connectorAccount
+    let integrationKeys = {};
+    
+    if (connectorAccount && connectorAccount.integrationKeys) {
+      console.log('🔐 Raw integrationKeys from database:', connectorAccount.integrationKeys);
+      
+      // Handle different types of integrationKeys storage
+      if (connectorAccount.integrationKeys instanceof Map) {
+        integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+      } else if (typeof connectorAccount.integrationKeys === 'object') {
+        integrationKeys = { ...connectorAccount.integrationKeys };
+      } else {
+        console.warn('⚠️ Unexpected integrationKeys type:', typeof connectorAccount.integrationKeys);
+        integrationKeys = {};
+      }
+    }
 
     console.log('🔍 Integration Keys Found:', Object.keys(integrationKeys));
+    console.log('🔐 Integration Keys Values:', integrationKeys);
 
-    // ✅ CRITICAL FIX: Extract credentials with fallbacks
+    // ✅ CRITICAL FIX: Extract credentials with proper fallbacks
     const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
     const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'] || integrationKeys['X-Client-Secret'];
     const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
@@ -315,6 +292,7 @@ console.log('🔐 Integration Keys Debug:', {
       );
 
       console.log('✅ Cashfree API Response Status:', response.status);
+      console.log('✅ Cashfree API Response Data:', response.data);
       
     } catch (apiError) {
       console.error('❌ Cashfree API Call Failed:', apiError.message);
@@ -334,7 +312,11 @@ console.log('🔐 Integration Keys Debug:', {
           throw new Error(`Cashfree: Bad request - ${apiError.response.data?.message || 'Check request data'}`);
         } else if (apiError.response.status === 403) {
           throw new Error('Cashfree: Forbidden - Account may be inactive or restricted');
+        } else if (apiError.response.status === 500) {
+          throw new Error('Cashfree: Internal server error - please try again later');
         }
+      } else if (apiError.request) {
+        throw new Error('Cashfree: No response received from server - check network connection');
       }
       
       throw new Error(`Cashfree API call failed: ${apiError.message}`);
@@ -344,8 +326,6 @@ console.log('🔐 Integration Keys Debug:', {
     if (!response.data) {
       throw new Error('Cashfree API returned empty response');
     }
-
-    console.log('✅ Cashfree API Response Data:', response.data);
 
     if (!response.data.payment_session_id) {
       console.error('❌ No payment_session_id in response:', response.data);
