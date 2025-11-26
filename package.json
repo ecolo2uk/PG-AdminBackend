@@ -13,7 +13,7 @@
   "dependencies": {
     "@ant-design/icons": "^6.0.2",
     "axios": "^1.12.2",
-    "bcryptjs": "^3.0.2",
+    "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "csv-express": "^1.2.2",
@@ -26,6 +26,7 @@
     "mongoose": "^8.18.0",
     "mongoose-paginate-v2": "^1.9.1",
     "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
     "nodemon": "^3.1.10",
     "shortid": "^2.2.17"
   },

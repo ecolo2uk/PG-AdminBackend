@@ -3,11 +3,12 @@ import User from '../models/User.js';
 import Merchant from '../models/Merchant.js';
 import Settlement from '../models/Settlement.js';
 import PayoutTransaction from '../models/PayoutTransaction.js';
+import mongoose from 'mongoose';
 
 // Get merchants for settlement
 export const getSettlementMerchants = async (req, res) => {
   try {
-    console.log('Fetching merchants for settlement...');
+    console.log('🔄 Fetching merchants for settlement...');
     
     const merchants = await User.find({
       role: 'merchant',
@@ -19,7 +20,7 @@ export const getSettlementMerchants = async (req, res) => {
     .select('firstname lastname email mid unsettleBalance bankDetails status createdAt')
     .sort({ unsettleBalance: -1, createdAt: -1 });
 
-    console.log(`Found ${merchants.length} merchants`);
+    console.log(`✅ Found ${merchants.length} merchants`);
 
     const formattedMerchants = await Promise.all(
       merchants.map(async (merchant) => {
@@ -28,7 +29,7 @@ export const getSettlementMerchants = async (req, res) => {
           const merchantDetail = await Merchant.findOne({ userId: merchant._id });
           
           return {
-            id: merchant._id,
+            id: merchant._id.toString(),
             merchantName: merchantDetail?.merchantName || `${merchant.firstname} ${merchant.lastname}`,
             merchantEmail: merchant.email,
             unsettleBalance: merchant.unsettleBalance || 0,
@@ -38,7 +39,7 @@ export const getSettlementMerchants = async (req, res) => {
             createdAt: merchant.createdAt
           };
         } catch (error) {
-          console.error(`Error processing merchant ${merchant._id}:`, error);
+          console.error(`❌ Error processing merchant ${merchant._id}:`, error);
           return null;
         }
       })
@@ -48,12 +49,14 @@ export const getSettlementMerchants = async (req, res) => {
     const validMerchants = formattedMerchants.filter(m => m !== null)
       .sort((a, b) => b.unsettleBalance - a.unsettleBalance);
 
+    console.log(`📊 Returning ${validMerchants.length} valid merchants`);
+
     res.json({
       success: true,
       merchants: validMerchants
     });
   } catch (error) {
-    console.error('Error in getSettlementMerchants:', error);
+    console.error('❌ Error in getSettlementMerchants:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -69,7 +72,7 @@ export const processSettlement = async (req, res) => {
   try {
     const { settlementAmount, selectedMerchants } = req.body;
     
-    console.log('Processing settlement with data:', {
+    console.log('🔄 Processing settlement with data:', {
       settlementAmount,
       selectedMerchantsCount: selectedMerchants?.length
     });
@@ -124,7 +127,7 @@ export const processSettlement = async (req, res) => {
         
         return res.status(400).json({
           success: false,
-          message: `Settlement amount (${merchantData.settlementAmount}) exceeds unsettled balance (${merchant.unsettleBalance}) for ${merchantData.merchantName}`
+          message: `Settlement amount (₹${merchantData.settlementAmount}) exceeds unsettled balance (₹${merchant.unsettleBalance}) for ${merchantData.merchantName}`
         });
       }
     }
@@ -193,9 +196,9 @@ export const processSettlement = async (req, res) => {
               
               console.log(`✅ Settlement completed for ${merchantData.merchantName} - UTR: ${payout.utr}`);
             } catch (error) {
-              console.error('Error updating payout status:', error);
+              console.error('❌ Error updating payout status:', error);
             }
-          }, 3000);
+          }, 2000);
 
         } else {
           failedSettlements.push({
@@ -204,7 +207,7 @@ export const processSettlement = async (req, res) => {
           });
         }
       } catch (error) {
-        console.error(`Error processing settlement for ${merchantData.merchantName}:`, error);
+        console.error(`❌ Error processing settlement for ${merchantData.merchantName}:`, error);
         failedSettlements.push({
           merchant: merchantData.merchantName,
           reason: error.message
@@ -233,11 +236,11 @@ export const processSettlement = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    console.log(`Settlement ${settlement.batchId} processed: ${payoutTransactions.length} successful, ${failedSettlements.length} failed`);
+    console.log(`✅ Settlement ${settlement.batchId} processed: ${payoutTransactions.length} successful, ${failedSettlements.length} failed`);
 
     res.json({
       success: true,
-      message: 'Settlement processed successfully',
+      message: 'Settlement processed successfully!',
       settlementId: settlement.settlementId,
       batchId: settlement.batchId,
       totalProcessed: payoutTransactions.length,
@@ -254,7 +257,7 @@ export const processSettlement = async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     
-    console.error('Error in processSettlement:', error);
+    console.error('❌ Error in processSettlement:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -267,7 +270,7 @@ export const getMerchantSettlementDetails = async (req, res) => {
   try {
     const { merchantId } = req.params;
 
-    console.log(`Fetching settlement details for merchant: ${merchantId}`);
+    console.log(`🔄 Fetching settlement details for merchant: ${merchantId}`);
 
     // Validate merchantId
     if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
@@ -305,6 +308,8 @@ export const getMerchantSettlementDetails = async (req, res) => {
       remark: settlement.remark
     }));
 
+    console.log(`✅ Found ${settlementDetails.length} settlements for ${merchant.firstname}`);
+
     res.json({
       success: true,
       merchant: {
@@ -315,7 +320,7 @@ export const getMerchantSettlementDetails = async (req, res) => {
       settlements: settlementDetails
     });
   } catch (error) {
-    console.error('Error in getMerchantSettlementDetails:', error);
+    console.error('❌ Error in getMerchantSettlementDetails:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -349,7 +354,7 @@ export const getAllSettlements = async (req, res) => {
       total
     });
   } catch (error) {
-    console.error('Error in getAllSettlements:', error);
+    console.error('❌ Error in getAllSettlements:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -378,7 +383,7 @@ export const getSettlementById = async (req, res) => {
       settlement
     });
   } catch (error) {
-    console.error('Error in getSettlementById:', error);
+    console.error('❌ Error in getSettlementById:', error);
     res.status(500).json({
       success: false,
       message: error.message
