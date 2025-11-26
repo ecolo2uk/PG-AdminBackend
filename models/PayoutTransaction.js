@@ -3,6 +3,11 @@ import Merchant from './Merchant.js';
 import User from './User.js';
 
 const payoutTransactionSchema = new mongoose.Schema({
+  payoutId: {
+    type: String,
+    required: true,
+    unique: true
+  },
   utr: {
     type: String,
     unique: true,
@@ -18,6 +23,22 @@ const payoutTransactionSchema = new mongoose.Schema({
   merchantName: {
     type: String,
     required: true,
+  },
+   merchantEmail: {
+    type: String,
+    required: true
+  },
+  mid: {
+    type: String,
+    required: true
+  },
+
+    settlementId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Settlement'
+  },
+  settlementBatch: {
+    type: String
   },
   
   // ✅ ADDED: Fields for your UI
@@ -53,6 +74,10 @@ const payoutTransactionSchema = new mongoose.Schema({
   amount: {
     type: Number,
     required: true,
+  },
+   settlementAmount: {
+    type: Number,
+    required: true
   },
   currency: {
     type: String,
@@ -97,7 +122,31 @@ const payoutTransactionSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-
+    bankDetails: {
+    bankName: String,
+    accountNumber: String,
+    ifscCode: String,
+    accountHolderName: String,
+    accountType: String
+  },
+    paymentMode: {
+    type: String,
+    default: 'NEFT'
+  },
+  remark: {
+    type: String,
+    default: 'Payout Settlement'
+  },
+  processedBy: {
+    type: String,
+    default: 'System'
+  },
+ initiatedAt: {
+    type: Date,
+    default: Date.now
+  },
+  processedAt: Date,
+  completedAt: Date
   
 }, {
   timestamps: true,
@@ -190,6 +239,66 @@ payoutTransactionSchema.index({
   createdAt: -1 
 }, { background: true });
 
+payoutTransactionSchema.post('save', async function(doc) {
+  try {
+    const Merchant = mongoose.model('Merchant');
+    const User = mongoose.model('User');
+    
+    const merchant = await Merchant.findOne({ userId: doc.merchantId });
+    
+    if (!merchant) {
+      console.log('❌ Merchant not found for payout auto-sync');
+      return;
+    }
 
+    // Add to payoutTransactions array
+    if (!merchant.payoutTransactions.includes(doc._id)) {
+      merchant.payoutTransactions.push(doc._id);
+    }
+
+    // Update recentTransactions
+    const newPayout = {
+      transactionId: doc.payoutId,
+      type: 'payout',
+      transactionType: doc.transactionType,
+      amount: doc.amount,
+      status: doc.status,
+      reference: doc.utr || doc.payoutId,
+      method: doc.paymentMode,
+      remark: doc.remark || 'Payout Settlement',
+      date: doc.createdAt,
+      customer: 'N/A'
+    };
+
+    merchant.recentTransactions.unshift(newPayout);
+    
+    if (merchant.recentTransactions.length > 20) {
+      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+    }
+
+    // Update balance for successful settlements
+    if (doc.status === 'SUCCESS' && doc.transactionType === 'Debit') {
+      merchant.availableBalance -= doc.amount;
+      merchant.totalDebits += doc.amount;
+      merchant.unsettledBalance -= doc.amount;
+      
+      // Also update user balance and unsettleBalance
+      await User.findByIdAndUpdate(doc.merchantId, {
+        $inc: { 
+          balance: -doc.amount,
+          unsettleBalance: -doc.amount
+        }
+      });
+      
+      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+    }
+
+    await merchant.save();
+    console.log(`✅ Auto-synced settlement for merchant: ${merchant.merchantName}`);
+
+  } catch (error) {
+    console.error('❌ Error in settlement auto-sync:', error);
+  }
+});
 const PayoutTransaction = mongoose.model('PayoutTransaction', payoutTransactionSchema);
 export default PayoutTransaction;

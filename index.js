@@ -34,6 +34,7 @@ import riskManagementRoutes from './routes/riskManagementRoutes.js';
 import payoutSettlementRoutes from './routes/payoutSettlementRoutes.js';
 import payoutTransactionRoutes from './routes/payoutTransactionRoutes.js';
 import syncRoutes from './routes/syncRoutes.js';
+import settlementRoutes from './routes/settlementRoutes.js';
 
 
 dotenv.config();
@@ -76,6 +77,7 @@ app.use('/api/payout-settlements', payoutSettlementRoutes);
 app.use('/api/payout-transactions', payoutTransactionRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/settlement', settlementRoutes);
 
 // Basic root route
 app.get('/', (req, res) => {
