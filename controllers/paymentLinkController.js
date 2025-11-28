@@ -214,29 +214,66 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
   try {
     console.log('🔗 Generating Enpay Payment...');
     
+    // ✅ CRITICAL: Add detailed debugging
+    console.log('🔍 CONNECTOR ACCOUNT DEBUG:', {
+      connectorAccountId: connectorAccount?._id,
+      connectorAccountName: connectorAccount?.name,
+      hasIntegrationKeys: !!connectorAccount?.integrationKeys,
+      integrationKeysType: typeof connectorAccount?.integrationKeys,
+      integrationKeysValue: connectorAccount?.integrationKeys
+    });
+    
     let integrationKeys = {};
     
     // ✅ CRITICAL FIX: Better integration keys extraction
     if (connectorAccount?.integrationKeys) {
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+        console.log('🔍 IntegrationKeys extracted from Map');
       } else if (typeof connectorAccount.integrationKeys === 'object') {
         integrationKeys = { ...connectorAccount.integrationKeys };
+        console.log('🔍 IntegrationKeys extracted from Object');
       } else if (typeof connectorAccount.integrationKeys === 'string') {
         try {
           integrationKeys = JSON.parse(connectorAccount.integrationKeys);
+          console.log('🔍 IntegrationKeys extracted from JSON string');
         } catch (e) {
           console.error('❌ Failed to parse integrationKeys string:', e);
         }
       }
     }
 
-    console.log('🔍 Enpay Integration Keys:', Object.keys(integrationKeys));
+    // ✅ CRITICAL: Log ALL integration keys found
+    console.log('🔍 ALL INTEGRATION KEYS FOUND:', integrationKeys);
+    console.log('🔍 INTEGRATION KEYS KEYS:', Object.keys(integrationKeys));
+
+    // ✅ CRITICAL: Log the ACTUAL credentials being sent to Enpay
+    console.log('🔍 ACTUAL CREDENTIALS BEING USED:', {
+      merchantKey: integrationKeys['X-Merchant-Key'],
+      merchantSecret: integrationKeys['X-Merchant-Secret'] ? '***' + integrationKeys['X-Merchant-Secret'].slice(-8) : 'MISSING',
+      merchantHashId: integrationKeys['merchantHashId'],
+      baseUrl: integrationKeys['baseUrl']
+    });
+
+    // ✅ CRITICAL: Compare with working credentials
+    const workingKey = '0851439b-03df-4983-88d6-32399b1e4514';
+    const workingHash = 'MERCDSH51Y7CD4YJLFIZR8NF';
+    
+    console.log('🔍 CREDENTIALS COMPARISON:', {
+      merchantKeyMatch: integrationKeys['X-Merchant-Key'] === workingKey,
+      merchantHashMatch: integrationKeys['merchantHashId'] === workingHash,
+      actualKey: integrationKeys['X-Merchant-Key'],
+      expectedKey: workingKey,
+      actualHash: integrationKeys['merchantHashId'],
+      expectedHash: workingHash
+    });
 
     // Validate Enpay credentials
     const requiredCredentials = ['X-Merchant-Key', 'X-Merchant-Secret', 'merchantHashId'];
     for (const cred of requiredCredentials) {
       if (!integrationKeys[cred]) {
+        console.error(`❌ MISSING CREDENTIAL: ${cred}`);
+        console.error(`❌ Available keys: ${Object.keys(integrationKeys)}`);
         throw new Error(`Missing required Enpay credential: ${cred}`);
       }
     }
@@ -261,7 +298,14 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
     console.log('📤 Calling Enpay API with data:', {
       amount: requestData.amount,
       merchantHashId: requestData.merchantHashId,
-      merchantOrderId: requestData.merchantOrderId
+      merchantOrderId: requestData.merchantOrderId,
+      merchantVpa: requestData.merchantVpa
+    });
+
+    // ✅ CRITICAL: Log the exact headers being sent
+    console.log('🔍 REQUEST HEADERS:', {
+      'X-Merchant-Key': integrationKeys['X-Merchant-Key'] ? 'PRESENT' : 'MISSING',
+      'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'] ? 'PRESENT' : 'MISSING'
     });
 
     // Call Enpay API
@@ -305,7 +349,10 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
     if (error.response) {
       console.error('Enpay API error response:', {
         status: error.response.status,
-        data: error.response.data
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data,
+        headers: error.response.headers
       });
       
       if (error.response.status === 401) {
@@ -313,6 +360,8 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       } else if (error.response.status === 400) {
         throw new Error(`Enpay: Bad request - ${error.response.data?.message}`);
       }
+    } else if (error.code) {
+      console.error('Axios error code:', error.code);
     }
     
     throw new Error(`Enpay payment failed: ${error.message}`);
