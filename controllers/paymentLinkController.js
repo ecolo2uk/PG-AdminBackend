@@ -1458,6 +1458,172 @@ export const debugCashfreeCredentials = async (req, res) => {
 
 // Enpay Payment Generation
 
+// Add this to your controller
+export const debugCurrentEnpayCredentials = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🔍 DEBUG: Checking current Enpay credentials for merchant:', merchantId);
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name')
+    .populate('connectorAccountId');
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const integrationKeys = connectorAccount?.integrationKeys || {};
+
+    console.log('🔍 CURRENT CREDENTIALS IN DATABASE:', integrationKeys);
+
+    res.json({
+      success: true,
+      merchant: {
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid
+      },
+      connector: {
+        name: activeAccount.connectorId?.name,
+        terminalId: activeAccount.terminalId
+      },
+      credentials: {
+        merchantKey: integrationKeys['X-Merchant-Key'],
+        merchantSecret: integrationKeys['X-Merchant-Secret'] ? '***' + integrationKeys['X-Merchant-Secret'].slice(-4) : 'MISSING',
+        merchantHashId: integrationKeys['merchantHashId'],
+        baseUrl: integrationKeys['baseUrl']
+      },
+      matchWithCorrect: {
+        merchantKey: integrationKeys['X-Merchant-Key'] === '0851439b-03df-4983-88d6-32399b1e4514',
+        merchantHashId: integrationKeys['merchantHashId'] === 'MERCDSH51Y7CD4YJLFIZR8NF'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Debug error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Test endpoint
+export const testEnpayConnection = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🧪 Testing Enpay connection for merchant:', merchantId);
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name')
+    .populate('connectorAccountId');
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const integrationKeys = connectorAccount?.integrationKeys || {};
+
+    // Test with minimal data
+    const testData = {
+      amount: "100.00",
+      merchantHashId: integrationKeys.merchantHashId,
+      merchantOrderId: `TEST${Date.now()}`,
+      merchantTxnId: `TXNTEST${Date.now()}`,
+      merchantVpa: "test@fino",
+      returnURL: "https://example.com/return",
+      successURL: "https://example.com/success",
+      txnnNote: "Test payment"
+    };
+
+    console.log('📤 Testing with credentials:', {
+      merchantKey: integrationKeys['X-Merchant-Key'] ? 'PRESENT' : 'MISSING',
+      merchantSecret: integrationKeys['X-Merchant-Secret'] ? 'PRESENT' : 'MISSING',
+      merchantHashId: integrationKeys.merchantHashId
+    });
+
+    const enpayResponse = await axios.post(
+      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      testData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
+          'Accept': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ Enpay API Success:', enpayResponse.data);
+
+    res.json({
+      success: true,
+      message: 'Enpay connection test successful!',
+      paymentLink: enpayResponse.data.details || enpayResponse.data.paymentUrl,
+      debug: {
+        credentialsUsed: {
+          merchantKey: integrationKeys['X-Merchant-Key'] ? `${integrationKeys['X-Merchant-Key'].substring(0, 10)}...` : 'MISSING',
+          merchantHashId: integrationKeys.merchantHashId
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Enpay connection test failed:', error);
+    
+    let errorMessage = 'Enpay connection test failed';
+    let errorDetails = {};
+
+    if (error.response) {
+      errorDetails = {
+        status: error.response.status,
+        data: error.response.data
+      };
+
+      if (error.response.status === 401) {
+        errorMessage = 'Invalid Enpay credentials (Unauthorized) - Check Merchant Key/Secret';
+      } else if (error.response.status === 400) {
+        errorMessage = `Bad request to Enpay API: ${error.response.data?.message}`;
+      }
+    }
+
+    res.json({
+      success: false,
+      message: errorMessage,
+      error: errorDetails
+    });
+  }
+};
 
 export const testEnpayDirect = async (req, res) => {
   try {
