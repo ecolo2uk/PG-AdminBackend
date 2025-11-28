@@ -213,8 +213,7 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
-// ✅ FIXED: ENPAY PAYMENT GENERATION
-// ✅ FIXED: ENPAY PAYMENT GENERATION
+
 const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🚨🚨🚨 EMERGENCY DEBUG - Enpay Payment Generation 🚨🚨🚨');
@@ -235,7 +234,6 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       console.log('🎯 FOUND integrationKeys in connectorAccount.integrationKeys');
       integrationKeys = connectorAccount.integrationKeys;
     } 
-    // Remove the else if blocks that check connectorAccount.connectorAccountId.integrationKeys
     else {
       console.error('❌❌❌ NO INTEGRATION KEYS FOUND IN connectorAccount.integrationKeys! ❌❌❌');
       console.log('Available properties in connectorAccount:', Object.keys(connectorAccount || {}));
@@ -258,10 +256,10 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
     console.log('🎯 FINAL INTEGRATION KEYS:', integrationKeys);
     console.log('🎯 FINAL INTEGRATION KEYS KEYS:', Object.keys(integrationKeys));
 
-    // ✅ CRITICAL: Validate the actual values being used
-    const merchantKey = integrationKeys['0851439b-03df-4983-88d6-32399b1e4514'];
-    const merchantSecret = integrationKeys['bae97f533a594af9bf3dded47f09c34e15e053d1'];
-    const merchantHashId = integrationKeys['MERCDSH51Y7CD4YJLFIZR8NF'];
+    // ✅ CRITICAL FIX: Use the CORRECT key names
+    const merchantKey = integrationKeys['X-Merchant-Key'];
+    const merchantSecret = integrationKeys['X-Merchant-Secret'];
+    const merchantHashId = integrationKeys['merchantHashId'];
 
     console.log('🔐 ACTUAL CREDENTIAL VALUES:', {
       'X-Merchant-Key': merchantKey,
@@ -274,7 +272,8 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       console.error('❌ MISSING CREDENTIALS:', {
         hasMerchantKey: !!merchantKey,
         hasMerchantSecret: !!merchantSecret,
-        hasMerchantHashId: !!merchantHashId
+        hasMerchantHashId: !!merchantHashId,
+        availableKeys: Object.keys(integrationKeys)
       });
       throw new Error('Missing required Enpay credentials');
     }
@@ -739,7 +738,7 @@ const activeAccount = await MerchantConnectorAccount.findOne({
 })
 .populate('connectorId')
 .populate('connectorAccountId')
-.select('+integrationKeys'); // ✅ IMPORTANT: Include integrationKeys
+.select('+integrationKeys'); // ✅ IMPORTANT: Include integrationKeys // ✅ IMPORTANT: Include integrationKeys
 
 console.log('🔍 Active Account Found:', {
   found: !!activeAccount,
