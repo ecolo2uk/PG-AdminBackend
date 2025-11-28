@@ -363,9 +363,13 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     const paymentsBaseURL = 'https://payments.cashfree.com/order';
 
     console.log('🎯 Using PRODUCTION Environment:', cashfreeBaseURL);
-    const returnUrl = `${API_BASE_URL}/api/payment/cashfree/return`;
-    const notifyUrl = `${API_BASE_URL}/api/payment/cashfree/webhook`;
+  const returnUrl = process.env.NODE_ENV === 'production' 
+  ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`
+  : `${API_BASE_URL}/api/payment/cashfree/return`;
 
+const notifyUrl = process.env.NODE_ENV === 'production'
+  ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`
+  : `${API_BASE_URL}/api/payment/cashfree/webhook`;
     // Generate order ID
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 1000);
