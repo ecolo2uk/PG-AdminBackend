@@ -184,33 +184,41 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     
     let integrationKeys = {};
     
+    // ✅ CRITICAL FIX: Better integration keys extraction
     if (connectorAccount?.integrationKeys) {
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
       } else if (typeof connectorAccount.integrationKeys === 'object') {
         integrationKeys = { ...connectorAccount.integrationKeys };
+      } else if (typeof connectorAccount.integrationKeys === 'string') {
+        try {
+          integrationKeys = JSON.parse(connectorAccount.integrationKeys);
+        } catch (e) {
+          console.error('❌ Failed to parse integrationKeys string:', e);
+        }
       }
     }
 
-    // Extract credentials
-    const clientId = integrationKeys['x-client-id'];
-    const clientSecret = integrationKeys['x-client-secret'];
-    const apiVersion = integrationKeys['x-api-version'] || '2023-08-01';
+    console.log('🔍 Raw Integration Keys:', integrationKeys);
+    console.log('🔍 Keys Object Type:', typeof integrationKeys);
+    console.log('🔍 Available Keys:', Object.keys(integrationKeys));
 
-    console.log('🔐 Cashfree Credentials Status:', {
-      clientId: clientId ? 'PRESENT' : 'MISSING',
-      environment: 'PRODUCTION'
+    // Extract credentials
+    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
+    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'] || integrationKeys['X-Client-Secret'];
+    const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
+
+    console.log('🔐 Cashfree Credentials Extracted:', {
+      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING',
+      clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'MISSING',
+      apiVersion: apiVersion
     });
 
-    if (!clientId || !clientSecret) {
-      throw new Error('Missing Cashfree credentials');
-    }
-
-    // ✅ FIXED: Always use production URLs for live credentials
+    // ✅ FIXED: ALWAYS USE PRODUCTION FOR LIVE CREDENTIALS
     const cashfreeBaseURL = 'https://api.cashfree.com/pg';
     const paymentsBaseURL = 'https://payments.cashfree.com/order';
 
-    // ✅ FIXED: Use proper HTTPS URLs
+    console.log('🎯 Using PRODUCTION Environment:', cashfreeBaseURL);  // ✅ FIXED: Use proper HTTPS URLs
     const returnUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`;
     const notifyUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`;
 
@@ -381,14 +389,48 @@ export const checkCashfreeEnvironment = async (req, res) => {
     const { merchantId } = req.params;
     
     const merchant = await User.findById(merchantId);
-    const activeAccount = await MerchantConnectorAccount.findOne({
-      merchantId: merchantId,
-      status: 'Active'
-    })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+   const activeAccount = await MerchantConnectorAccount.findOne({
+  merchantId: new mongoose.Types.ObjectId(merchantId),
+  status: 'Active'
+})
+.populate('connectorId')
+.populate({
+  path: 'connectorAccountId',
+  select: 'name integrationKeys terminalId currency'
+})
+.lean(); // Add lean() for better performance
 
-    const connectorAccount = activeAccount.connectorAccountId;
+console.log('🔍 Active Account Details:', {
+  found: !!activeAccount,
+  connectorId: activeAccount?.connectorId?._id,
+  connectorAccountId: activeAccount?.connectorAccountId?._id,
+  connectorName: activeAccount?.connectorId?.name,
+  hasIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
+});
+
+if (!activeAccount) {
+  return res.status(404).json({
+    success: false,
+    message: 'No active payment connector found'
+  });
+}
+
+
+
+    const connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId).lean();
+if (!connectorAccount) {
+  return res.status(404).json({
+    success: false,
+    message: 'Connector account not found'
+  });
+}
+
+
+console.log('🔍 Fresh Connector Account Data:', {
+  name: connectorAccount.name,
+  integrationKeysType: typeof connectorAccount.integrationKeys,
+  integrationKeysCount: connectorAccount.integrationKeys ? Object.keys(connectorAccount.integrationKeys).length : 0
+});
     const integrationKeys = connectorAccount?.integrationKeys || {};
     
     let keysObject = {};
@@ -418,6 +460,109 @@ export const checkCashfreeEnvironment = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Add this debug function
+export const debugIntegrationKeys = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🔍 DEBUG: Checking integration keys for merchant:', merchantId);
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    // Get active account with proper population
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId')
+    .populate('connectorAccountId')
+    .lean();
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
+
+    // Get fresh connector account data
+    const connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId).lean();
+
+    let integrationKeys = {};
+    let keysSource = 'unknown';
+    
+    if (connectorAccount?.integrationKeys) {
+      if (connectorAccount.integrationKeys instanceof Map) {
+        integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+        keysSource = 'map';
+      } else if (typeof connectorAccount.integrationKeys === 'object') {
+        integrationKeys = { ...connectorAccount.integrationKeys };
+        keysSource = 'object';
+      } else if (typeof connectorAccount.integrationKeys === 'string') {
+        try {
+          integrationKeys = JSON.parse(connectorAccount.integrationKeys);
+          keysSource = 'string_json';
+        } catch (e) {
+          integrationKeys = { raw_string: connectorAccount.integrationKeys };
+          keysSource = 'string_raw';
+        }
+      }
+    }
+
+    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
+    const isTest = clientId && clientId.startsWith('TEST');
+    const isLive = clientId && !clientId.startsWith('TEST');
+
+    res.json({
+      success: true,
+      debug: {
+        merchant: {
+          name: `${merchant.firstname} ${merchant.lastname}`,
+          mid: merchant.mid
+        },
+        connector: {
+          name: activeAccount.connectorId?.name,
+          account: connectorAccount?.name
+        },
+        integrationKeys: {
+          source: keysSource,
+          rawType: typeof connectorAccount?.integrationKeys,
+          isMap: connectorAccount?.integrationKeys instanceof Map,
+          extractedType: typeof integrationKeys,
+          keysCount: Object.keys(integrationKeys).length,
+          allKeys: Object.keys(integrationKeys),
+          values: integrationKeys
+        },
+        credentials: {
+          clientId: clientId ? `${clientId.substring(0, 15)}...` : 'NOT FOUND',
+          clientSecret: integrationKeys['x-client-secret'] ? 'PRESENT' : 'MISSING',
+          environment: isTest ? 'SANDBOX' : isLive ? 'PRODUCTION' : 'UNKNOWN',
+          isTest: isTest,
+          isLive: isLive
+        },
+        recommendation: isTest ? 
+          '⚠️ Using TEST credentials - Switch to LIVE for production' :
+          isLive ? 
+          '✅ Using LIVE credentials - Transactions should appear in production dashboard' :
+          '❓ Cannot determine environment'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Integration keys debug error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
