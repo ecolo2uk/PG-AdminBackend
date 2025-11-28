@@ -178,7 +178,6 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
-// ✅ COMPLETELY FIXED: generateCashfreePayment function
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
@@ -193,88 +192,52 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       }
     }
 
-    // ✅ IMPROVED CREDENTIAL EXTRACTION
-    const clientId = integrationKeys['x-client-id'] || 
-                    integrationKeys['client_id'] ||
-                    integrationKeys['X-Client-Id'] ||
-                    integrationKeys['x_client_id'];
-                    
-    const clientSecret = integrationKeys['x-client-secret'] || 
-                        integrationKeys['client_secret'] ||
-                        integrationKeys['X-Client-Secret'] ||
-                        integrationKeys['x_client_secret'];
-                        
-    const apiVersion = integrationKeys['x-api-version'] || 
-                      integrationKeys['api_version'] || 
-                      integrationKeys['x_api_version'] ||
-                      '2022-09-01'; // Use older, more stable version
+    // Extract credentials
+    const clientId = integrationKeys['x-client-id'];
+    const clientSecret = integrationKeys['x-client-secret'];
+    const apiVersion = integrationKeys['x-api-version'] || '2023-08-01';
 
-    console.log('🔐 Cashfree Credentials Check:', {
-      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING',
-      clientSecret: clientSecret ? `${clientSecret.substring(0, 6)}...` : 'MISSING',
-      apiVersion: apiVersion,
-      credentialType: clientId ? (clientId.startsWith('TEST') ? 'TEST' : 'LIVE') : 'UNKNOWN'
+    console.log('🔐 Cashfree Credentials Status:', {
+      clientId: clientId ? 'PRESENT' : 'MISSING',
+      environment: 'PRODUCTION'
     });
 
     if (!clientId || !clientSecret) {
-      throw new Error(`Missing Cashfree credentials. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
+      throw new Error('Missing Cashfree credentials');
     }
 
-    // ✅ CRITICAL FIX: Proper environment detection
-    const isTestMode = clientId.startsWith('TEST');
-    const cashfreeBaseURL = isTestMode 
-      ? 'https://sandbox.cashfree.com/pg' 
-      : 'https://api.cashfree.com/pg';
-
-    const paymentsBaseURL = isTestMode
-      ? 'https://sandbox.cashfree.com/order'
-      : 'https://payments.cashfree.com/order';
-
-    console.log('🎯 Cashfree Environment:', {
-      mode: isTestMode ? 'SANDBOX' : 'PRODUCTION',
-      apiURL: cashfreeBaseURL,
-      paymentsURL: paymentsBaseURL
-    });
+    // ✅ FIXED: Always use production URLs for live credentials
+    const cashfreeBaseURL = 'https://api.cashfree.com/pg';
+    const paymentsBaseURL = 'https://payments.cashfree.com/order';
 
     // ✅ FIXED: Use proper HTTPS URLs
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    
-    const returnUrl = isTestMode 
-      ? 'https://webhook.site/test-cashfree-return'
-      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
-        
-    const notifyUrl = isTestMode
-      ? 'https://webhook.site/test-cashfree-webhook'
-      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
+    const returnUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`;
+    const notifyUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`;
 
-    console.log('🔗 Final URLs:', { returnUrl, notifyUrl });
-
-    // Generate order data
+    // ✅ FIXED: Generate simpler order IDs
     const timestamp = Date.now();
-    const random = Math.floor(Math.random() * 10000);
+    const random = Math.floor(Math.random() * 1000);
     const orderId = `order_${timestamp}_${random}`;
-    const txnRefId = `txn_${timestamp}_${random}`;
     
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount < 1) {
       throw new Error('Invalid amount. Minimum is 1 INR');
     }
 
-    // Payment methods mapping
+    // ✅ FIXED: Simplified payment methods
     const getCashfreePaymentMethods = (method) => {
       const methods = {
         upi: "upi",
         card: "cc,dc", 
         netbanking: "nb",
-        wallet: "wallet",
-        phonepe: "upi"
+        wallet: "wallet"
       };
       return methods[method] || "upi";
     };
 
     const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
 
-    // ✅ SIMPLIFIED ORDER DATA (remove optional fields that might cause issues)
+    // ✅ FIXED: Clean order data without extra fields
     const requestData = {
       order_amount: orderAmount.toFixed(2),
       order_currency: "INR",
@@ -290,12 +253,16 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         notify_url: notifyUrl,
         payment_methods: cashfreeMethods
       }
-      // Remove order_note and order_expiry_time temporarily to simplify
+      // Remove order_note and order_expiry_time to avoid issues
     };
 
-    console.log('📤 Cashfree API Request to:', `${cashfreeBaseURL}/orders`);
+    console.log('📤 Cashfree API Request:', {
+      orderId: orderId,
+      amount: orderAmount,
+      methods: cashfreeMethods
+    });
 
-    // ✅ API CALL WITH BETTER HEADERS
+    // ✅ API CALL
     let response;
     try {
       response = await axios.post(
@@ -305,7 +272,7 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
           headers: {
             'Content-Type': 'application/json',
             'x-client-id': clientId.trim(),
-            'x-client-secret': clientSecret.trim(), 
+            'x-client-secret': clientSecret.trim(),
             'x-api-version': apiVersion,
             'Accept': 'application/json'
           },
@@ -313,20 +280,19 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         }
       );
 
-      console.log('✅ Cashfree API Success - Status:', response.status);
+      console.log('✅ Cashfree API Response Status:', response.status);
 
     } catch (apiError) {
       console.error('❌ Cashfree API Call Failed:', apiError.message);
       
       if (apiError.response) {
-        console.error('🔍 Cashfree API Error Response:', {
+        console.error('🔍 Cashfree API Error Details:', {
           status: apiError.response.status,
           data: apiError.response.data
         });
 
-        // Specific error handling
         if (apiError.response.status === 401) {
-          throw new Error('Cashfree: Invalid credentials - Check your Client ID and Secret');
+          throw new Error('Cashfree: Invalid credentials - Check Client ID/Secret');
         } else if (apiError.response.status === 403) {
           throw new Error('Cashfree: Account not activated or restricted');
         } else if (apiError.response.data?.message) {
@@ -337,28 +303,33 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error(`Cashfree API call failed: ${apiError.message}`);
     }
 
-    // Validate response
-    if (!response.data?.payment_session_id) {
-      console.error('❌ Invalid Cashfree response:', response.data);
-      throw new Error('Cashfree API did not return valid payment session');
+    // ✅ VALIDATE RESPONSE
+    if (!response.data) {
+      throw new Error('Cashfree API returned empty response');
     }
 
-    // Generate payment link
+    if (!response.data.payment_session_id) {
+      console.error('❌ No payment_session_id in response:', response.data);
+      throw new Error('Cashfree API did not return payment session ID');
+    }
+
+    // ✅ FIXED: Generate proper payment link
     const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
 
     console.log('🎯 Generated Payment Link Successfully');
-    console.log('🔑 Session ID:', response.data.payment_session_id.substring(0, 20) + '...');
+    console.log('🔑 Payment Session ID:', response.data.payment_session_id.substring(0, 30) + '...');
+    console.log('🔗 Full Payment Link:', paymentLink);
 
     return {
       paymentLink: paymentLink,
       merchantOrderId: orderId,
-      txnRefId: txnRefId,
+      txnRefId: `txn_${timestamp}_${random}`,
       gatewayTxnId: response.data.cf_order_id,
       gatewayOrderId: response.data.order_id,
       cfOrderId: response.data.cf_order_id,
       cfPaymentLink: paymentLink,
       paymentSessionId: response.data.payment_session_id,
-      environment: isTestMode ? 'sandbox' : 'production'
+      environment: 'production'
     };
 
   } catch (error) {
@@ -366,12 +337,41 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     
     // Improved error messages
     if (error.message.includes('client session is invalid')) {
-      throw new Error('Cashfree: Invalid credentials or environment mismatch. Check if you are using TEST credentials in production or vice versa.');
+      throw new Error('Cashfree: Session expired or invalid. Please try generating a new payment link.');
     } else if (error.message.includes('Unauthorized') || error.message.includes('401')) {
-      throw new Error('Cashfree: Invalid Client ID or Secret. Please verify your credentials.');
+      throw new Error('Cashfree: Invalid Client ID or Secret');
     }
     
     throw new Error(`Cashfree payment failed: ${error.message}`);
+  }
+};
+
+// Add this to your controller
+export const validatePaymentSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    // Quick validation - if session exists and is recent
+    const transaction = await Transaction.findOne({ 
+      paymentSessionId: sessionId,
+      createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) } // 15 minutes
+    });
+    
+    if (!transaction) {
+      return res.json({
+        valid: false,
+        message: 'Payment session expired or invalid'
+      });
+    }
+    
+    res.json({
+      valid: true,
+      transactionId: transaction.transactionId,
+      amount: transaction.amount
+    });
+    
+  } catch (error) {
+    res.status(500).json({ valid: false, error: error.message });
   }
 };
 
@@ -1182,44 +1182,51 @@ export const processShortLink = async (req, res) => {
     const { shortLinkId } = req.params;
     console.log('🔄 Process route called for shortLinkId:', shortLinkId);
 
-    // Find transaction by short link ID
+    // Find transaction
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
     
     if (!transaction) {
-      console.error('❌ Transaction not found in database');
       return res.status(404).send(`
         <html>
           <head><title>Payment Link Not Found</title></head>
           <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #dc3545;">Payment Link Not Found</h2>
-            <p>Short Link ID: <strong>${shortLinkId}</strong></p>
             <p>This payment link may have expired or is invalid.</p>
-            <p><a href="/" style="color: #007bff;">Return to Home</a></p>
           </body>
         </html>
       `);
     }
 
-    console.log('✅ Transaction found:', transaction.transactionId);
-    console.log('🔗 Payment URL:', transaction.paymentUrl);
+    // ✅ CHECK IF SESSION IS RECENT (less than 15 minutes)
+    const sessionAge = Date.now() - new Date(transaction.createdAt).getTime();
+    const maxSessionAge = 15 * 60 * 1000; // 15 minutes
+    
+    if (sessionAge > maxSessionAge) {
+      return res.status(410).send(`
+        <html>
+          <head><title>Payment Link Expired</title></head>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #dc3545;">Payment Link Expired</h2>
+            <p>This payment link has expired. Please generate a new one.</p>
+            <p>Session created: ${new Date(transaction.createdAt).toLocaleString()}</p>
+          </body>
+        </html>
+      `);
+    }
 
-    // Update transaction status
+    console.log('✅ Transaction found, redirecting to:', transaction.paymentUrl);
+
+    // Update status and redirect
     await Transaction.findOneAndUpdate(
       { shortLinkId: shortLinkId },
       { 
         status: 'REDIRECTED', 
-        redirectedAt: new Date(),
-        updatedAt: new Date()
+        redirectedAt: new Date()
       }
     );
 
-    // Direct redirect to payment page
-    if (transaction.paymentUrl && transaction.paymentUrl.includes('http')) {
-      console.log('➡️ Redirecting to payment page:', transaction.paymentUrl);
-      return res.redirect(302, transaction.paymentUrl);
-    } else {
-      throw new Error('No valid payment URL found');
-    }
+    // ✅ IMMEDIATE REDIRECT
+    res.redirect(302, transaction.paymentUrl);
 
   } catch (error) {
     console.error('🔥 ERROR in process route:', error);
@@ -1229,8 +1236,6 @@ export const processShortLink = async (req, res) => {
         <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
           <h2 style="color: #dc3545;">Payment Processing Error</h2>
           <p>An error occurred while processing your payment.</p>
-          <p>Error: ${error.message}</p>
-          <p><a href="/" style="color: #007bff;">Return to Home</a></p>
         </body>
       </html>
     `);

@@ -17,7 +17,8 @@ import {
   handleCashfreeWebhook,
   checkCashfreeEnvironment,
   testCashfreeConnectionEnhanced,
-  debugCashfreeSetup  // ✅ ADD THIS IMPORT
+  debugCashfreeSetup,
+  validatePaymentSession  // ✅ ADD THIS IMPORT
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -36,8 +37,9 @@ router.post('/cashfree/webhook', handleCashfreeWebhook);
 router.get('/cashfree/test/:merchantId', testCashfreeConnection);
 router.get('/cashfree/test-enhanced/:merchantId', testCashfreeConnectionEnhanced);
 router.get('/cashfree/check-environment/:merchantId', checkCashfreeEnvironment);
-router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);  // ✅ ADD THIS ROUTE
+router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);
 router.get('/cashfree/debug-credentials/:merchantId', debugCashfreeCredentials);
+router.get('/cashfree/validate-session/:sessionId', validatePaymentSession); // ✅ ADD THIS
 
 // ==================== ENPAY SPECIFIC ROUTES ====================
 router.get('/enpay/test-direct', testEnpayDirect);
