@@ -1,4 +1,4 @@
-// routes/paymentRoutes.js - FIXED VERSION
+// routes/paymentRoutes.js - COMPLETE AND WORKING VERSION
 import express from 'express';
 import {
   generatePaymentLink,
@@ -18,7 +18,7 @@ import {
   checkCashfreeEnvironment,
   testCashfreeConnectionEnhanced,
   debugCashfreeSetup,
-  validatePaymentSession
+  validatePaymentSession  // ✅ ADD THIS IMPORT
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -28,8 +28,9 @@ router.post('/generate-link', generatePaymentLink);
 
 // ==================== MERCHANT & CONNECTOR ROUTES ====================
 router.get('/merchants', getMerchants);
-router.get('/methods', getPaymentMethods);
-router.get('/merchants/:merchantId/connector-accounts', getMerchantConnectors); // ✅ SPECIFIC PATH
+// router.get('/merchants/:merchantId/connectors', getMerchantConnectors);
+router.get('/payment-methods', getPaymentMethods);
+router.get('/:merchantId/connector-accounts', getMerchantConnectors); // ✅ हे route ADD करा
 
 // ==================== CASHFREE SPECIFIC ROUTES ====================
 router.get('/cashfree/return', handleCashfreeReturn);
@@ -39,7 +40,7 @@ router.get('/cashfree/test-enhanced/:merchantId', testCashfreeConnectionEnhanced
 router.get('/cashfree/check-environment/:merchantId', checkCashfreeEnvironment);
 router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);
 router.get('/cashfree/debug-credentials/:merchantId', debugCashfreeCredentials);
-router.get('/cashfree/validate-session/:sessionId', validatePaymentSession);
+router.get('/cashfree/validate-session/:sessionId', validatePaymentSession); // ✅ ADD THIS
 
 // ==================== ENPAY SPECIFIC ROUTES ====================
 router.get('/enpay/test-direct', testEnpayDirect);
