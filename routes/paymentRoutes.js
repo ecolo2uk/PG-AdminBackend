@@ -1,4 +1,4 @@
-// routes/paymentRoutes.js - FIXED VERSION
+// routes/paymentRoutes.js - UPDATED VERSION
 import express from 'express';
 import {
   generatePaymentLink,
@@ -18,7 +18,8 @@ import {
   checkCashfreeEnvironment,
   testCashfreeConnectionEnhanced,
   debugCashfreeSetup,
-  validatePaymentSession
+  validatePaymentSession,
+  getTransactionByShortLink  // ✅ ADD THIS
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -28,8 +29,11 @@ router.post('/generate-link', generatePaymentLink);
 
 // ==================== MERCHANT & CONNECTOR ROUTES ====================
 router.get('/merchants', getMerchants);
-router.get('/methods', getPaymentMethods); // ✅ ADD THIS LINE - FIXES 404 ERROR
-router.get('/:merchantId/connector-accounts', getMerchantConnectors); // ✅ SPECIFIC PATH
+router.get('/methods', getPaymentMethods);
+router.get('/:merchantId/connector-accounts', getMerchantConnectors);
+
+// ==================== TRANSACTION ROUTES ====================
+router.get('/transaction/:shortLinkId', getTransactionByShortLink); // ✅ ADD THIS
 
 // ==================== CASHFREE SPECIFIC ROUTES ====================
 router.get('/cashfree/return', handleCashfreeReturn);

@@ -1,4 +1,3 @@
-// controllers/paymentLinkController.js
 import Transaction from '../models/Transaction.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
@@ -51,6 +50,14 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount must be between 500 and 10,000 INR'
+      });
+    }
+
     // Find merchant
     const merchant = await User.findById(merchantId);
     if (!merchant) {
@@ -90,11 +97,19 @@ export const generatePaymentLink = async (req, res) => {
 
     let paymentResult;
 
-    // Generate payment based on connector
+    // ✅ FIXED: SUPPORT BOTH ENPAY AND CASHFREE
     if (connectorName === 'Cashfree') {
       paymentResult = await generateCashfreePayment({
         merchant,
-        amount,
+        amount: amountNum,
+        paymentMethod, 
+        paymentOption,
+        connectorAccount: activeAccount.connectorAccountId
+      });
+    } else if (connectorName === 'Enpay') {
+      paymentResult = await generateEnpayPayment({
+        merchant,
+        amount: amountNum,
         paymentMethod, 
         paymentOption,
         connectorAccount: activeAccount.connectorAccountId
@@ -119,7 +134,7 @@ export const generatePaymentLink = async (req, res) => {
       merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
       mid: merchant.mid,
       
-      amount: amount,
+      amount: amountNum,
       currency: currency,
       status: 'INITIATED',
       paymentMethod: paymentMethod,
@@ -135,9 +150,6 @@ export const generatePaymentLink = async (req, res) => {
       gatewayPaymentLink: paymentResult.paymentLink,
       gatewayOrderId: paymentResult.gatewayOrderId,
       
-      cfOrderId: paymentResult.cfOrderId,
-      cfPaymentLink: paymentResult.cfPaymentLink,
-      
       customerName: `${merchant.firstname} ${merchant.lastname}`,
       customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
       customerContact: merchant.contact || '',
@@ -146,6 +158,25 @@ export const generatePaymentLink = async (req, res) => {
       txnNote: `Payment for ${merchant.company || merchant.firstname}`,
       source: connectorName.toLowerCase()
     };
+
+    // Add connector-specific fields
+    if (connectorName === 'Cashfree') {
+      transactionData.cfOrderId = paymentResult.cfOrderId;
+      transactionData.cfPaymentLink = paymentResult.cfPaymentLink;
+      transactionData.paymentSessionId = paymentResult.paymentSessionId;
+    } else if (connectorName === 'Enpay') {
+      transactionData.enpayTxnId = paymentResult.enpayTxnId;
+      transactionData.enpayPaymentLink = paymentResult.enpayPaymentLink;
+    }
+
+    // Encrypt payment payload for security
+    transactionData.encryptedPaymentPayload = encrypt(JSON.stringify({
+      amount: amountNum,
+      currency: currency,
+      merchantId: merchant._id,
+      connector: connectorName,
+      timestamp: new Date().toISOString()
+    }));
 
     // Save transaction
     const newTransaction = new Transaction(transactionData);
@@ -162,7 +193,7 @@ export const generatePaymentLink = async (req, res) => {
       connector: connectorName,
       terminalId: activeAccount.terminalId || 'N/A',
       merchantName: `${merchant.firstname} ${merchant.lastname}`,
-      amount: amount,
+      amount: amountNum,
       currency: currency,
       message: `${connectorName} payment link generated successfully`
     });
@@ -178,6 +209,117 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
+// ✅ FIXED: ENPAY PAYMENT GENERATION
+const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
+  try {
+    console.log('🔗 Generating Enpay Payment...');
+    
+    let integrationKeys = {};
+    
+    // ✅ CRITICAL FIX: Better integration keys extraction
+    if (connectorAccount?.integrationKeys) {
+      if (connectorAccount.integrationKeys instanceof Map) {
+        integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+      } else if (typeof connectorAccount.integrationKeys === 'object') {
+        integrationKeys = { ...connectorAccount.integrationKeys };
+      } else if (typeof connectorAccount.integrationKeys === 'string') {
+        try {
+          integrationKeys = JSON.parse(connectorAccount.integrationKeys);
+        } catch (e) {
+          console.error('❌ Failed to parse integrationKeys string:', e);
+        }
+      }
+    }
+
+    console.log('🔍 Enpay Integration Keys:', Object.keys(integrationKeys));
+
+    // Validate Enpay credentials
+    const requiredCredentials = ['X-Merchant-Key', 'X-Merchant-Secret', 'merchantHashId'];
+    for (const cred of requiredCredentials) {
+      if (!integrationKeys[cred]) {
+        throw new Error(`Missing required Enpay credential: ${cred}`);
+      }
+    }
+
+    // Generate unique IDs
+    const txnRefId = generateTxnRefId();
+    const merchantOrderId = generateMerchantOrderId();
+    const enpayTxnId = `ENP${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    // Prepare Enpay API request
+    const requestData = {
+      amount: amount.toFixed(2),
+      merchantHashId: integrationKeys.merchantHashId,
+      merchantOrderId: merchantOrderId,
+      merchantTxnId: txnRefId,
+      merchantVpa: `${merchant.mid?.toLowerCase()}@fino`,
+      returnURL: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
+      successURL: `${API_BASE_URL}/api/payment/success?transactionId=${txnRefId}`,
+      txnnNote: `Payment for ${merchant.company || merchant.firstname}`
+    };
+
+    console.log('📤 Calling Enpay API with data:', {
+      amount: requestData.amount,
+      merchantHashId: requestData.merchantHashId,
+      merchantOrderId: requestData.merchantOrderId
+    });
+
+    // Call Enpay API
+    const enpayResponse = await axios.post(
+      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
+          'Accept': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ Enpay API response:', enpayResponse.data);
+
+    let paymentLink = '';
+    if (enpayResponse.data && enpayResponse.data.details) {
+      paymentLink = enpayResponse.data.details;
+    } else if (enpayResponse.data && enpayResponse.data.paymentUrl) {
+      paymentLink = enpayResponse.data.paymentUrl;
+    } else {
+      throw new Error('Enpay API did not return payment link');
+    }
+
+    return {
+      paymentLink: paymentLink,
+      merchantOrderId: merchantOrderId,
+      txnRefId: txnRefId,
+      gatewayTxnId: enpayTxnId,
+      enpayTxnId: enpayTxnId,
+      enpayPaymentLink: paymentLink
+    };
+
+  } catch (error) {
+    console.error('❌ Enpay payment generation failed:', error);
+    
+    if (error.response) {
+      console.error('Enpay API error response:', {
+        status: error.response.status,
+        data: error.response.data
+      });
+      
+      if (error.response.status === 401) {
+        throw new Error('Enpay: Invalid Merchant Key/Secret');
+      } else if (error.response.status === 400) {
+        throw new Error(`Enpay: Bad request - ${error.response.data?.message}`);
+      }
+    }
+    
+    throw new Error(`Enpay payment failed: ${error.message}`);
+  }
+};
+
+// ✅ FIXED: CASHFREE PAYMENT GENERATION
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
@@ -199,9 +341,7 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       }
     }
 
-    console.log('🔍 Raw Integration Keys:', integrationKeys);
-    console.log('🔍 Keys Object Type:', typeof integrationKeys);
-    console.log('🔍 Available Keys:', Object.keys(integrationKeys));
+    console.log('🔍 Cashfree Integration Keys:', Object.keys(integrationKeys));
 
     // Extract credentials
     const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
@@ -214,15 +354,19 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       apiVersion: apiVersion
     });
 
+    if (!clientId || !clientSecret) {
+      throw new Error('Missing Cashfree credentials: Client ID or Secret');
+    }
+
     // ✅ FIXED: ALWAYS USE PRODUCTION FOR LIVE CREDENTIALS
     const cashfreeBaseURL = 'https://api.cashfree.com/pg';
     const paymentsBaseURL = 'https://payments.cashfree.com/order';
 
-    console.log('🎯 Using PRODUCTION Environment:', cashfreeBaseURL);  // ✅ FIXED: Use proper HTTPS URLs
-    const returnUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`;
-    const notifyUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`;
+    console.log('🎯 Using PRODUCTION Environment:', cashfreeBaseURL);
+    const returnUrl = `${API_BASE_URL}/api/payment/cashfree/return`;
+    const notifyUrl = `${API_BASE_URL}/api/payment/cashfree/webhook`;
 
-    // ✅ FIXED: Generate simpler order IDs
+    // Generate order ID
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 1000);
     const orderId = `order_${timestamp}_${random}`;
@@ -261,7 +405,6 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         notify_url: notifyUrl,
         payment_methods: cashfreeMethods
       }
-      // Remove order_note and order_expiry_time to avoid issues
     };
 
     console.log('📤 Cashfree API Request:', {
@@ -353,6 +496,163 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
     throw new Error(`Cashfree payment failed: ${error.message}`);
   }
 };
+
+// Add this route to get transaction by shortLinkId
+export const getTransactionByShortLink = async (req, res) => {
+  try {
+    const { shortLinkId } = req.params;
+    
+    console.log('🔍 Fetching transaction for shortLinkId:', shortLinkId);
+
+    const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
+    
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: 'Transaction not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        transactionId: transaction.transactionId,
+        merchantName: transaction.merchantName,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        paymentMethod: transaction.paymentMethod,
+        connectorName: transaction.connectorName,
+        status: transaction.status,
+        paymentUrl: transaction.paymentUrl,
+        createdAt: transaction.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching transaction:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching transaction',
+      error: error.message
+    });
+  }
+};
+
+ export const handleSuccess = async (req, res) => {
+  try {
+    const { transactionId } = req.query;
+    console.log('✅ Success callback for:', transactionId);
+
+    if (transactionId) {
+      await Transaction.findOneAndUpdate(
+        { transactionId: transactionId },
+        { status: 'SUCCESS', updatedAt: new Date() }
+      );
+    }
+
+    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${transactionId || ''}`);
+  } catch (error) {
+    console.error('Success callback error:', error);
+    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=error`);
+  }
+};
+
+export const handleReturn = async (req, res) => {
+  try {
+    const { transactionId, status } = req.query;
+    console.log('↩️ Return callback for:', transactionId, 'status:', status);
+
+    if (transactionId) {
+      await Transaction.findOneAndUpdate(
+        { transactionId: transactionId },
+        { status: status || 'FAILED', updatedAt: new Date() }
+      );
+    }
+
+    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=${status || 'failed'}&transactionRefId=${transactionId || ''}`);
+  } catch (error) {
+    console.error('Return callback error:', error);
+    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
+  }
+};
+
+export const getMerchantConnectors = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🔍 Fetching connector accounts for merchant:', merchantId);
+
+    if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid merchant ID'
+      });
+    }
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    console.log('🔄 Fetching connector accounts from database...');
+
+    const connectorAccounts = await MerchantConnectorAccount.find({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name connectorType description')
+    .populate('connectorAccountId', 'name currency integrationKeys terminalId')
+    .select('terminalId industry percentage isPrimary status createdAt')
+    .sort({ isPrimary: -1, createdAt: -1 });
+
+    console.log(`✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchant.firstname} ${merchant.lastname}`);
+
+    const formattedAccounts = connectorAccounts.map(account => {
+      const connector = account.connectorId || {};
+      const connectorAcc = account.connectorAccountId || {};
+      
+      return {
+        _id: account._id,
+        terminalId: account.terminalId || connectorAcc.terminalId || 'N/A',
+        connector: connector.name || 'Unknown',
+        connectorName: connector.name || 'Unknown',
+        connectorType: connector.connectorType || 'Payment',
+        assignedAccount: connectorAcc.name || 'Unknown',
+        accountName: connectorAcc.name || 'Unknown',
+        currency: connectorAcc.currency || 'INR',
+        industry: account.industry || 'General',
+        percentage: account.percentage || 100,
+        isPrimary: account.isPrimary || false,
+        status: account.status || 'Active',
+        integrationKeys: connectorAcc.integrationKeys || {},
+        createdAt: account.createdAt
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: formattedAccounts,
+      merchantInfo: {
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid,
+        email: merchant.email
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching merchant connectors from database:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching connector accounts from database',
+      error: error.message
+    });
+  }
+};
+
+
 
 // Add this to your controller
 export const validatePaymentSession = async (req, res) => {
@@ -1153,84 +1453,7 @@ export const debugCashfreeCredentials = async (req, res) => {
 };
 
 // Enpay Payment Generation
-const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
-  try {
-    console.log('🔗 Generating Enpay Payment...');
-    
-    const integrationKeys = connectorAccount?.integrationKeys || {};
-    
-    // Validate Enpay credentials
-    const requiredCredentials = ['X-Merchant-Key', 'X-Merchant-Secret', 'merchantHashId'];
-    for (const cred of requiredCredentials) {
-      if (!integrationKeys[cred]) {
-        throw new Error(`Missing required Enpay credential: ${cred}`);
-      }
-    }
 
-    // Generate unique IDs
-    const txnRefId = generateTxnRefId();
-    const merchantOrderId = generateMerchantOrderId();
-    const enpayTxnId = `ENP${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-    // Prepare Enpay API request
-    const requestData = {
-      amount: parseFloat(amount).toFixed(2),
-      merchantHashId: integrationKeys.merchantHashId,
-      merchantOrderId: merchantOrderId,
-      merchantTxnId: txnRefId,
-      merchantVpa: `${merchant.mid?.toLowerCase()}@fino`,
-      returnURL: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
-      successURL: `${API_BASE_URL}/api/payment/success?transactionId=${txnRefId}`,
-      txnnNote: `Payment for ${merchant.company || merchant.firstname}`
-    };
-
-    console.log('📤 Calling Enpay API...');
-
-    // Call Enpay API
-    const enpayResponse = await axios.post(
-      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
-      requestData,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
-          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
-          'Accept': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
-
-    console.log('✅ Enpay API response:', enpayResponse.data);
-
-    let paymentLink = '';
-    if (enpayResponse.data && enpayResponse.data.details) {
-      paymentLink = enpayResponse.data.details;
-    } else if (enpayResponse.data && enpayResponse.data.paymentUrl) {
-      paymentLink = enpayResponse.data.paymentUrl;
-    } else {
-      throw new Error('Enpay API did not return payment link');
-    }
-
-    return {
-      paymentLink: paymentLink,
-      merchantOrderId: merchantOrderId,
-      txnRefId: txnRefId,
-      gatewayTxnId: enpayTxnId,
-      enpayTxnId: enpayTxnId,
-      enpayPaymentLink: paymentLink
-    };
-
-  } catch (error) {
-    console.error('❌ Enpay payment generation failed:', error);
-    
-    if (error.response) {
-      console.error('Enpay API error:', error.response.data);
-    }
-    
-    throw new Error(`Enpay payment failed: ${error.message}`);
-  }
-};
 
 export const testEnpayDirect = async (req, res) => {
   try {
@@ -1566,81 +1789,6 @@ export const getMerchants = async (req, res) => {
   }
 };
 
-export const getMerchantConnectors = async (req, res) => {
-  try {
-    const { merchantId } = req.params;
-    
-    console.log('🔍 Fetching connector accounts for merchant:', merchantId);
-
-    if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid merchant ID'
-      });
-    }
-
-    const merchant = await User.findById(merchantId);
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Merchant not found'
-      });
-    }
-
-    console.log('🔄 Fetching connector accounts from database...');
-
-    const connectorAccounts = await MerchantConnectorAccount.find({
-      merchantId: merchantId,
-      status: 'Active'
-    })
-    .populate('connectorId', 'name connectorType description')
-    .populate('connectorAccountId', 'name currency integrationKeys terminalId')
-    .select('terminalId industry percentage isPrimary status createdAt')
-    .sort({ isPrimary: -1, createdAt: -1 });
-
-    console.log(`✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchant.firstname} ${merchant.lastname}`);
-
-    const formattedAccounts = connectorAccounts.map(account => {
-      const connector = account.connectorId || {};
-      const connectorAcc = account.connectorAccountId || {};
-      
-      return {
-        _id: account._id,
-        terminalId: account.terminalId || connectorAcc.terminalId || 'N/A',
-        connector: connector.name || 'Unknown',
-        connectorName: connector.name || 'Unknown',
-        connectorType: connector.connectorType || 'Payment',
-        assignedAccount: connectorAcc.name || 'Unknown',
-        accountName: connectorAcc.name || 'Unknown',
-        currency: connectorAcc.currency || 'INR',
-        industry: account.industry || 'General',
-        percentage: account.percentage || 100,
-        isPrimary: account.isPrimary || false,
-        status: account.status || 'Active',
-        integrationKeys: connectorAcc.integrationKeys || {},
-        createdAt: account.createdAt
-      };
-    });
-
-    res.status(200).json({
-      success: true,
-      data: formattedAccounts,
-      merchantInfo: {
-        name: `${merchant.firstname} ${merchant.lastname}`,
-        mid: merchant.mid,
-        email: merchant.email
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error fetching merchant connectors from database:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching connector accounts from database',
-      error: error.message
-    });
-  }
-};
 
 export const getPaymentMethods = async (req, res) => {
   try {
@@ -1666,43 +1814,5 @@ export const getPaymentMethods = async (req, res) => {
       message: 'Error fetching payment methods',
       error: error.message
     });
-  }
-};
-
-export const handleSuccess = async (req, res) => {
-  try {
-    const { transactionId } = req.query;
-    console.log('✅ Success callback for:', transactionId);
-
-    if (transactionId) {
-      await Transaction.findOneAndUpdate(
-        { transactionId: transactionId },
-        { status: 'SUCCESS', updatedAt: new Date() }
-      );
-    }
-
-    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${transactionId || ''}`);
-  } catch (error) {
-    console.error('Success callback error:', error);
-    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=error`);
-  }
-};
-
-export const handleReturn = async (req, res) => {
-  try {
-    const { transactionId, status } = req.query;
-    console.log('↩️ Return callback for:', transactionId, 'status:', status);
-
-    if (transactionId) {
-      await Transaction.findOneAndUpdate(
-        { transactionId: transactionId },
-        { status: status || 'FAILED', updatedAt: new Date() }
-      );
-    }
-
-    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=${status || 'failed'}&transactionRefId=${transactionId || ''}`);
-  } catch (error) {
-    console.error('Return callback error:', error);
-    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
   }
 };
