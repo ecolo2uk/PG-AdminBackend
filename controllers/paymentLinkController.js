@@ -433,45 +433,152 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error(`Missing Cashfree credentials. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
     }
 
-    // ✅ CRITICAL FIX: Correct payment methods mapping
-   // ✅ BETTER PAYMENT METHODS MAPPING
-const getCashfreePaymentMethods = (method, option) => {
-  const methodMapping = {
-    // Card payments
-    card: {
-      visa: "cc,dc",
-      mastercard: "cc,dc", 
-      rupay: "cc,dc",
-      default: "cc,dc"
-    },
-    // UPI payments
-    upi: {
-      upi_collect: "upi",
-      upi_intent: "upi",
-      gpay: "upi",
-      phonepe: "upi",
-      paytm: "upi",
-      default: "upi"
-    },
-    // Net Banking
-    netbanking: {
-      sbi: "nb",
-      hdfc: "nb", 
-      icici: "nb",
-      default: "nb"
-    },
-    // Wallet payments (Cashfree uses "app" for wallets)
-    wallet: {
-      default: "app"
+  
+const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
+  try {
+    console.log('🔗 Generating Cashfree Payment...');
+    
+    let integrationKeys = {};
+    
+    if (connectorAccount?.integrationKeys) {
+      if (connectorAccount.integrationKeys instanceof Map) {
+        integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+      } else if (typeof connectorAccount.integrationKeys === 'object') {
+        integrationKeys = { ...connectorAccount.integrationKeys };
+      }
     }
-  };
 
-  const methodConfig = methodMapping[method];
-  if (!methodConfig) {
-    return "cc,dc,upi,nb,app"; // Default all methods
+    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'];
+    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'];
+    const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
+
+    console.log('🔐 Credentials:', {
+      clientId: clientId ? 'PRESENT' : 'MISSING',
+      clientSecret: clientSecret ? 'PRESENT' : 'MISSING'
+    });
+
+    if (!clientId || !clientSecret) {
+      throw new Error('Missing Cashfree credentials');
+    }
+
+    // ✅ SIMPLE PAYMENT METHODS
+    const getCashfreePaymentMethods = (method) => {
+      const methods = {
+        card: "cc,dc",
+        upi: "upi", 
+        netbanking: "nb",
+        wallet: "app"
+      };
+      return methods[method] || "cc,dc,upi,nb,app";
+    };
+
+    const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
+
+    // ✅ ENVIRONMENT DETECTION
+    const isTestMode = clientId.startsWith('TEST');
+    const cashfreeBaseURL = isTestMode 
+      ? 'https://sandbox.cashfree.com/pg' 
+      : 'https://api.cashfree.com/pg';
+
+    console.log('🎯 Environment:', {
+      mode: isTestMode ? 'SANDBOX' : 'PRODUCTION',
+      baseURL: cashfreeBaseURL
+    });
+
+    // ✅ ORDER DATA
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    const orderId = `order_${timestamp}_${random}`;
+    const txnRefId = `txn_${timestamp}_${random}`;
+    
+    const orderAmount = parseFloat(amount);
+    if (isNaN(orderAmount) || orderAmount < 1) {
+      throw new Error('Invalid amount. Minimum is 1 INR');
+    }
+
+    // ✅ RETURN URLs (तुमच्या domain वर update करा)
+    const returnUrl = "https://your-merchant-domain.com/payment-success";
+    const notifyUrl = "https://your-backend-domain.com/api/payment/cashfree-webhook";
+
+    const requestData = {
+      order_amount: orderAmount.toFixed(2),
+      order_currency: "INR",
+      order_id: orderId,
+      customer_details: {
+        customer_id: merchant.mid || `cust_${timestamp}`,
+        customer_phone: merchant.contact || "9876543210",
+        customer_email: merchant.email || "customer@example.com",
+        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
+      },
+      order_meta: {
+        return_url: returnUrl,
+        notify_url: notifyUrl,
+        payment_methods: cashfreeMethods
+      },
+      order_note: `Payment for ${merchant.company || merchant.firstname}`,
+      order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+    };
+
+    console.log('📤 Cashfree Request:', {
+      url: `${cashfreeBaseURL}/orders`,
+      amount: orderAmount,
+      methods: cashfreeMethods
+    });
+
+    // ✅ API CALL
+    const response = await axios.post(
+      `${cashfreeBaseURL}/orders`,
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': clientId.trim(),
+          'x-client-secret': clientSecret.trim(),
+          'x-api-version': apiVersion
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ Cashfree Response:', response.data);
+
+    if (!response.data.payment_session_id) {
+      throw new Error('No payment session ID received');
+    }
+
+    // ✅ PAYMENT LINK
+    const paymentsBaseURL = isTestMode
+      ? 'https://sandbox.cashfree.com/order'
+      : 'https://payments.cashfree.com/order';
+      
+    const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
+
+    console.log('🎯 Payment Link Generated:', paymentLink);
+
+    return {
+      paymentLink: paymentLink,
+      merchantOrderId: orderId,
+      txnRefId: txnRefId,
+      gatewayTxnId: response.data.cf_order_id,
+      gatewayOrderId: response.data.order_id,
+      cfOrderId: response.data.cf_order_id,
+      cfPaymentLink: paymentLink,
+      paymentSessionId: response.data.payment_session_id,
+      environment: isTestMode ? 'sandbox' : 'production'
+    };
+
+  } catch (error) {
+    console.error('❌ Cashfree payment failed:', error);
+    
+    if (error.response) {
+      console.error('🔍 Error Details:', {
+        status: error.response.status,
+        data: error.response.data
+      });
+    }
+    
+    throw new Error(`Cashfree: ${error.message}`);
   }
-
-  return methodConfig[option] || methodConfig.default || "cc,dc,upi,nb,app";
 };
 
     const cashfreePaymentMethods = getCashfreePaymentMethods(paymentMethod, paymentOption);
@@ -497,10 +604,10 @@ const getCashfreePaymentMethods = (method, option) => {
     const orderId = `order_${timestamp}_${random}`;
     const txnRefId = `txn_${timestamp}_${random}`;
     
-    const orderAmount = parseFloat(amount);
-    if (isNaN(orderAmount) || orderAmount <= 0) {
-      throw new Error('Invalid amount: ' + amount);
-    }
+   const orderAmount = parseFloat(amount);
+if (isNaN(orderAmount) || orderAmount < 1) { // Cashfree minimum is 1 INR
+  throw new Error('Invalid amount: ' + amount + '. Minimum amount is 1 INR');
+}
 
     const returnUrl = isTestMode
       ? 'https://webhook.site/cashfree-return'
