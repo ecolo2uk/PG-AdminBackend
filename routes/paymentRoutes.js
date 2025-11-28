@@ -12,7 +12,9 @@ import {
   testEnpayDirect,
   processShortLink,
   handleSuccess,
-  handleReturn
+  handleReturn,
+  handleCashfreeReturn,
+  handleCashfreeWebhook
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -30,5 +32,7 @@ router.get('/test-enpay-direct', testEnpayDirect);
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
-
+// Cashfree specific routes
+router.get('/cashfree-return', handleCashfreeReturn);
+router.post('/cashfree-webhook', handleCashfreeWebhook);
 export default router;

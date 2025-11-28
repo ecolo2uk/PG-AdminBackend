@@ -196,31 +196,192 @@ export const generatePaymentLink = async (req, res) => {
 };
 
 
-// FIXED Cashfree function - HTTPS URLs
+// // FIXED Cashfree function - HTTPS URLs
+// const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
+//   try {
+//     console.log('🔗 Generating Cashfree Payment...');
+    
+//     // ✅ CRITICAL FIX: Properly handle integrationKeys from populated connectorAccount
+//     let integrationKeys = {};
+    
+//     if (connectorAccount && connectorAccount.integrationKeys) {
+//       console.log('🔐 Raw integrationKeys from database:', connectorAccount.integrationKeys);
+      
+//       // Handle different types of integrationKeys storage
+//       if (connectorAccount.integrationKeys instanceof Map) {
+//         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+//       } else if (typeof connectorAccount.integrationKeys === 'object') {
+//         integrationKeys = { ...connectorAccount.integrationKeys };
+//       } else {
+//         console.warn('⚠️ Unexpected integrationKeys type:', typeof connectorAccount.integrationKeys);
+//         integrationKeys = {};
+//       }
+//     }
+
+//     console.log('🔍 Integration Keys Found:', Object.keys(integrationKeys));
+
+//     // ✅ CRITICAL FIX: Extract credentials with proper fallbacks
+//     const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
+//     const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'] || integrationKeys['X-Client-Secret'];
+//     const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
+
+//     console.log('🔐 Credentials Status:', {
+//       clientId: clientId ? 'PRESENT' : 'MISSING',
+//       clientSecret: clientSecret ? 'PRESENT' : 'MISSING',
+//       apiVersion: apiVersion
+//     });
+
+//     // ✅ CRITICAL FIX: Better validation
+//     if (!clientId || !clientSecret) {
+//       const missing = [];
+//       if (!clientId) missing.push('Client ID');
+//       if (!clientSecret) missing.push('Client Secret');
+//       throw new Error(`Missing Cashfree credentials: ${missing.join(', ')}. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
+//     }
+
+//     // ✅ CRITICAL FIX: Generate unique order ID
+//     const timestamp = Date.now();
+//     const random = Math.floor(Math.random() * 10000);
+//     const orderId = `order_${timestamp}_${random}`;
+//     const txnRefId = `txn_${timestamp}_${random}`;
+    
+//     // ✅ CRITICAL FIX: Validate amount
+//     const orderAmount = parseFloat(amount);
+//     if (isNaN(orderAmount) || orderAmount <= 0) {
+//       throw new Error('Invalid amount: ' + amount);
+//     }
+
+//     // ✅ CRITICAL FIX: Use HTTPS URLs for Cashfree (required by their API)
+//     const returnUrl = `https://webhook.site/cashfree-return`; // Temporary HTTPS URL for testing
+//     const notifyUrl = `https://webhook.site/cashfree-webhook`; // Temporary HTTPS URL for testing
+
+//     console.log('🔐 Using HTTPS URLs for Cashfree:', {
+//       return_url: returnUrl,
+//       notify_url: notifyUrl
+//     });
+
+//     const requestData = {
+//       order_amount: orderAmount.toFixed(2),
+//       order_currency: "INR",
+//       order_id: orderId,
+//       customer_details: {
+//         customer_id: merchant.mid || `cust_${timestamp}`,
+//         customer_phone: merchant.contact || "9999999999",
+//         customer_email: merchant.email || "customer@example.com",
+//         customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
+//       },
+//       order_meta: {
+//         return_url: returnUrl, // ✅ HTTPS URL
+//         notify_url: notifyUrl  // ✅ HTTPS URL
+//       },
+//       order_note: `Payment for ${merchant.company || merchant.firstname}`
+//     };
+
+//     console.log('📤 Cashfree API Request Data:', JSON.stringify(requestData, null, 2));
+
+//     // ✅ CRITICAL FIX: Enhanced API call with better error handling
+//     let response;
+//     try {
+//       console.log('🌐 Calling Cashfree API...');
+      
+//       response = await axios.post(
+//         'https://api.cashfree.com/pg/orders',
+//         requestData,
+//         {
+//           headers: {
+//             'Content-Type': 'application/json',
+//             'x-client-id': clientId.trim(),
+//             'x-client-secret': clientSecret.trim(),
+//             'x-api-version': apiVersion,
+//             'Accept': 'application/json'
+//           },
+//           timeout: 30000
+//         }
+//       );
+
+//       console.log('✅ Cashfree API Response Status:', response.status);
+//       console.log('✅ Cashfree API Response Data:', response.data);
+      
+//     } catch (apiError) {
+//       console.error('❌ Cashfree API Call Failed:', apiError.message);
+      
+//       if (apiError.response) {
+//         console.error('🔍 Cashfree API Error Response:', {
+//           status: apiError.response.status,
+//           statusText: apiError.response.statusText,
+//           data: apiError.response.data,
+//           headers: apiError.response.headers
+//         });
+        
+//         // Handle specific Cashfree errors
+//         if (apiError.response.status === 401) {
+//           throw new Error('Cashfree: Invalid credentials (Unauthorized)');
+//         } else if (apiError.response.status === 400) {
+//           throw new Error(`Cashfree: Bad request - ${apiError.response.data?.message || 'Check request data'}`);
+//         } else if (apiError.response.status === 403) {
+//           throw new Error('Cashfree: Forbidden - Account may be inactive or restricted');
+//         } else if (apiError.response.status === 500) {
+//           throw new Error('Cashfree: Internal server error - please try again later');
+//         }
+//       } else if (apiError.request) {
+//         throw new Error('Cashfree: No response received from server - check network connection');
+//       }
+      
+//       throw new Error(`Cashfree API call failed: ${apiError.message}`);
+//     }
+
+//     // ✅ CRITICAL FIX: Validate response
+//     if (!response.data) {
+//       throw new Error('Cashfree API returned empty response');
+//     }
+
+//     if (!response.data.payment_session_id) {
+//       console.error('❌ No payment_session_id in response:', response.data);
+//       throw new Error('Cashfree API did not return payment session ID');
+//     }
+
+//     const paymentLink = `https://payments.cashfree.com/order/#${response.data.payment_session_id}`;
+    
+//     console.log('🎯 Generated Payment Link:', paymentLink);
+
+//     return {
+//       paymentLink: paymentLink,
+//       merchantOrderId: orderId,
+//       txnRefId: txnRefId,
+//       gatewayTxnId: response.data.cf_order_id || orderId,
+//       gatewayOrderId: response.data.order_id,
+//       cfOrderId: response.data.cf_order_id,
+//       cfPaymentLink: paymentLink,
+//       paymentSessionId: response.data.payment_session_id,
+//       apiResponse: response.data
+//     };
+
+//   } catch (error) {
+//     console.error('❌ Cashfree payment generation failed:', error);
+//     throw new Error(`Cashfree: ${error.message}`);
+//   }
+// };
+
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
-    // ✅ CRITICAL FIX: Properly handle integrationKeys from populated connectorAccount
+    // ✅ CRITICAL FIX: Properly handle integrationKeys
     let integrationKeys = {};
     
     if (connectorAccount && connectorAccount.integrationKeys) {
       console.log('🔐 Raw integrationKeys from database:', connectorAccount.integrationKeys);
       
-      // Handle different types of integrationKeys storage
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
       } else if (typeof connectorAccount.integrationKeys === 'object') {
         integrationKeys = { ...connectorAccount.integrationKeys };
-      } else {
-        console.warn('⚠️ Unexpected integrationKeys type:', typeof connectorAccount.integrationKeys);
-        integrationKeys = {};
       }
     }
 
     console.log('🔍 Integration Keys Found:', Object.keys(integrationKeys));
 
-    // ✅ CRITICAL FIX: Extract credentials with proper fallbacks
+    // ✅ Extract credentials with proper fallbacks
     const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
     const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'] || integrationKeys['X-Client-Secret'];
     const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
@@ -231,29 +392,29 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       apiVersion: apiVersion
     });
 
-    // ✅ CRITICAL FIX: Better validation
+    // ✅ Better validation
     if (!clientId || !clientSecret) {
       const missing = [];
       if (!clientId) missing.push('Client ID');
       if (!clientSecret) missing.push('Client Secret');
-      throw new Error(`Missing Cashfree credentials: ${missing.join(', ')}. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
+      throw new Error(`Missing Cashfree credentials: ${missing.join(', ')}`);
     }
 
-    // ✅ CRITICAL FIX: Generate unique order ID
+    // ✅ Generate unique order ID
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const orderId = `order_${timestamp}_${random}`;
     const txnRefId = `txn_${timestamp}_${random}`;
     
-    // ✅ CRITICAL FIX: Validate amount
+    // ✅ Validate amount
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount <= 0) {
       throw new Error('Invalid amount: ' + amount);
     }
 
-    // ✅ CRITICAL FIX: Use HTTPS URLs for Cashfree (required by their API)
-    const returnUrl = `https://webhook.site/cashfree-return`; // Temporary HTTPS URL for testing
-    const notifyUrl = `https://webhook.site/cashfree-webhook`; // Temporary HTTPS URL for testing
+    // ✅ CRITICAL FIX: Use proper HTTPS URLs for Cashfree
+    const returnUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
+    const notifyUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
 
     console.log('🔐 Using HTTPS URLs for Cashfree:', {
       return_url: returnUrl,
@@ -271,15 +432,17 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
       },
       order_meta: {
-        return_url: returnUrl, // ✅ HTTPS URL
-        notify_url: notifyUrl  // ✅ HTTPS URL
+        return_url: returnUrl,
+        notify_url: notifyUrl,
+        payment_methods: "cc,dc,upi" // Specify allowed payment methods
       },
-      order_note: `Payment for ${merchant.company || merchant.firstname}`
+      order_note: `Payment for ${merchant.company || merchant.firstname}`,
+      order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes expiry
     };
 
     console.log('📤 Cashfree API Request Data:', JSON.stringify(requestData, null, 2));
 
-    // ✅ CRITICAL FIX: Enhanced API call with better error handling
+    // ✅ Enhanced API call
     let response;
     try {
       console.log('🌐 Calling Cashfree API...');
@@ -309,37 +472,26 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         console.error('🔍 Cashfree API Error Response:', {
           status: apiError.response.status,
           statusText: apiError.response.statusText,
-          data: apiError.response.data,
-          headers: apiError.response.headers
+          data: apiError.response.data
         });
         
-        // Handle specific Cashfree errors
         if (apiError.response.status === 401) {
           throw new Error('Cashfree: Invalid credentials (Unauthorized)');
         } else if (apiError.response.status === 400) {
           throw new Error(`Cashfree: Bad request - ${apiError.response.data?.message || 'Check request data'}`);
-        } else if (apiError.response.status === 403) {
-          throw new Error('Cashfree: Forbidden - Account may be inactive or restricted');
-        } else if (apiError.response.status === 500) {
-          throw new Error('Cashfree: Internal server error - please try again later');
         }
-      } else if (apiError.request) {
-        throw new Error('Cashfree: No response received from server - check network connection');
       }
       
       throw new Error(`Cashfree API call failed: ${apiError.message}`);
     }
 
-    // ✅ CRITICAL FIX: Validate response
-    if (!response.data) {
-      throw new Error('Cashfree API returned empty response');
-    }
-
+    // ✅ CRITICAL FIX: Proper payment link generation
     if (!response.data.payment_session_id) {
       console.error('❌ No payment_session_id in response:', response.data);
       throw new Error('Cashfree API did not return payment session ID');
     }
 
+    // ✅ CORRECT Payment Link Format
     const paymentLink = `https://payments.cashfree.com/order/#${response.data.payment_session_id}`;
     
     console.log('🎯 Generated Payment Link:', paymentLink);
@@ -352,13 +504,110 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       gatewayOrderId: response.data.order_id,
       cfOrderId: response.data.cf_order_id,
       cfPaymentLink: paymentLink,
-      paymentSessionId: response.data.payment_session_id,
-      apiResponse: response.data
+      paymentSessionId: response.data.payment_session_id
     };
 
   } catch (error) {
     console.error('❌ Cashfree payment generation failed:', error);
     throw new Error(`Cashfree: ${error.message}`);
+  }
+};
+
+// Cashfree Return URL Handler
+export const handleCashfreeReturn = async (req, res) => {
+  try {
+    const { order_id, order_status, payment_status, reference_id } = req.query;
+    
+    console.log('🔁 Cashfree Return Callback:', {
+      order_id,
+      order_status, 
+      payment_status,
+      reference_id
+    });
+
+    // Update transaction status based on callback
+    if (order_id) {
+      const transaction = await Transaction.findOne({ 
+        $or: [
+          { merchantOrderId: order_id },
+          { gatewayOrderId: order_id },
+          { cfOrderId: order_id }
+        ]
+      });
+
+      if (transaction) {
+        let status = 'PENDING';
+        if (order_status === 'PAID') status = 'SUCCESS';
+        else if (order_status === 'EXPIRED') status = 'FAILED';
+
+        await Transaction.findOneAndUpdate(
+          { _id: transaction._id },
+          { 
+            status: status,
+            updatedAt: new Date(),
+            gatewayTxnId: reference_id || transaction.gatewayTxnId
+          }
+        );
+
+        console.log(`✅ Transaction ${transaction.transactionId} updated to: ${status}`);
+      }
+    }
+
+    // Redirect to frontend success page
+    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=${order_status === 'PAID' ? 'success' : 'failed'}&transactionRefId=${order_id || ''}`);
+    
+  } catch (error) {
+    console.error('❌ Cashfree return handler error:', error);
+    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
+  }
+};
+
+// Cashfree Webhook Handler
+export const handleCashfreeWebhook = async (req, res) => {
+  try {
+    const webhookData = req.body;
+    
+    console.log('📩 Cashfree Webhook Received:', webhookData);
+
+    // Verify webhook signature (important for security)
+    // Add signature verification logic here
+
+    const { data, type } = webhookData;
+    
+    if (type === 'TRANSACTION_STATUS' && data) {
+      const { orderId, referenceId, txStatus, txMsg, paymentMode, txTime } = data;
+      
+      let status = 'PENDING';
+      if (txStatus === 'SUCCESS') status = 'SUCCESS';
+      else if (txStatus === 'FAILED') status = 'FAILED';
+      else if (txStatus === 'USER_DROPPED') status = 'CANCELLED';
+
+      // Update transaction in database
+      await Transaction.findOneAndUpdate(
+        {
+          $or: [
+            { merchantOrderId: orderId },
+            { gatewayOrderId: orderId },
+            { cfOrderId: orderId }
+          ]
+        },
+        {
+          status: status,
+          gatewayTxnId: referenceId,
+          paymentMethod: paymentMode,
+          updatedAt: new Date(),
+          ...(txStatus === 'SUCCESS' && { settledAt: new Date(txTime) })
+        }
+      );
+
+      console.log(`✅ Webhook: Order ${orderId} updated to ${status}`);
+    }
+
+    res.status(200).json({ success: true, message: 'Webhook processed' });
+    
+  } catch (error) {
+    console.error('❌ Cashfree webhook error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
