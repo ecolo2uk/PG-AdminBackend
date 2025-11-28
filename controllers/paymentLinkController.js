@@ -35,6 +35,8 @@ function generateMerchantOrderId() {
   return `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
 }
 
+
+
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
   console.log('🚀 generatePaymentLink STARTED');
@@ -396,11 +398,9 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
-    // ✅ CRITICAL FIX: Better integration keys extraction
     let integrationKeys = {};
     
     if (connectorAccount?.integrationKeys) {
-      // Handle Mongoose Map and plain objects
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
       } else if (typeof connectorAccount.integrationKeys === 'object') {
@@ -410,16 +410,13 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       console.log('🔐 Extracted Integration Keys:', Object.keys(integrationKeys));
     }
 
-    // ✅ CRITICAL FIX: Check ALL possible key names
     const clientId = integrationKeys['x-client-id'] || 
                     integrationKeys['X-Client-Id'] || 
-                    integrationKeys['client_id'] ||
-                    integrationKeys['clientId'];
+                    integrationKeys['client_id'];
                     
     const clientSecret = integrationKeys['x-client-secret'] || 
                         integrationKeys['X-Client-Secret'] || 
-                        integrationKeys['client_secret'] ||
-                        integrationKeys['clientSecret'];
+                        integrationKeys['client_secret'];
                         
     const apiVersion = integrationKeys['x-api-version'] || 
                       integrationKeys['X-Api-Version'] || 
@@ -436,7 +433,55 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error(`Missing Cashfree credentials. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
     }
 
-    // ✅ CRITICAL FIX: Environment detection
+    // ✅ CRITICAL FIX: Correct payment methods mapping
+   // ✅ BETTER PAYMENT METHODS MAPPING
+const getCashfreePaymentMethods = (method, option) => {
+  const methodMapping = {
+    // Card payments
+    card: {
+      visa: "cc,dc",
+      mastercard: "cc,dc", 
+      rupay: "cc,dc",
+      default: "cc,dc"
+    },
+    // UPI payments
+    upi: {
+      upi_collect: "upi",
+      upi_intent: "upi",
+      gpay: "upi",
+      phonepe: "upi",
+      paytm: "upi",
+      default: "upi"
+    },
+    // Net Banking
+    netbanking: {
+      sbi: "nb",
+      hdfc: "nb", 
+      icici: "nb",
+      default: "nb"
+    },
+    // Wallet payments (Cashfree uses "app" for wallets)
+    wallet: {
+      default: "app"
+    }
+  };
+
+  const methodConfig = methodMapping[method];
+  if (!methodConfig) {
+    return "cc,dc,upi,nb,app"; // Default all methods
+  }
+
+  return methodConfig[option] || methodConfig.default || "cc,dc,upi,nb,app";
+};
+
+    const cashfreePaymentMethods = getCashfreePaymentMethods(paymentMethod, paymentOption);
+    
+    console.log('🎯 Payment Methods Mapping:', {
+      selectedMethod: paymentMethod,
+      selectedOption: paymentOption,
+      cashfreeMethods: cashfreePaymentMethods
+    });
+
     const isTestMode = clientId.startsWith('TEST');
     const cashfreeBaseURL = isTestMode 
       ? 'https://sandbox.cashfree.com/pg' 
@@ -447,7 +492,6 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       baseURL: cashfreeBaseURL
     });
 
-    // Generate order data
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const orderId = `order_${timestamp}_${random}`;
@@ -458,13 +502,12 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Invalid amount: ' + amount);
     }
 
-    // ✅ CRITICAL FIX: Use proper return URLs
     const returnUrl = isTestMode
-      ? 'https://webhook.site/cashfree-return' // Test webhook
+      ? 'https://webhook.site/cashfree-return'
       : 'https://your-production-domain.com/api/payment/cashfree-return';
 
     const notifyUrl = isTestMode
-      ? 'https://webhook.site/cashfree-webhook' // Test webhook  
+      ? 'https://webhook.site/cashfree-webhook' 
       : 'https://your-production-domain.com/api/payment/cashfree-webhook';
 
     const requestData = {
@@ -480,7 +523,8 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
-        payment_methods: "cc,dc,upi,netbanking,wallet"
+        // ✅ FIXED: Use correct Cashfree payment methods
+        payment_methods: cashfreePaymentMethods
       },
       order_note: `Payment for ${merchant.company || merchant.firstname}`,
       order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString()
@@ -491,7 +535,6 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       data: requestData
     });
 
-    // ✅ Make API call
     const response = await axios.post(
       `${cashfreeBaseURL}/orders`,
       requestData,
@@ -513,7 +556,6 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Cashfree API did not return payment session ID');
     }
 
-    // ✅ Generate payment link
     const paymentsBaseURL = isTestMode
       ? 'https://sandbox.cashfree.com/order'
       : 'https://payments.cashfree.com/order';
@@ -542,7 +584,6 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         headers: error.response.headers
       });
       
-      // Handle specific errors
       if (error.response.status === 401) {
         throw new Error('Cashfree: Invalid credentials - check Client ID/Secret');
       } else if (error.response.status === 400) {
