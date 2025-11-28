@@ -260,17 +260,33 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Invalid amount. Minimum is 1 INR');
     }
 
-    // ✅ IMPORTANT: Use proper return URLs (ये fix करना important है)
+     const isDevelopment = process.env.NODE_ENV === 'development';
+    
     const returnUrl = isTestMode 
       ? 'https://webhook.site/test-cashfree-return'
-      : `${API_BASE_URL}/api/payment/cashfree-return`;
-      
+      : isDevelopment
+        ? `${API_BASE_URL}/api/payment/cashfree-return`
+        : `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
+        
     const notifyUrl = isTestMode
       ? 'https://webhook.site/test-cashfree-webhook'
-      : `${API_BASE_URL}/api/payment/cashfree-webhook`;
+      : isDevelopment
+        ? `${API_BASE_URL}/api/payment/cashfree-webhook`
+        : `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
 
-    console.log('🔗 Using URLs:', { returnUrl, notifyUrl });
+    console.log('🔗 Using URLs:', { 
+      environment: process.env.NODE_ENV,
+      isTestMode,
+      returnUrl,
+      notifyUrl 
+    });
 
+    // ✅ VALIDATE URLs are HTTPS in production
+    if (!isTestMode && !isDevelopment) {
+      if (!returnUrl.startsWith('https://') || !notifyUrl.startsWith('https://')) {
+        throw new Error('Cashfree requires HTTPS URLs for return_url and notify_url in production');
+      }
+    }
     // ✅ CLEAN ORDER REQUEST DATA
     const requestData = {
       order_amount: orderAmount.toFixed(2),
@@ -602,6 +618,7 @@ export const testCashfreeConnectionEnhanced = async (req, res) => {
 };
 
 // Cashfree Return URL Handler
+// Cashfree Return URL Handler
 export const handleCashfreeReturn = async (req, res) => {
   try {
     const { order_id, order_status, payment_status, reference_id } = req.query;
@@ -613,7 +630,7 @@ export const handleCashfreeReturn = async (req, res) => {
       reference_id
     });
 
-    // Update transaction status based on callback
+    // Update transaction status
     if (order_id) {
       const transaction = await Transaction.findOne({ 
         $or: [
@@ -641,12 +658,19 @@ export const handleCashfreeReturn = async (req, res) => {
       }
     }
 
-    // Redirect to frontend success page
-    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=${order_status === 'PAID' ? 'success' : 'failed'}&transactionRefId=${order_id || ''}`);
+    // Use HTTPS for frontend redirect in production
+    const frontendBaseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://your-frontend-domain.com' 
+      : FRONTEND_BASE_URL;
+
+    res.redirect(`${frontendBaseUrl}/payment-success?status=${order_status === 'PAID' ? 'success' : 'failed'}&transactionRefId=${order_id || ''}`);
     
   } catch (error) {
     console.error('❌ Cashfree return handler error:', error);
-    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
+    const frontendBaseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://your-frontend-domain.com' 
+      : FRONTEND_BASE_URL;
+    res.redirect(`${frontendBaseUrl}/payment-return?status=error`);
   }
 };
 
