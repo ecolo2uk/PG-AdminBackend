@@ -179,6 +179,67 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
+export const debugEnpayIntegrationKeys = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🔍 DEEP DEBUG: Enpay Integration Keys for merchant:', merchantId);
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    // Get active account with DEEP population
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId')
+    .populate('connectorAccountId');
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
+
+    // Get fresh connector account data
+    const connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId);
+
+    res.json({
+      success: true,
+      debug: {
+        merchant: {
+          name: `${merchant.firstname} ${merchant.lastname}`,
+          mid: merchant.mid
+        },
+        activeAccount: {
+          _id: activeAccount._id,
+          hasIntegrationKeys: !!activeAccount.integrationKeys,
+          integrationKeys: activeAccount.integrationKeys,
+          integrationKeysType: typeof activeAccount.integrationKeys
+        },
+        connectorAccount: {
+          _id: connectorAccount?._id,
+          name: connectorAccount?.name,
+          hasIntegrationKeys: !!connectorAccount?.integrationKeys,
+          integrationKeys: connectorAccount?.integrationKeys,
+          integrationKeysType: typeof connectorAccount?.integrationKeys
+        },
+        recommendation: 'Check which location has the integration keys and update the code accordingly'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Deep debug error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 
 
 const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {

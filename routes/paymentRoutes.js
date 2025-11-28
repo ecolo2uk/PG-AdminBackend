@@ -19,7 +19,8 @@ import {
   testCashfreeConnectionEnhanced,
   debugCashfreeSetup,
   validatePaymentSession,
-  getTransactionByShortLink  // ✅ ADD THIS
+  getTransactionByShortLink ,
+   debugEnpayIntegrationKeys
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -57,5 +58,5 @@ router.get('/debug/credentials/:merchantId', debugCashfreeCredentials);
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
-
+router.get('/debug/enpay-keys/:merchantId', debugEnpayIntegrationKeys);
 export default router;
