@@ -691,17 +691,34 @@ export const handleCashfreeWebhook = async (req, res) => {
 };
 
 // Add this to your paymentLinkController.js
+// Add this debug function to check environment
 export const debugCashfreeSetup = async (req, res) => {
   try {
     const { merchantId } = req.params;
     
+    console.log('🔍 DEBUG: Checking Cashfree setup for merchant:', merchantId);
+
     const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
       status: 'Active'
     })
     .populate('connectorId', 'name')
     .populate('connectorAccountId');
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
 
     const connectorAccount = activeAccount.connectorAccountId;
     const integrationKeys = connectorAccount?.integrationKeys || {};
@@ -721,19 +738,38 @@ export const debugCashfreeSetup = async (req, res) => {
 
     res.json({
       success: true,
+      merchant: {
+        id: merchant._id,
+        name: `${merchant.firstname} ${merchant.lastname}`,
+        mid: merchant.mid
+      },
+      connector: {
+        name: activeAccount.connectorId?.name,
+        account: connectorAccount?.name,
+        terminalId: activeAccount.terminalId
+      },
       credentials: {
         clientId: clientId ? `${clientId.substring(0, 15)}...` : 'NOT FOUND',
         clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'NOT FOUND',
         type: isTestCredentials ? 'TEST' : isLiveCredentials ? 'LIVE' : 'UNKNOWN',
         environment: process.env.NODE_ENV || 'development'
       },
-      issue: isTestCredentials ? 
-        '⚠️ Using TEST credentials - Switch to LIVE credentials for production' :
-        '✅ Using LIVE credentials'
+      urls: {
+        apiBase: process.env.API_BASE_URL,
+        frontendBase: process.env.FRONTEND_URL
+      },
+      recommendation: isTestCredentials ? 
+        '⚠️ Switch to LIVE credentials for production' :
+        '✅ Using LIVE credentials for production'
     });
 
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Cashfree debug setup error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 

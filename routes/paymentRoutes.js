@@ -1,4 +1,4 @@
-// routes/paymentRoutes.js - Complete and organized version
+// routes/paymentRoutes.js - COMPLETE AND WORKING VERSION
 import express from 'express';
 import {
   generatePaymentLink,
@@ -17,7 +17,7 @@ import {
   handleCashfreeWebhook,
   checkCashfreeEnvironment,
   testCashfreeConnectionEnhanced,
-  debugCashfreeSetup
+  debugCashfreeSetup  // ✅ ADD THIS IMPORT
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -36,7 +36,7 @@ router.post('/cashfree/webhook', handleCashfreeWebhook);
 router.get('/cashfree/test/:merchantId', testCashfreeConnection);
 router.get('/cashfree/test-enhanced/:merchantId', testCashfreeConnectionEnhanced);
 router.get('/cashfree/check-environment/:merchantId', checkCashfreeEnvironment);
-router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);
+router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);  // ✅ ADD THIS ROUTE
 router.get('/cashfree/debug-credentials/:merchantId', debugCashfreeCredentials);
 
 // ==================== ENPAY SPECIFIC ROUTES ====================
