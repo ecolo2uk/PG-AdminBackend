@@ -1,4 +1,4 @@
-// routes/paymentRoutes.js - Fixed version
+// routes/paymentRoutes.js - Complete and organized version
 import express from 'express';
 import {
   generatePaymentLink,
@@ -16,28 +16,40 @@ import {
   handleCashfreeReturn,
   handleCashfreeWebhook,
   checkCashfreeEnvironment,
-  testCashfreeConnectionEnhanced
+  testCashfreeConnectionEnhanced,
+  debugCashfreeSetup
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
 
-// ✅ All routes
-router.get('/merchants', getMerchants);
-router.get('/methods', getPaymentMethods);
-router.get('/:merchantId/connector-accounts', getMerchantConnectors);
+// ==================== PAYMENT LINK GENERATION ====================
 router.post('/generate-link', generatePaymentLink);
+
+// ==================== MERCHANT & CONNECTOR ROUTES ====================
+router.get('/merchants', getMerchants);
+router.get('/merchants/:merchantId/connectors', getMerchantConnectors);
+router.get('/payment-methods', getPaymentMethods);
+
+// ==================== CASHFREE SPECIFIC ROUTES ====================
+router.get('/cashfree/return', handleCashfreeReturn);
+router.post('/cashfree/webhook', handleCashfreeWebhook);
+router.get('/cashfree/test/:merchantId', testCashfreeConnection);
+router.get('/cashfree/test-enhanced/:merchantId', testCashfreeConnectionEnhanced);
+router.get('/cashfree/check-environment/:merchantId', checkCashfreeEnvironment);
+router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);
+router.get('/cashfree/debug-credentials/:merchantId', debugCashfreeCredentials);
+
+// ==================== ENPAY SPECIFIC ROUTES ====================
+router.get('/enpay/test-direct', testEnpayDirect);
+router.get('/enpay/debug-credentials/:merchantId', debugEnpayCredentials);
+
+// ==================== DEBUG & TESTING ROUTES ====================
 router.get('/debug/connector/:merchantId', debugConnectorAccount);
-router.get('/debug/cashfree/:merchantId', debugCashfreeCredentials);
-router.get('/debug/enpay/:merchantId', debugEnpayCredentials);
-router.get('/test/cashfree/:merchantId', testCashfreeConnection);
-router.get('/test-enhanced/cashfree/:merchantId', testCashfreeConnectionEnhanced);
-router.get('/test-enpay-direct', testEnpayDirect);
+router.get('/debug/credentials/:merchantId', debugCashfreeCredentials);
+
+// ==================== PAYMENT PROCESSING ROUTES ====================
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
-// Cashfree specific routes
-router.get('/cashfree-return', handleCashfreeReturn);
-router.post('/cashfree-webhook', handleCashfreeWebhook);
-router.get('/check-cashfree-env/:merchantId', checkCashfreeEnvironment);
 
 export default router;

@@ -191,35 +191,36 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       } else if (typeof connectorAccount.integrationKeys === 'object') {
         integrationKeys = { ...connectorAccount.integrationKeys };
       }
-      
-      console.log('🔐 Extracted Integration Keys:', Object.keys(integrationKeys));
     }
 
-    // ✅ BETTER CREDENTIAL EXTRACTION
+    // ✅ IMPROVED CREDENTIAL EXTRACTION
     const clientId = integrationKeys['x-client-id'] || 
                     integrationKeys['client_id'] ||
-                    integrationKeys['X-Client-Id'];
+                    integrationKeys['X-Client-Id'] ||
+                    integrationKeys['x_client_id'];
                     
     const clientSecret = integrationKeys['x-client-secret'] || 
                         integrationKeys['client_secret'] ||
-                        integrationKeys['X-Client-Secret'];
+                        integrationKeys['X-Client-Secret'] ||
+                        integrationKeys['x_client_secret'];
                         
     const apiVersion = integrationKeys['x-api-version'] || 
                       integrationKeys['api_version'] || 
-                      '2023-08-01';
+                      integrationKeys['x_api_version'] ||
+                      '2022-09-01'; // Use older, more stable version
 
-    console.log('🔐 Credentials Status:', {
-      clientId: clientId ? `${clientId.substring(0, 8)}...` : 'MISSING',
-      clientSecret: clientSecret ? `${clientSecret.substring(0, 8)}...` : 'MISSING',
+    console.log('🔐 Cashfree Credentials Check:', {
+      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING',
+      clientSecret: clientSecret ? `${clientSecret.substring(0, 6)}...` : 'MISSING',
       apiVersion: apiVersion,
-      isTestCredentials: clientId ? clientId.startsWith('TEST') : 'UNKNOWN'
+      credentialType: clientId ? (clientId.startsWith('TEST') ? 'TEST' : 'LIVE') : 'UNKNOWN'
     });
 
     if (!clientId || !clientSecret) {
       throw new Error(`Missing Cashfree credentials. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
     }
 
-    // ✅ CORRECT ENVIRONMENT DETECTION
+    // ✅ CRITICAL FIX: Proper environment detection
     const isTestMode = clientId.startsWith('TEST');
     const cashfreeBaseURL = isTestMode 
       ? 'https://sandbox.cashfree.com/pg' 
@@ -235,21 +236,20 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       paymentsURL: paymentsBaseURL
     });
 
-    // ✅ SIMPLE PAYMENT METHODS MAPPING
-    const getCashfreePaymentMethods = (method) => {
-      const methods = {
-        upi: "upi",
-        card: "cc,dc", 
-        netbanking: "nb",
-        wallet: "wallet",
-        phonepe: "upi" // PhonePe UPI के लिए
-      };
-      return methods[method] || "upi"; // Default UPI
-    };
+    // ✅ FIXED: Use proper HTTPS URLs
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    
+    const returnUrl = isTestMode 
+      ? 'https://webhook.site/test-cashfree-return'
+      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
+        
+    const notifyUrl = isTestMode
+      ? 'https://webhook.site/test-cashfree-webhook'
+      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
 
-    const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
+    console.log('🔗 Final URLs:', { returnUrl, notifyUrl });
 
-    // ✅ ORDER DATA WITH PROPER VALIDATION
+    // Generate order data
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const orderId = `order_${timestamp}_${random}`;
@@ -260,34 +260,21 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Invalid amount. Minimum is 1 INR');
     }
 
-     const isDevelopment = process.env.NODE_ENV === 'development';
-    
-    const returnUrl = isTestMode 
-      ? 'https://webhook.site/test-cashfree-return'
-      : isDevelopment
-        ? `${API_BASE_URL}/api/payment/cashfree-return`
-        : `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
-        
-    const notifyUrl = isTestMode
-      ? 'https://webhook.site/test-cashfree-webhook'
-      : isDevelopment
-        ? `${API_BASE_URL}/api/payment/cashfree-webhook`
-        : `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
+    // Payment methods mapping
+    const getCashfreePaymentMethods = (method) => {
+      const methods = {
+        upi: "upi",
+        card: "cc,dc", 
+        netbanking: "nb",
+        wallet: "wallet",
+        phonepe: "upi"
+      };
+      return methods[method] || "upi";
+    };
 
-    console.log('🔗 Using URLs:', { 
-      environment: process.env.NODE_ENV,
-      isTestMode,
-      returnUrl,
-      notifyUrl 
-    });
+    const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
 
-    // ✅ VALIDATE URLs are HTTPS in production
-    if (!isTestMode && !isDevelopment) {
-      if (!returnUrl.startsWith('https://') || !notifyUrl.startsWith('https://')) {
-        throw new Error('Cashfree requires HTTPS URLs for return_url and notify_url in production');
-      }
-    }
-    // ✅ CLEAN ORDER REQUEST DATA
+    // ✅ SIMPLIFIED ORDER DATA (remove optional fields that might cause issues)
     const requestData = {
       order_amount: orderAmount.toFixed(2),
       order_currency: "INR",
@@ -296,25 +283,19 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         customer_id: merchant.mid || `cust_${timestamp}`,
         customer_phone: merchant.contact || "9876543210",
         customer_email: merchant.email || "customer@example.com",
-        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Test Customer"
+        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
       },
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
         payment_methods: cashfreeMethods
-      },
-      order_note: `Payment for ${merchant.company || merchant.firstname}`,
-      order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes
+      }
+      // Remove order_note and order_expiry_time temporarily to simplify
     };
 
-    console.log('📤 Cashfree API Request:', {
-      url: `${cashfreeBaseURL}/orders`,
-      orderId: orderId,
-      amount: orderAmount,
-      methods: cashfreeMethods
-    });
+    console.log('📤 Cashfree API Request to:', `${cashfreeBaseURL}/orders`);
 
-    // ✅ API CALL WITH BETTER ERROR HANDLING
+    // ✅ API CALL WITH BETTER HEADERS
     let response;
     try {
       response = await axios.post(
@@ -324,7 +305,7 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
           headers: {
             'Content-Type': 'application/json',
             'x-client-id': clientId.trim(),
-            'x-client-secret': clientSecret.trim(),
+            'x-client-secret': clientSecret.trim(), 
             'x-api-version': apiVersion,
             'Accept': 'application/json'
           },
@@ -332,50 +313,41 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         }
       );
 
-      console.log('✅ Cashfree API Response Status:', response.status);
-      console.log('✅ Cashfree API Response Data:', response.data);
+      console.log('✅ Cashfree API Success - Status:', response.status);
 
     } catch (apiError) {
       console.error('❌ Cashfree API Call Failed:', apiError.message);
       
       if (apiError.response) {
-        console.error('🔍 Cashfree API Error Details:', {
+        console.error('🔍 Cashfree API Error Response:', {
           status: apiError.response.status,
-          statusText: apiError.response.statusText,
           data: apiError.response.data
         });
 
-        // Handle specific Cashfree errors
+        // Specific error handling
         if (apiError.response.status === 401) {
-          throw new Error('Cashfree: Invalid credentials (Unauthorized) - Check Client ID/Secret');
+          throw new Error('Cashfree: Invalid credentials - Check your Client ID and Secret');
         } else if (apiError.response.status === 403) {
-          throw new Error('Cashfree: Account not activated or restricted. Please activate your Cashfree account.');
-        } else if (apiError.response.status === 400) {
-          const errorMsg = apiError.response.data?.message || 'Bad request';
-          throw new Error(`Cashfree: ${errorMsg}`);
-        } else if (apiError.response.status === 404) {
-          throw new Error('Cashfree: API endpoint not found - check environment (sandbox vs production)');
+          throw new Error('Cashfree: Account not activated or restricted');
+        } else if (apiError.response.data?.message) {
+          throw new Error(`Cashfree: ${apiError.response.data.message}`);
         }
       }
       
       throw new Error(`Cashfree API call failed: ${apiError.message}`);
     }
 
-    // ✅ VALIDATE RESPONSE
-    if (!response.data) {
-      throw new Error('Cashfree API returned empty response');
+    // Validate response
+    if (!response.data?.payment_session_id) {
+      console.error('❌ Invalid Cashfree response:', response.data);
+      throw new Error('Cashfree API did not return valid payment session');
     }
 
-    if (!response.data.payment_session_id) {
-      console.error('❌ No payment_session_id in response:', response.data);
-      throw new Error('Cashfree API did not return payment session ID');
-    }
-
-    // ✅ GENERATE PAYMENT LINK
+    // Generate payment link
     const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
 
-    console.log('🎯 Generated Payment Link:', paymentLink);
-    console.log('🔑 Payment Session ID:', response.data.payment_session_id);
+    console.log('🎯 Generated Payment Link Successfully');
+    console.log('🔑 Session ID:', response.data.payment_session_id.substring(0, 20) + '...');
 
     return {
       paymentLink: paymentLink,
@@ -392,13 +364,11 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
   } catch (error) {
     console.error('❌ Cashfree payment generation failed:', error);
     
-    // More specific error messages
-    if (error.message.includes('Unauthorized') || error.message.includes('401')) {
-      throw new Error('Cashfree: Invalid credentials - Please check your Client ID and Client Secret');
-    } else if (error.message.includes('Forbidden') || error.message.includes('403')) {
-      throw new Error('Cashfree: Account not activated - Please activate your Cashfree merchant account');
-    } else if (error.message.includes('client session is invalid')) {
-      throw new Error('Cashfree: Invalid session - Please check your credentials and account status');
+    // Improved error messages
+    if (error.message.includes('client session is invalid')) {
+      throw new Error('Cashfree: Invalid credentials or environment mismatch. Check if you are using TEST credentials in production or vice versa.');
+    } else if (error.message.includes('Unauthorized') || error.message.includes('401')) {
+      throw new Error('Cashfree: Invalid Client ID or Secret. Please verify your credentials.');
     }
     
     throw new Error(`Cashfree payment failed: ${error.message}`);
@@ -716,6 +686,53 @@ export const handleCashfreeWebhook = async (req, res) => {
     
   } catch (error) {
     console.error('❌ Cashfree webhook error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Add this to your paymentLinkController.js
+export const debugCashfreeSetup = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    const merchant = await User.findById(merchantId);
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name')
+    .populate('connectorAccountId');
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const integrationKeys = connectorAccount?.integrationKeys || {};
+    
+    let keysObject = {};
+    if (integrationKeys instanceof Map) {
+      keysObject = Object.fromEntries(integrationKeys);
+    } else if (typeof integrationKeys === 'object') {
+      keysObject = { ...integrationKeys };
+    }
+
+    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
+    const clientSecret = keysObject['x-client-secret'] || keysObject['client_secret'];
+    
+    const isTestCredentials = clientId && clientId.startsWith('TEST');
+    const isLiveCredentials = clientId && !clientId.startsWith('TEST');
+
+    res.json({
+      success: true,
+      credentials: {
+        clientId: clientId ? `${clientId.substring(0, 15)}...` : 'NOT FOUND',
+        clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'NOT FOUND',
+        type: isTestCredentials ? 'TEST' : isLiveCredentials ? 'LIVE' : 'UNKNOWN',
+        environment: process.env.NODE_ENV || 'development'
+      },
+      issue: isTestCredentials ? 
+        '⚠️ Using TEST credentials - Switch to LIVE credentials for production' :
+        '✅ Using LIVE credentials'
+    });
+
+  } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
