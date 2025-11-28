@@ -40,8 +40,6 @@ export const generatePaymentLink = async (req, res) => {
   try {
     const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
     
-    console.log('📦 Request Body:', JSON.stringify(req.body, null, 2));
-
     // Validation
     if (!merchantId || !amount) {
       return res.status(400).json({
@@ -51,10 +49,10 @@ export const generatePaymentLink = async (req, res) => {
     }
 
     const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum < 500 || amountNum > 10000) {
+    if (isNaN(amountNum)) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be between 500 and 10,000 INR'
+        message: 'Invalid amount'
       });
     }
 
@@ -67,26 +65,13 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    // ✅ CRITICAL FIX: Updated population to get ALL data
+    // Find Active Connector Account
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: new mongoose.Types.ObjectId(merchantId),
       status: 'Active'
     })
     .populate('connectorId')
-    .populate('connectorAccountId');
-
-    console.log('🔍 Active Account Found:', {
-      found: !!activeAccount,
-      accountId: activeAccount?._id,
-      connectorName: activeAccount?.connectorId?.name,
-      connectorAccountName: activeAccount?.connectorAccountId?.name,
-      // ✅ Check both locations for integrationKeys
-      hasDirectIntegrationKeys: !!activeAccount?.integrationKeys,
-      hasConnectorAccountIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys,
-      // ✅ CRITICAL: Log the actual integrationKeys structure
-      directIntegrationKeys: activeAccount?.integrationKeys,
-      connectorAccountIntegrationKeys: activeAccount?.connectorAccountId?.integrationKeys
-    });
+    .populate('connectorAccountId'); // Populating the reference to get global details if needed
 
     if (!activeAccount) {
       return res.status(404).json({
@@ -98,25 +83,29 @@ export const generatePaymentLink = async (req, res) => {
     const connectorName = activeAccount.connectorId?.name;
     console.log('🎯 Using Connector:', connectorName);
 
+    // Extract keys using helper function
+    const integrationKeys = extractIntegrationKeys(activeAccount);
+    
+    // Attach extracted keys to the account object for the generator functions
+    activeAccount.extractedKeys = integrationKeys;
+
     let paymentResult;
 
-    // ✅ FIXED: SUPPORT BOTH ENPAY AND CASHFREE
     if (connectorName === 'Cashfree') {
       paymentResult = await generateCashfreePayment({
         merchant,
         amount: amountNum,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount.connectorAccountId
+        connectorAccount: activeAccount
       });
     } else if (connectorName === 'Enpay') {
-      // ✅ CRITICAL FIX: Pass the MERCHANT connector account, not connectorAccountId
       paymentResult = await generateEnpayPayment({
         merchant,
         amount: amountNum,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount  // ✅ PASS THE WHOLE ACCOUNT
+        connectorAccount: activeAccount 
       });
     } else {
       return res.status(400).json({
@@ -163,24 +152,9 @@ export const generatePaymentLink = async (req, res) => {
       source: connectorName.toLowerCase()
     };
 
-    // Add connector-specific fields
-    if (connectorName === 'Cashfree') {
-      transactionData.cfOrderId = paymentResult.cfOrderId;
-      transactionData.cfPaymentLink = paymentResult.cfPaymentLink;
-      transactionData.paymentSessionId = paymentResult.paymentSessionId;
-    } else if (connectorName === 'Enpay') {
-      transactionData.enpayTxnId = paymentResult.enpayTxnId;
-      transactionData.enpayPaymentLink = paymentResult.enpayPaymentLink;
+    if (connectorName === 'Enpay') {
+        transactionData.enpayTxnId = paymentResult.enpayTxnId;
     }
-
-    // Encrypt payment payload for security
-    transactionData.encryptedPaymentPayload = encrypt(JSON.stringify({
-      amount: amountNum,
-      currency: currency,
-      merchantId: merchant._id,
-      connector: connectorName,
-      timestamp: new Date().toISOString()
-    }));
 
     // Save transaction
     const newTransaction = new Transaction(transactionData);
@@ -192,19 +166,11 @@ export const generatePaymentLink = async (req, res) => {
       success: true,
       paymentLink: paymentResult.paymentLink,
       transactionRefId: transactionData.transactionId,
-      txnRefId: transactionData.txnRefId,
-      shortLinkId: transactionData.shortLinkId,
-      connector: connectorName,
-      terminalId: activeAccount.terminalId || 'N/A',
-      merchantName: `${merchant.firstname} ${merchant.lastname}`,
-      amount: amountNum,
-      currency: currency,
       message: `${connectorName} payment link generated successfully`
     });
 
   } catch (error) {
     console.error(`❌ Payment link generation failed:`, error);
-    
     res.status(500).json({
       success: false,
       message: error.message,
@@ -214,95 +180,44 @@ export const generatePaymentLink = async (req, res) => {
 };
 
 
+
 const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
-    console.log('🚨🚨🚨 EMERGENCY DEBUG - Enpay Payment Generation 🚨🚨🚨');
+    console.log('🔹 Generating Enpay Payment');
     
-    // ✅ CRITICAL FIX: Access integrationKeys directly from connectorAccount
-    console.log('🔍 CONNECTOR ACCOUNT FULL OBJECT:', JSON.stringify({
-      _id: connectorAccount._id,
-      connectorId: connectorAccount.connectorId,
-      connectorAccountId: connectorAccount.connectorAccountId,
-      integrationKeys: connectorAccount.integrationKeys,
-      hasIntegrationKeys: !!connectorAccount.integrationKeys
-    }, null, 2));
+    // 1. Get Keys (Calculated in main function)
+    const keys = connectorAccount.extractedKeys || {};
+    
+    const merchantKey = keys['X-Merchant-Key'];
+    const merchantSecret = keys['X-Merchant-Secret'];
+    const merchantHashId = keys['merchantHashId'];
 
-    let integrationKeys = {};
-    
-    // ✅ FIXED: Get integrationKeys from the CORRECT location
-    if (connectorAccount?.integrationKeys) {
-      console.log('🎯 FOUND integrationKeys in connectorAccount.integrationKeys');
-      integrationKeys = connectorAccount.integrationKeys;
-    } 
-    else {
-      console.error('❌❌❌ NO INTEGRATION KEYS FOUND IN connectorAccount.integrationKeys! ❌❌❌');
-      console.log('Available properties in connectorAccount:', Object.keys(connectorAccount || {}));
+    // 2. Validate Keys
+    if (!merchantKey || !merchantSecret || !merchantHashId) {
+      console.error('❌ Missing Enpay Credentials. Found:', Object.keys(keys));
       throw new Error('No integration keys found for Enpay connector');
     }
 
-    // ✅ Convert if it's a Map or special object
-    if (integrationKeys instanceof Map) {
-      integrationKeys = Object.fromEntries(integrationKeys);
-      console.log('🔍 Converted Map to Object');
-    } else if (typeof integrationKeys === 'string') {
-      try {
-        integrationKeys = JSON.parse(integrationKeys);
-        console.log('🔍 Parsed JSON string to Object');
-      } catch (e) {
-        console.error('❌ Failed to parse integrationKeys string:', e);
-      }
-    }
-
-    console.log('🎯 FINAL INTEGRATION KEYS:', integrationKeys);
-    console.log('🎯 FINAL INTEGRATION KEYS KEYS:', Object.keys(integrationKeys));
-
-    // ✅ CRITICAL FIX: Use the CORRECT key names
-    const merchantKey = integrationKeys['X-Merchant-Key'];
-    const merchantSecret = integrationKeys['X-Merchant-Secret'];
-    const merchantHashId = integrationKeys['merchantHashId'];
-
-    console.log('🔐 ACTUAL CREDENTIAL VALUES:', {
-      'X-Merchant-Key': merchantKey,
-      'X-Merchant-Secret': merchantSecret ? '***' + merchantSecret.slice(-8) : 'MISSING',
-      'merchantHashId': merchantHashId
-    });
-
-    // ✅ Validate Enpay credentials
-    if (!merchantKey || !merchantSecret || !merchantHashId) {
-      console.error('❌ MISSING CREDENTIALS:', {
-        hasMerchantKey: !!merchantKey,
-        hasMerchantSecret: !!merchantSecret,
-        hasMerchantHashId: !!merchantHashId,
-        availableKeys: Object.keys(integrationKeys)
-      });
-      throw new Error('Missing required Enpay credentials');
-    }
-
-    // Generate unique IDs
+    // 3. Prepare IDs
     const txnRefId = generateTxnRefId();
     const merchantOrderId = generateMerchantOrderId();
-    const enpayTxnId = `ENP${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-    // Prepare Enpay API request
+    const enpayTxnId = `ENP${Date.now()}`;
+    
+    // 4. Construct Payload (MATCHING POSTMAN EXACTLY)
     const requestData = {
-      amount: amount.toFixed(2),
+      amount: String(amount.toFixed(2)), // Ensure string format "600.00"
       merchantHashId: merchantHashId,
       merchantOrderId: merchantOrderId,
-      merchantTxnId: txnRefId,
-      merchantVpa: `${merchant.mid?.toLowerCase()}@fino`,
+      merchantTrnId: txnRefId, // ✅ FIXED: Was merchantTxnId, must be merchantTrnId
+      merchantVpa: `${merchant.mid?.toLowerCase()}@fino`, // Ensure this VPA format is valid for your aggregator
       returnURL: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
       successURL: `${API_BASE_URL}/api/payment/success?transactionId=${txnRefId}`,
-      txnnNote: `Payment for ${merchant.company || merchant.firstname}`
+      txnNote: `Payment for Order` // ✅ FIXED: Was txnnNote, must be txnNote
     };
 
-    console.log('📤 Calling Enpay API with data:', {
-      amount: requestData.amount,
-      merchantHashId: requestData.merchantHashId,
-      merchantOrderId: requestData.merchantOrderId,
-      baseUrl: 'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway'
-    });
+    console.log('📤 Enpay Request Payload:', requestData);
 
-    // Call Enpay API
+    // 5. API Call
     const enpayResponse = await axios.post(
       'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
       requestData,
@@ -317,15 +232,16 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       }
     );
 
-    console.log('✅ Enpay API response:', enpayResponse.data);
+    console.log('✅ Enpay API Response:', enpayResponse.data);
 
+    // 6. Extract Link
     let paymentLink = '';
     if (enpayResponse.data && enpayResponse.data.details) {
       paymentLink = enpayResponse.data.details;
     } else if (enpayResponse.data && enpayResponse.data.paymentUrl) {
       paymentLink = enpayResponse.data.paymentUrl;
     } else {
-      throw new Error('Enpay API did not return payment link');
+      throw new Error('Enpay API response missing payment URL/details');
     }
 
     return {
@@ -333,28 +249,16 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       merchantOrderId: merchantOrderId,
       txnRefId: txnRefId,
       gatewayTxnId: enpayTxnId,
-      enpayTxnId: enpayTxnId,
-      enpayPaymentLink: paymentLink
+      enpayTxnId: enpayTxnId
     };
 
   } catch (error) {
-    console.error('❌ Enpay payment generation failed:', error);
-    
+    console.error('❌ Enpay Error:', error.message);
     if (error.response) {
-      console.error('Enpay API error response:', {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      });
-      
-      if (error.response.status === 401) {
-        throw new Error('Enpay: Invalid Merchant Key/Secret');
-      } else if (error.response.status === 400) {
-        throw new Error(`Enpay: Bad request - ${error.response.data?.message}`);
-      }
+       console.error('Enpay API Response Data:', error.response.data);
+       throw new Error(`Enpay Provider Error: ${error.response.data?.message || error.response.statusText}`);
     }
-    
-    throw new Error(`Enpay payment failed: ${error.message}`);
+    throw error;
   }
 };
 
@@ -738,7 +642,7 @@ const activeAccount = await MerchantConnectorAccount.findOne({
 })
 .populate('connectorId')
 .populate('connectorAccountId')
-.select('+integrationKeys'); // ✅ IMPORTANT: Include integrationKeys // ✅ IMPORTANT: Include integrationKeys
+.select('+integrationKeys'); // ✅ IMPORTANT: Include integrationKeys
 
 console.log('🔍 Active Account Found:', {
   found: !!activeAccount,
