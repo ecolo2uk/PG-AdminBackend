@@ -216,47 +216,77 @@ export const generatePaymentLink = async (req, res) => {
 // ✅ FIXED: ENPAY PAYMENT GENERATION
 const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
-    console.log('🔗 Generating Enpay Payment...');
+    console.log('🚨🚨🚨 EMERGENCY DEBUG - Enpay Payment Generation 🚨🚨🚨');
     
-    // ✅ CRITICAL: Enhanced debugging
-    console.log('🔍 CONNECTOR ACCOUNT DEBUG:', {
-      accountType: 'MerchantConnectorAccount',
-      accountId: connectorAccount?._id,
-      hasDirectIntegrationKeys: !!connectorAccount?.integrationKeys,
-      hasConnectorAccountIntegrationKeys: !!connectorAccount?.connectorAccountId?.integrationKeys
-    });
+    // ✅ CRITICAL: Log EVERYTHING about the connectorAccount
+    console.log('🔍 CONNECTOR ACCOUNT FULL OBJECT:', JSON.stringify(connectorAccount, null, 2));
+    
+    console.log('🔍 CONNECTOR ACCOUNT TYPE:', typeof connectorAccount);
+    console.log('🔍 CONNECTOR ACCOUNT KEYS:', Object.keys(connectorAccount || {}));
     
     let integrationKeys = {};
     
-    // ✅ CRITICAL FIX: Check BOTH possible locations for integrationKeys
+    // ✅ Check EVERY possible location for integrationKeys
     if (connectorAccount?.integrationKeys) {
-      // Case 1: integrationKeys are directly in merchant connector account
-      console.log('🔍 Using DIRECT integrationKeys from merchant connector account');
-      if (connectorAccount.integrationKeys instanceof Map) {
-        integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
-      } else if (typeof connectorAccount.integrationKeys === 'object') {
-        integrationKeys = { ...connectorAccount.integrationKeys };
+      console.log('🎯 FOUND integrationKeys in connectorAccount.integrationKeys');
+      integrationKeys = connectorAccount.integrationKeys;
+    } 
+    else if (connectorAccount?.connectorAccountId?.integrationKeys) {
+      console.log('🎯 FOUND integrationKeys in connectorAccount.connectorAccountId.integrationKeys');
+      integrationKeys = connectorAccount.connectorAccountId.integrationKeys;
+    }
+    else if (connectorAccount?.data?.integrationKeys) {
+      console.log('🎯 FOUND integrationKeys in connectorAccount.data.integrationKeys');
+      integrationKeys = connectorAccount.data.integrationKeys;
+    }
+    else {
+      console.error('❌❌❌ NO INTEGRATION KEYS FOUND ANYWHERE! ❌❌❌');
+      console.log('Available properties:', Object.keys(connectorAccount || {}));
+      if (connectorAccount?.connectorAccountId) {
+        console.log('connectorAccountId properties:', Object.keys(connectorAccount.connectorAccountId || {}));
       }
-    } else if (connectorAccount?.connectorAccountId?.integrationKeys) {
-      // Case 2: integrationKeys are in the referenced connector account
-      console.log('🔍 Using integrationKeys from connectorAccount reference');
-      const connectorAccKeys = connectorAccount.connectorAccountId.integrationKeys;
-      if (connectorAccKeys instanceof Map) {
-        integrationKeys = Object.fromEntries(connectorAccKeys);
-      } else if (typeof connectorAccKeys === 'object') {
-        integrationKeys = { ...connectorAccKeys };
-      }
-    } else {
-      console.error('❌ No integrationKeys found in either location!');
       throw new Error('No integration keys found for Enpay connector');
     }
 
-    // ✅ CRITICAL: Log the ACTUAL credentials being used
-    console.log('🔍 ACTUAL CREDENTIALS BEING USED:', {
-      merchantKey: integrationKeys['X-Merchant-Key'],
-      merchantSecret: integrationKeys['X-Merchant-Secret'] ? '***' + integrationKeys['X-Merchant-Secret'].slice(-8) : 'MISSING',
-      merchantHashId: integrationKeys['merchantHashId'],
-      baseUrl: integrationKeys['baseUrl']
+    // ✅ Log EXACT credentials being used
+    console.log('🔍 INTEGRATION KEYS OBJECT:', integrationKeys);
+    console.log('🔍 INTEGRATION KEYS TYPE:', typeof integrationKeys);
+    
+    // ✅ Convert if it's a Map or special object
+    if (integrationKeys instanceof Map) {
+      integrationKeys = Object.fromEntries(integrationKeys);
+      console.log('🔍 Converted Map to Object');
+    } else if (typeof integrationKeys === 'string') {
+      try {
+        integrationKeys = JSON.parse(integrationKeys);
+        console.log('🔍 Parsed JSON string to Object');
+      } catch (e) {
+        console.error('❌ Failed to parse integrationKeys string:', e);
+      }
+    }
+
+    console.log('🎯 FINAL INTEGRATION KEYS:', integrationKeys);
+    console.log('🎯 FINAL INTEGRATION KEYS KEYS:', Object.keys(integrationKeys));
+
+    // ✅ CRITICAL: Log the ACTUAL values
+    console.log('🔐 ACTUAL CREDENTIAL VALUES:', {
+      'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
+      'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'] ? '***' + integrationKeys['X-Merchant-Secret'].slice(-8) : 'MISSING',
+      'merchantHashId': integrationKeys['merchantHashId'],
+      'baseUrl': integrationKeys['baseUrl']
+    });
+
+    // ✅ Compare with working credentials
+    const workingKey = '0851439b-03df-4983-88d6-32399b1e4514';
+    const workingHash = 'MERCDSH51Y7CD4YJLFIZR8NF';
+    
+    console.log('🔍 CREDENTIALS COMPARISON:', {
+      merchantKeyMatch: integrationKeys['X-Merchant-Key'] === workingKey,
+      merchantHashMatch: integrationKeys['merchantHashId'] === workingHash,
+      actualKey: integrationKeys['X-Merchant-Key'],
+      expectedKey: workingKey,
+      actualHash: integrationKeys['merchantHashId'], 
+      expectedHash: workingHash
     });
 
     // Validate Enpay credentials
