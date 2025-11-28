@@ -20,7 +20,8 @@ import {
   debugCashfreeSetup,
   validatePaymentSession,
   getTransactionByShortLink ,
-   debugEnpayIntegrationKeys
+   debugEnpayIntegrationKeys,
+   debugIntegrationKeys
 } from '../controllers/paymentLinkController.js';
 
 const router = express.Router();
@@ -53,10 +54,11 @@ router.get('/enpay/debug-credentials/:merchantId', debugEnpayCredentials);
 // ==================== DEBUG & TESTING ROUTES ====================
 router.get('/debug/connector/:merchantId', debugConnectorAccount);
 router.get('/debug/credentials/:merchantId', debugCashfreeCredentials);
-
+router.get('/debug/integration-keys/:merchantId', debugIntegrationKeys);
+router.get('/debug/enpay-keys/:merchantId', debugEnpayIntegrationKeys);
 // ==================== PAYMENT PROCESSING ROUTES ====================
 router.get('/process/:shortLinkId', processShortLink);
 router.get('/success', handleSuccess);
 router.get('/return', handleReturn);
-router.get('/debug/enpay-keys/:merchantId', debugEnpayIntegrationKeys);
+// router.get('/debug/enpay-keys/:merchantId', debugEnpayIntegrationKeys);
 export default router;

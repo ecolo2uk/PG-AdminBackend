@@ -33,6 +33,46 @@ function generateMerchantOrderId() {
   return `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
 }
 
+// ✅ ADD THIS FUNCTION - Extract integration keys from connector account
+function extractIntegrationKeys(connectorAccount) {
+  console.log('🔍 Extracting integration keys from:', {
+    hasIntegrationKeys: !!connectorAccount?.integrationKeys,
+    hasConnectorAccountId: !!connectorAccount?.connectorAccountId?.integrationKeys,
+    connectorAccountId: connectorAccount?.connectorAccountId?._id
+  });
+
+  let integrationKeys = {};
+
+  // ✅ Check multiple possible locations for integration keys
+  if (connectorAccount?.integrationKeys && Object.keys(connectorAccount.integrationKeys).length > 0) {
+    console.log('🎯 Found keys in connectorAccount.integrationKeys');
+    integrationKeys = connectorAccount.integrationKeys;
+  } 
+  else if (connectorAccount?.connectorAccountId?.integrationKeys && Object.keys(connectorAccount.connectorAccountId.integrationKeys).length > 0) {
+    console.log('🎯 Found keys in connectorAccount.connectorAccountId.integrationKeys');
+    integrationKeys = connectorAccount.connectorAccountId.integrationKeys;
+  }
+  else {
+    console.log('⚠️ No integration keys found in standard locations');
+  }
+
+  // ✅ Convert if it's a Map or special object
+  if (integrationKeys instanceof Map) {
+    integrationKeys = Object.fromEntries(integrationKeys);
+    console.log('🔍 Converted Map to Object');
+  } else if (typeof integrationKeys === 'string') {
+    try {
+      integrationKeys = JSON.parse(integrationKeys);
+      console.log('🔍 Parsed JSON string to Object');
+    } catch (e) {
+      console.error('❌ Failed to parse integrationKeys string:', e);
+    }
+  }
+
+  console.log('🎯 Extracted Keys:', Object.keys(integrationKeys));
+  return integrationKeys;
+}
+
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
   console.log('🚀 generatePaymentLink STARTED');
@@ -84,8 +124,15 @@ export const generatePaymentLink = async (req, res) => {
     console.log('🎯 Using Connector:', connectorName);
 
     // Extract keys using helper function
-    const integrationKeys = extractIntegrationKeys(activeAccount);
-    
+   const integrationKeys = extractIntegrationKeys(activeAccount);
+console.log('🔑 Integration Keys Extracted:', {
+  keysCount: Object.keys(integrationKeys).length,
+  availableKeys: Object.keys(integrationKeys)
+});
+const accountWithKeys = {
+  ...activeAccount.toObject(), // Convert mongoose document to plain object
+  extractedKeys: integrationKeys
+};
     // Attach extracted keys to the account object for the generator functions
     activeAccount.extractedKeys = integrationKeys;
 
@@ -97,7 +144,7 @@ export const generatePaymentLink = async (req, res) => {
         amount: amountNum,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount
+        connectorAccount: accountWithKeys 
       });
     } else if (connectorName === 'Enpay') {
       paymentResult = await generateEnpayPayment({
@@ -105,7 +152,7 @@ export const generatePaymentLink = async (req, res) => {
         amount: amountNum,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount 
+        connectorAccount: accountWithKeys 
       });
     } else {
       return res.status(400).json({
