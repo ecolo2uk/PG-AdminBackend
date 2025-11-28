@@ -73,7 +73,7 @@ export const generatePaymentLink = async (req, res) => {
       status: 'Active'
     })
     .populate('connectorId')
-    .populate('connectorAccountId'); // Remove select to get all fields
+    .populate('connectorAccountId');
 
     console.log('🔍 Active Account Found:', {
       found: !!activeAccount,
@@ -82,7 +82,10 @@ export const generatePaymentLink = async (req, res) => {
       connectorAccountName: activeAccount?.connectorAccountId?.name,
       // ✅ Check both locations for integrationKeys
       hasDirectIntegrationKeys: !!activeAccount?.integrationKeys,
-      hasConnectorAccountIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
+      hasConnectorAccountIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys,
+      // ✅ CRITICAL: Log the actual integrationKeys structure
+      directIntegrationKeys: activeAccount?.integrationKeys,
+      connectorAccountIntegrationKeys: activeAccount?.connectorAccountId?.integrationKeys
     });
 
     if (!activeAccount) {
@@ -97,7 +100,6 @@ export const generatePaymentLink = async (req, res) => {
 
     let paymentResult;
 
-
     // ✅ FIXED: SUPPORT BOTH ENPAY AND CASHFREE
     if (connectorName === 'Cashfree') {
       paymentResult = await generateCashfreePayment({
@@ -108,12 +110,13 @@ export const generatePaymentLink = async (req, res) => {
         connectorAccount: activeAccount.connectorAccountId
       });
     } else if (connectorName === 'Enpay') {
+      // ✅ CRITICAL FIX: Pass the MERCHANT connector account, not connectorAccountId
       paymentResult = await generateEnpayPayment({
         merchant,
         amount: amountNum,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount.connectorAccountId
+        connectorAccount: activeAccount  // ✅ PASS THE WHOLE ACCOUNT
       });
     } else {
       return res.status(400).json({
