@@ -68,7 +68,7 @@ export const generatePaymentLink = async (req, res) => {
     }
 
     // ✅ CRITICAL FIX: Better population
-    const activeAccount = await MerchantConnectorAccount.findOne({
+     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: new mongoose.Types.ObjectId(merchantId),
       status: 'Active'
     })
@@ -78,12 +78,36 @@ export const generatePaymentLink = async (req, res) => {
       select: 'name integrationKeys terminalId currency'
     });
 
-    console.log('🔍 Active Account Found:', {
+    console.log('🔍 ACTIVE ACCOUNT SEARCH RESULT:', {
+      merchantId: merchantId,
       found: !!activeAccount,
+      activeAccountId: activeAccount?._id,
+      connectorId: activeAccount?.connectorId?._id,
       connectorName: activeAccount?.connectorId?.name,
-      connectorAccount: activeAccount?.connectorAccountId?.name,
-      hasIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
+      connectorAccountId: activeAccount?.connectorAccountId?._id,
+      connectorAccountName: activeAccount?.connectorAccountId?.name
     });
+
+    if (!activeAccount) {
+      // ✅ Log ALL available accounts for debugging
+      const allAccounts = await MerchantConnectorAccount.find({
+        merchantId: new mongoose.Types.ObjectId(merchantId)
+      })
+      .populate('connectorId')
+      .populate('connectorAccountId');
+      
+      console.log('🔍 ALL ACCOUNTS FOR MERCHANT:', allAccounts.map(acc => ({
+        id: acc._id,
+        connector: acc.connectorId?.name,
+        connectorAccount: acc.connectorAccountId?.name,
+        status: acc.status
+      })));
+
+      return res.status(404).json({
+        success: false,
+        message: 'No active payment connector found'
+      });
+    }
 
     if (!activeAccount) {
       return res.status(404).json({
