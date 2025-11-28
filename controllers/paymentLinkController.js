@@ -1644,20 +1644,27 @@ export const getMerchantConnectors = async (req, res) => {
 
 export const getPaymentMethods = async (req, res) => {
   try {
+    console.log('🔍 Fetching payment methods...');
+    
     const methods = [
       { id: "upi", name: "UPI" },
       { id: "card", name: "Credit/Debit Card" },
-      { id: "netbanking", name: "Net Banking" }
+      { id: "netbanking", name: "Net Banking" },
+      { id: "wallet", name: "Wallet" }
     ];
+
+    console.log('✅ Payment methods:', methods);
 
     res.json({
       success: true,
       methods: methods
     });
   } catch (error) {
+    console.error('❌ Error fetching payment methods:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payment methods'
+      message: 'Error fetching payment methods',
+      error: error.message
     });
   }
 };
