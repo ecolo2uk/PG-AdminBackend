@@ -362,16 +362,59 @@ export const generatePaymentLink = async (req, res) => {
 //   }
 // };
 
+// Add this debug function to check environment
+export const checkCashfreeEnvironment = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    const merchant = await User.findById(merchantId);
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name')
+    .populate('connectorAccountId');
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const integrationKeys = connectorAccount?.integrationKeys || {};
+    
+    let keysObject = {};
+    if (integrationKeys instanceof Map) {
+      keysObject = Object.fromEntries(integrationKeys);
+    } else if (typeof integrationKeys === 'object') {
+      keysObject = { ...integrationKeys };
+    }
+
+    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
+    
+    // Check if credentials are for test or production
+    const isTestCredentials = clientId && clientId.startsWith('TEST');
+    const isLiveCredentials = clientId && !clientId.startsWith('TEST');
+
+    res.json({
+      success: true,
+      environment: {
+        usingProductionAPI: true, // You're using api.cashfree.com (production)
+        credentialsType: isTestCredentials ? 'TEST' : isLiveCredentials ? 'LIVE' : 'UNKNOWN',
+        clientId: clientId ? `${clientId.substring(0, 15)}...` : 'Not Found',
+        recommendedAction: isTestCredentials ? 
+          'Use TEST environment: https://sandbox.cashfree.com' : 
+          'Credentials match production environment'
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
-    // ✅ CRITICAL FIX: Properly handle integrationKeys
     let integrationKeys = {};
     
     if (connectorAccount && connectorAccount.integrationKeys) {
-      console.log('🔐 Raw integrationKeys from database:', connectorAccount.integrationKeys);
-      
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
       } else if (typeof connectorAccount.integrationKeys === 'object') {
@@ -379,47 +422,51 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       }
     }
 
-    console.log('🔍 Integration Keys Found:', Object.keys(integrationKeys));
-
-    // ✅ Extract credentials with proper fallbacks
-    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
-    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'] || integrationKeys['X-Client-Secret'];
+    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'];
+    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'];
     const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
 
-    console.log('🔐 Credentials Status:', {
-      clientId: clientId ? 'PRESENT' : 'MISSING',
-      clientSecret: clientSecret ? 'PRESENT' : 'MISSING',
-      apiVersion: apiVersion
+    // ✅ CRITICAL FIX: Determine environment based on credentials
+    const isTestMode = clientId && clientId.startsWith('TEST');
+    
+    // ✅ Use Sandbox for TEST credentials, Production for LIVE credentials
+    const cashfreeBaseURL = isTestMode 
+      ? 'https://sandbox.cashfree.com/pg' 
+      : 'https://api.cashfree.com/pg';
+    
+    const paymentsBaseURL = isTestMode
+      ? 'https://sandbox.cashfree.com/order'
+      : 'https://payments.cashfree.com/order';
+
+    console.log('🎯 Cashfree Environment:', {
+      mode: isTestMode ? 'SANDBOX/TEST' : 'PRODUCTION/LIVE',
+      baseURL: cashfreeBaseURL,
+      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING'
     });
 
-    // ✅ Better validation
     if (!clientId || !clientSecret) {
-      const missing = [];
-      if (!clientId) missing.push('Client ID');
-      if (!clientSecret) missing.push('Client Secret');
-      throw new Error(`Missing Cashfree credentials: ${missing.join(', ')}`);
+      throw new Error(`Missing Cashfree credentials`);
     }
 
-    // ✅ Generate unique order ID
+    // Generate unique order ID
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const orderId = `order_${timestamp}_${random}`;
     const txnRefId = `txn_${timestamp}_${random}`;
     
-    // ✅ Validate amount
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount <= 0) {
       throw new Error('Invalid amount: ' + amount);
     }
 
-    // ✅ CRITICAL FIX: Use proper HTTPS URLs for Cashfree
-    const returnUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
-    const notifyUrl = `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
+    // ✅ Use appropriate return URLs
+    const returnUrl = isTestMode
+      ? `https://your-test-domain.com/api/payment/cashfree-return`
+      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
 
-    console.log('🔐 Using HTTPS URLs for Cashfree:', {
-      return_url: returnUrl,
-      notify_url: notifyUrl
-    });
+    const notifyUrl = isTestMode
+      ? `https://your-test-domain.com/api/payment/cashfree-webhook`
+      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
 
     const requestData = {
       order_amount: orderAmount.toFixed(2),
@@ -427,72 +474,48 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       order_id: orderId,
       customer_details: {
         customer_id: merchant.mid || `cust_${timestamp}`,
-        customer_phone: merchant.contact || "9999999999",
-        customer_email: merchant.email || "customer@example.com",
-        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
+        customer_phone: merchant.contact || "9999999998", // Changed last digit
+        customer_email: merchant.email || "test@example.com",
+        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Test Customer"
       },
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
-        payment_methods: "cc,dc,upi" // Specify allowed payment methods
+        payment_methods: "cc,dc,upi,netbanking,wallet" // All methods
       },
       order_note: `Payment for ${merchant.company || merchant.firstname}`,
-      order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes expiry
+      order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString()
     };
 
-    console.log('📤 Cashfree API Request Data:', JSON.stringify(requestData, null, 2));
+    console.log('📤 Cashfree API Request:', {
+      url: `${cashfreeBaseURL}/orders`,
+      data: requestData
+    });
 
-    // ✅ Enhanced API call
-    let response;
-    try {
-      console.log('🌐 Calling Cashfree API...');
-      
-      response = await axios.post(
-        'https://api.cashfree.com/pg/orders',
-        requestData,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-client-id': clientId.trim(),
-            'x-client-secret': clientSecret.trim(),
-            'x-api-version': apiVersion,
-            'Accept': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
-
-      console.log('✅ Cashfree API Response Status:', response.status);
-      console.log('✅ Cashfree API Response Data:', response.data);
-      
-    } catch (apiError) {
-      console.error('❌ Cashfree API Call Failed:', apiError.message);
-      
-      if (apiError.response) {
-        console.error('🔍 Cashfree API Error Response:', {
-          status: apiError.response.status,
-          statusText: apiError.response.statusText,
-          data: apiError.response.data
-        });
-        
-        if (apiError.response.status === 401) {
-          throw new Error('Cashfree: Invalid credentials (Unauthorized)');
-        } else if (apiError.response.status === 400) {
-          throw new Error(`Cashfree: Bad request - ${apiError.response.data?.message || 'Check request data'}`);
-        }
+    // ✅ Use correct base URL
+    const response = await axios.post(
+      `${cashfreeBaseURL}/orders`,
+      requestData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': clientId.trim(),
+          'x-client-secret': clientSecret.trim(),
+          'x-api-version': apiVersion,
+          'Accept': 'application/json'
+        },
+        timeout: 30000
       }
-      
-      throw new Error(`Cashfree API call failed: ${apiError.message}`);
-    }
+    );
 
-    // ✅ CRITICAL FIX: Proper payment link generation
+    console.log('✅ Cashfree API Response:', response.data);
+
     if (!response.data.payment_session_id) {
-      console.error('❌ No payment_session_id in response:', response.data);
       throw new Error('Cashfree API did not return payment session ID');
     }
 
-    // ✅ CORRECT Payment Link Format
-    const paymentLink = `https://payments.cashfree.com/order/#${response.data.payment_session_id}`;
+    // ✅ Use correct payments URL
+    const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
     
     console.log('🎯 Generated Payment Link:', paymentLink);
 
@@ -504,12 +527,188 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       gatewayOrderId: response.data.order_id,
       cfOrderId: response.data.cf_order_id,
       cfPaymentLink: paymentLink,
-      paymentSessionId: response.data.payment_session_id
+      paymentSessionId: response.data.payment_session_id,
+      environment: isTestMode ? 'sandbox' : 'production'
     };
 
   } catch (error) {
     console.error('❌ Cashfree payment generation failed:', error);
+    
+    if (error.response) {
+      console.error('🔍 Cashfree API Error Details:', {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      });
+    }
+    
     throw new Error(`Cashfree: ${error.message}`);
+  }
+};
+
+export const testCashfreeConnectionEnhanced = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+    
+    console.log('🧪 Enhanced Cashfree Test for merchant:', merchantId);
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Merchant not found'
+      });
+    }
+
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: merchantId,
+      status: 'Active'
+    })
+    .populate('connectorId', 'name')
+    .populate('connectorAccountId');
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active connector account found'
+      });
+    }
+
+    const connectorAccount = activeAccount.connectorAccountId;
+    const integrationKeys = connectorAccount?.integrationKeys || {};
+    
+    let keysObject = {};
+    if (integrationKeys instanceof Map) {
+      keysObject = Object.fromEntries(integrationKeys);
+    } else if (typeof integrationKeys === 'object') {
+      keysObject = { ...integrationKeys };
+    }
+
+    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
+    const clientSecret = keysObject['x-client-secret'] || keysObject['client_secret'];
+    const apiVersion = keysObject['x-api-version'] || keysObject['api_version'] || '2023-08-01';
+
+    // Determine environment
+    const isTestMode = clientId && clientId.startsWith('TEST');
+    const cashfreeBaseURL = isTestMode 
+      ? 'https://sandbox.cashfree.com/pg' 
+      : 'https://api.cashfree.com/pg';
+
+    console.log('🔍 Cashfree Environment Check:', {
+      clientId: clientId ? `${clientId.substring(0, 15)}...` : 'MISSING',
+      environment: isTestMode ? 'SANDBOX' : 'PRODUCTION',
+      baseURL: cashfreeBaseURL
+    });
+
+    if (!clientId || !clientSecret) {
+      return res.json({
+        success: false,
+        message: 'Missing Cashfree credentials',
+        debug: {
+          availableKeys: Object.keys(keysObject),
+          integrationKeys: keysObject
+        }
+      });
+    }
+
+    // Test order data
+    const testOrderData = {
+      order_amount: "1.00",
+      order_currency: "INR",
+      order_id: `test_${Date.now()}`,
+      customer_details: {
+        customer_id: "test_customer_001",
+        customer_phone: "9876543210", // Different phone number
+        customer_email: "testcustomer@example.com",
+        customer_name: "Test Customer"
+      },
+      order_meta: {
+        return_url: "https://example.com/return",
+        notify_url: "https://example.com/webhook",
+        payment_methods: "cc,dc,upi"
+      },
+      order_note: "Test payment connection"
+    };
+
+    console.log('📤 Testing Cashfree API with:', {
+      url: `${cashfreeBaseURL}/orders`,
+      environment: isTestMode ? 'SANDBOX' : 'PRODUCTION'
+    });
+
+    const testResponse = await axios.post(
+      `${cashfreeBaseURL}/orders`,
+      testOrderData,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': clientId.trim(),
+          'x-client-secret': clientSecret.trim(),
+          'x-api-version': apiVersion
+        },
+        timeout: 15000
+      }
+    );
+
+    console.log('✅ Cashfree Test Response:', testResponse.data);
+
+    if (testResponse.data && testResponse.data.payment_session_id) {
+      const paymentsBaseURL = isTestMode
+        ? 'https://sandbox.cashfree.com/order'
+        : 'https://payments.cashfree.com/order';
+        
+      const paymentLink = `${paymentsBaseURL}/#${testResponse.data.payment_session_id}`;
+      
+      res.json({
+        success: true,
+        message: `Cashfree ${isTestMode ? 'Sandbox' : 'Production'} connection successful!`,
+        paymentLink: paymentLink,
+        environment: isTestMode ? 'sandbox' : 'production',
+        orderId: testResponse.data.order_id,
+        cfOrderId: testResponse.data.cf_order_id,
+        paymentSessionId: testResponse.data.payment_session_id,
+        debug: {
+          credentialsType: isTestMode ? 'TEST' : 'LIVE',
+          baseURLUsed: cashfreeBaseURL
+        }
+      });
+    } else {
+      res.json({
+        success: false,
+        message: 'Cashfree API response missing payment session',
+        response: testResponse.data
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Enhanced Cashfree test failed:', error);
+    
+    let errorMessage = 'Cashfree connection test failed';
+    let errorDetails = {};
+
+    if (error.response) {
+      errorDetails = {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      };
+
+      if (error.response.status === 401) {
+        errorMessage = 'Invalid Cashfree credentials (Unauthorized) - Check Client ID/Secret';
+      } else if (error.response.status === 403) {
+        errorMessage = 'Cashfree account not activated or restricted';
+      } else if (error.response.status === 400) {
+        errorMessage = `Bad request to Cashfree API: ${error.response.data?.message}`;
+      } else if (error.response.status === 404) {
+        errorMessage = 'Cashfree API endpoint not found - check environment (sandbox vs production)';
+      }
+    }
+
+    res.json({
+      success: false,
+      message: errorMessage,
+      error: errorDetails,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
