@@ -28,8 +28,9 @@ router.post('/generate-link', generatePaymentLink);
 
 // ==================== MERCHANT & CONNECTOR ROUTES ====================
 router.get('/merchants', getMerchants);
-router.get('/merchants/:merchantId/connectors', getMerchantConnectors);
-router.get('/methods', getPaymentMethods); // ✅ हे route ADD करा
+// router.get('/merchants/:merchantId/connectors', getMerchantConnectors);
+router.get('/payment-methods', getPaymentMethods);
+router.get('/:merchantId/connector-accounts', getMerchantConnectors); // ✅ हे route ADD करा
 
 // ==================== CASHFREE SPECIFIC ROUTES ====================
 router.get('/cashfree/return', handleCashfreeReturn);
