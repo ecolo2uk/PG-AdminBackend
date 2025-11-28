@@ -35,8 +35,6 @@ function generateMerchantOrderId() {
   return `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
 }
 
-// controllers/paymentLinkController.js - CRITICAL FIX
-// controllers/paymentLinkController.js - CRITICAL FIX
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
   console.log('🚀 generatePaymentLink STARTED');
@@ -47,10 +45,10 @@ export const generatePaymentLink = async (req, res) => {
     console.log('📦 Request Body:', JSON.stringify(req.body, null, 2));
 
     // Validation
-    if (!merchantId || !amount || !paymentMethod) {
+    if (!merchantId || !amount) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: merchantId, amount, paymentMethod'
+        message: 'Missing required fields: merchantId, amount'
       });
     }
 
@@ -62,62 +60,50 @@ export const generatePaymentLink = async (req, res) => {
         message: 'Merchant not found'
       });
     }
-    console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
 
-    // ✅ CRITICAL FIX: Remove .lean() and fix population
+    // ✅ CRITICAL FIX: Better population
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: new mongoose.Types.ObjectId(merchantId),
       status: 'Active'
     })
     .populate('connectorId')
-    .populate('connectorAccountId'); // ✅ .lean() REMOVE करा
+    .populate({
+      path: 'connectorAccountId',
+      select: 'name integrationKeys terminalId currency'
+    });
 
-    console.log('🔍 Active Account Debug:', {
+    console.log('🔍 Active Account Found:', {
       found: !!activeAccount,
-      merchantId: merchantId,
-      connectorId: activeAccount?.connectorId?._id,
       connectorName: activeAccount?.connectorId?.name,
-      connectorAccountId: activeAccount?.connectorAccountId?._id,
-      connectorAccountName: activeAccount?.connectorAccountId?.name,
+      connectorAccount: activeAccount?.connectorAccountId?.name,
       hasIntegrationKeys: !!activeAccount?.connectorAccountId?.integrationKeys
     });
 
     if (!activeAccount) {
-      console.error('❌ No active connector account found for merchant:', merchantId);
       return res.status(404).json({
         success: false,
-        message: 'No active payment connector found for this merchant'
+        message: 'No active payment connector found'
       });
     }
 
     const connectorName = activeAccount.connectorId?.name;
-    console.log('🎯 Selected Connector:', connectorName);
+    console.log('🎯 Using Connector:', connectorName);
 
     let paymentResult;
 
-    // Generate payment link based on connector type
-    if (connectorName === 'Enpay') {
-      console.log('🔗 Using Enpay connector');
-      paymentResult = await generateEnpayPayment({
-        merchant,
-        amount,
-        paymentMethod,
-        paymentOption,
-        connectorAccount: activeAccount.connectorAccountId
-      });
-    } else if (connectorName === 'Cashfree') {
-      console.log('🔗 Using Cashfree connector');
+    // Generate payment based on connector
+    if (connectorName === 'Cashfree') {
       paymentResult = await generateCashfreePayment({
         merchant,
         amount,
         paymentMethod, 
         paymentOption,
-        connectorAccount: activeAccount.connectorAccountId // ✅ Directly pass the populated account
+        connectorAccount: activeAccount.connectorAccountId
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: 'Unsupported connector type: ' + connectorName
+        message: 'Unsupported connector: ' + connectorName
       });
     }
 
@@ -146,12 +132,12 @@ export const generatePaymentLink = async (req, res) => {
       connectorName: connectorName,
       terminalId: activeAccount.terminalId || 'N/A',
       
-      gatewayTxnId: paymentResult.gatewayTxnId || '',
+      gatewayTxnId: paymentResult.gatewayTxnId,
       gatewayPaymentLink: paymentResult.paymentLink,
-      gatewayOrderId: paymentResult.gatewayOrderId || '',
+      gatewayOrderId: paymentResult.gatewayOrderId,
       
-      cfOrderId: paymentResult.cfOrderId || '',
-      cfPaymentLink: paymentResult.cfPaymentLink || '',
+      cfOrderId: paymentResult.cfOrderId,
+      cfPaymentLink: paymentResult.cfPaymentLink,
       
       customerName: `${merchant.firstname} ${merchant.lastname}`,
       customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
@@ -184,13 +170,11 @@ export const generatePaymentLink = async (req, res) => {
 
   } catch (error) {
     console.error(`❌ Payment link generation failed:`, error);
-    console.error(`❌ Error Stack:`, error.stack);
     
     res.status(500).json({
       success: false,
       message: error.message,
-      errorType: 'GENERATION_ERROR',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      errorType: 'GENERATION_ERROR'
     });
   }
 };
@@ -412,43 +396,58 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
   try {
     console.log('🔗 Generating Cashfree Payment...');
     
+    // ✅ CRITICAL FIX: Better integration keys extraction
     let integrationKeys = {};
     
-    if (connectorAccount && connectorAccount.integrationKeys) {
+    if (connectorAccount?.integrationKeys) {
+      // Handle Mongoose Map and plain objects
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
       } else if (typeof connectorAccount.integrationKeys === 'object') {
         integrationKeys = { ...connectorAccount.integrationKeys };
       }
+      
+      console.log('🔐 Extracted Integration Keys:', Object.keys(integrationKeys));
     }
 
-    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'];
-    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'];
-    const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
+    // ✅ CRITICAL FIX: Check ALL possible key names
+    const clientId = integrationKeys['x-client-id'] || 
+                    integrationKeys['X-Client-Id'] || 
+                    integrationKeys['client_id'] ||
+                    integrationKeys['clientId'];
+                    
+    const clientSecret = integrationKeys['x-client-secret'] || 
+                        integrationKeys['X-Client-Secret'] || 
+                        integrationKeys['client_secret'] ||
+                        integrationKeys['clientSecret'];
+                        
+    const apiVersion = integrationKeys['x-api-version'] || 
+                      integrationKeys['X-Api-Version'] || 
+                      integrationKeys['api_version'] || 
+                      '2023-08-01';
 
-    // ✅ CRITICAL FIX: Determine environment based on credentials
-    const isTestMode = clientId && clientId.startsWith('TEST');
-    
-    // ✅ Use Sandbox for TEST credentials, Production for LIVE credentials
-    const cashfreeBaseURL = isTestMode 
-      ? 'https://sandbox.cashfree.com/pg' 
-      : 'https://api.cashfree.com/pg';
-    
-    const paymentsBaseURL = isTestMode
-      ? 'https://sandbox.cashfree.com/order'
-      : 'https://payments.cashfree.com/order';
-
-    console.log('🎯 Cashfree Environment:', {
-      mode: isTestMode ? 'SANDBOX/TEST' : 'PRODUCTION/LIVE',
-      baseURL: cashfreeBaseURL,
-      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING'
+    console.log('🔐 Final Credentials Check:', {
+      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING',
+      clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'MISSING',
+      apiVersion: apiVersion
     });
 
     if (!clientId || !clientSecret) {
-      throw new Error(`Missing Cashfree credentials`);
+      throw new Error(`Missing Cashfree credentials. Available keys: ${Object.keys(integrationKeys).join(', ')}`);
     }
 
-    // Generate unique order ID
+    // ✅ CRITICAL FIX: Environment detection
+    const isTestMode = clientId.startsWith('TEST');
+    const cashfreeBaseURL = isTestMode 
+      ? 'https://sandbox.cashfree.com/pg' 
+      : 'https://api.cashfree.com/pg';
+
+    console.log('🎯 Cashfree Environment:', {
+      mode: isTestMode ? 'SANDBOX' : 'PRODUCTION',
+      baseURL: cashfreeBaseURL
+    });
+
+    // Generate order data
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     const orderId = `order_${timestamp}_${random}`;
@@ -459,14 +458,14 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Invalid amount: ' + amount);
     }
 
-    // ✅ Use appropriate return URLs
+    // ✅ CRITICAL FIX: Use proper return URLs
     const returnUrl = isTestMode
-      ? `https://your-test-domain.com/api/payment/cashfree-return`
-      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-return`;
+      ? 'https://webhook.site/cashfree-return' // Test webhook
+      : 'https://your-production-domain.com/api/payment/cashfree-return';
 
     const notifyUrl = isTestMode
-      ? `https://your-test-domain.com/api/payment/cashfree-webhook`
-      : `https://pg-admin-backend.vercel.app/api/payment/cashfree-webhook`;
+      ? 'https://webhook.site/cashfree-webhook' // Test webhook  
+      : 'https://your-production-domain.com/api/payment/cashfree-webhook';
 
     const requestData = {
       order_amount: orderAmount.toFixed(2),
@@ -474,14 +473,14 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       order_id: orderId,
       customer_details: {
         customer_id: merchant.mid || `cust_${timestamp}`,
-        customer_phone: merchant.contact || "9999999998", // Changed last digit
-        customer_email: merchant.email || "test@example.com",
-        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Test Customer"
+        customer_phone: merchant.contact || "9876543210",
+        customer_email: merchant.email || "customer@example.com",
+        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
       },
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
-        payment_methods: "cc,dc,upi,netbanking,wallet" // All methods
+        payment_methods: "cc,dc,upi,netbanking,wallet"
       },
       order_note: `Payment for ${merchant.company || merchant.firstname}`,
       order_expiry_time: new Date(Date.now() + 30 * 60 * 1000).toISOString()
@@ -492,7 +491,7 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       data: requestData
     });
 
-    // ✅ Use correct base URL
+    // ✅ Make API call
     const response = await axios.post(
       `${cashfreeBaseURL}/orders`,
       requestData,
@@ -514,10 +513,12 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
       throw new Error('Cashfree API did not return payment session ID');
     }
 
-    // ✅ Use correct payments URL
+    // ✅ Generate payment link
+    const paymentsBaseURL = isTestMode
+      ? 'https://sandbox.cashfree.com/order'
+      : 'https://payments.cashfree.com/order';
+      
     const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
-    
-    console.log('🎯 Generated Payment Link:', paymentLink);
 
     return {
       paymentLink: paymentLink,
@@ -540,9 +541,18 @@ const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymen
         data: error.response.data,
         headers: error.response.headers
       });
+      
+      // Handle specific errors
+      if (error.response.status === 401) {
+        throw new Error('Cashfree: Invalid credentials - check Client ID/Secret');
+      } else if (error.response.status === 400) {
+        throw new Error(`Cashfree: Bad request - ${JSON.stringify(error.response.data)}`);
+      } else if (error.response.status === 403) {
+        throw new Error('Cashfree: Account restricted or not activated');
+      }
     }
     
-    throw new Error(`Cashfree: ${error.message}`);
+    throw new Error(`Cashfree payment failed: ${error.message}`);
   }
 };
 
