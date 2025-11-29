@@ -316,11 +316,12 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       amount: String(amount.toFixed(2)), // Ensure string format "600.00"
       merchantHashId: merchantHashId,
       merchantOrderId: merchantOrderId,
-      merchantTrnId: txnRefId, // ✅ FIXED: Was merchantTxnId, must be merchantTrnId
-      merchantVpa: `${merchant.mid?.toLowerCase()}@fino`, // Ensure this VPA format is valid for your aggregator
+      merchantTrnId: txnRefId,
+      // ✅ FIXED: Use the EXACT VPA from your working Postman example
+      merchantVpa: "enpay1.skypal@fino", // HARDCODE THE WORKING VPA
       returnURL: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
       successURL: `${API_BASE_URL}/api/payment/success?transactionId=${txnRefId}`,
-      txnNote: `Payment for Order` // ✅ FIXED: Was txnnNote, must be txnNote
+      txnNote: `Payment for Order`
     };
 
     console.log('📤 Enpay Request Payload:', requestData);
