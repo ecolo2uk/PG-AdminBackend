@@ -17,5 +17,32 @@ router.get('/merchants', getMerchantsForSettlement);
 router.post('/', createPayoutSettlement);
 router.get('/history', getSettlementHistory);
 router.get('/export', exportSettlementHistory);
+router.get('/history', auth, async (req, res) => {
+    try {
+        const { page = 1, limit = 10, merchantId, startDate, endDate } = req.query;
+        
+        // Your data fetching logic here
+        const settlements = await SettlementHistory.find({ /* your query */ })
+            .limit(limit * 1)
+            .skip((page - 1) * limit);
+            
+        const total = await SettlementHistory.countDocuments();
+        
+        res.json({
+            success: true,
+            data: settlements,
+            pagination: {
+                totalPages: Math.ceil(total / limit),
+                totalResults: total,
+                currentPage: page
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
 
 export default router;
