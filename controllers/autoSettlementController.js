@@ -8,8 +8,11 @@ import User from '../models/User.js';
 import cron from 'node-cron';
 
 // Create Auto Settlement
+// controllers/autoSettlementController.js - createAutoSettlement function
 export const createAutoSettlement = async (req, res) => {
   try {
+    console.log('🔧 CREATE AUTO SETTLEMENT REQUEST BODY:', req.body);
+    
     const {
       connectorId,
       connectorAccountId,
@@ -22,9 +25,20 @@ export const createAutoSettlement = async (req, res) => {
       minimumAmount = 100
     } = req.body;
 
+    // Validate required fields
+    if (!connectorId || !connectorAccountId || !startTime || !endTime || !cronRunTime) {
+      console.log('❌ MISSING REQUIRED FIELDS');
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
     // Validate connector exists
+    console.log('🔍 CHECKING CONNECTOR:', connectorId);
     const connector = await Connector.findById(connectorId);
     if (!connector) {
+      console.log('❌ CONNECTOR NOT FOUND');
       return res.status(404).json({
         success: false,
         message: 'Connector not found'
@@ -32,8 +46,10 @@ export const createAutoSettlement = async (req, res) => {
     }
 
     // Validate connector account exists
+    console.log('🔍 CHECKING CONNECTOR ACCOUNT:', connectorAccountId);
     const connectorAccount = await ConnectorAccount.findById(connectorAccountId);
     if (!connectorAccount) {
+      console.log('❌ CONNECTOR ACCOUNT NOT FOUND');
       return res.status(404).json({
         success: false,
         message: 'Connector account not found'
@@ -42,11 +58,14 @@ export const createAutoSettlement = async (req, res) => {
 
     // Validate connector supports payout
     if (!connector.isPayoutSupport) {
+      console.log('❌ CONNECTOR DOES NOT SUPPORT PAYOUT');
       return res.status(400).json({
         success: false,
         message: 'Selected connector does not support payouts'
       });
     }
+
+    console.log('✅ ALL VALIDATIONS PASSED, CREATING AUTO SETTLEMENT...');
 
     const autoSettlement = new AutoSettlement({
       name: `AutoSettlement_${Date.now()}`,
@@ -61,23 +80,21 @@ export const createAutoSettlement = async (req, res) => {
       settlementType,
       minimumAmount,
       status: isActive ? 'ACTIVE' : 'INACTIVE',
-      createdBy: req.user.id
+      createdBy: req.user?.id || 'system' // Add fallback
     });
 
     await autoSettlement.save();
     
-    // Schedule the auto settlement if active
-    if (isActive) {
-      scheduleAutoSettlement(autoSettlement);
-    }
+    console.log('✅ AUTO SETTLEMENT CREATED:', autoSettlement._id);
 
     res.status(201).json({
       success: true,
       message: 'Auto settlement created successfully',
       data: autoSettlement
     });
+
   } catch (error) {
-    console.error('Error creating auto settlement:', error);
+    console.error('❌ ERROR CREATING AUTO SETTLEMENT:', error);
     res.status(500).json({
       success: false,
       message: 'Error creating auto settlement',
