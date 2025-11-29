@@ -2,11 +2,11 @@ import mongoose from 'mongoose';
 import mongoosePaginate from 'mongoose-paginate-v2';
 
 const PayoutSettlementSchema = new mongoose.Schema({
-    settlementAmount: {
+    settlementAmount: { // Total amount for this specific settlement batch
         type: Number,
         required: true,
     },
-    settledBy: {
+    settledBy: { // Who initiated the settlement (e.g., admin user ID)
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: false,
@@ -15,14 +15,14 @@ const PayoutSettlementSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
-    merchantsSettled: [
+    merchantsSettled: [ // An array to track which merchants were part of this settlement batch
         {
             merchantId: {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'User',
                 required: true,
             },
-            merchantName: {
+            merchantName: { // Storing name here for denormalization and easier display
                 type: String,
                 required: true,
             },
@@ -30,7 +30,7 @@ const PayoutSettlementSchema = new mongoose.Schema({
                 type: String,
                 required: true,
             },
-            settledBalance: {
+            settledBalance: { // Amount specifically settled for THIS merchant in THIS batch
                 type: Number,
                 required: true,
                 default: 0
@@ -42,9 +42,7 @@ const PayoutSettlementSchema = new mongoose.Schema({
         enum: ['pending', 'completed', 'failed'],
         default: 'completed'
     }
-}, { 
-    timestamps: true 
-});
+}, { timestamps: true });
 
 PayoutSettlementSchema.plugin(mongoosePaginate);
 
