@@ -38,7 +38,7 @@ import settlementRoutes from './routes/settlementRoutes.js';
 import  autoSettlement  from './routes/autoSettlement.js';
 import settlementCalculatorRoutes from './routes/settlementCalculator.js';
 import bankSettlementRoutes from './routes/bankSettlement.js';
-
+import merchantFeeRoutes from './routes/merchantFee.js';
 
 dotenv.config();
 
@@ -84,7 +84,7 @@ app.use('/api/settlement', settlementRoutes);
 app.use('/api/auto-settlement', autoSettlement);
 app.use('/api/settlement-calculator', settlementCalculatorRoutes);
 app.use('/api/bank-settlement', bankSettlementRoutes);
-
+app.use('/api/merchant-fee', merchantFeeRoutes);
 // Basic root route
 app.get('/', (req, res) => {
   res.send('Welcome to the PG Admin API!');
