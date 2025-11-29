@@ -25,6 +25,7 @@ const executeWithRetry = async (operation, maxRetries = 3, baseDelay = 1000) => 
 };
 
 // Simple version without MongoDB transactions
+// controllers/payoutTransactionController.js - UPDATED createPayoutToMerchant
 export const createPayoutToMerchant = async (req, res) => {
   try {
     const {
@@ -52,6 +53,15 @@ export const createPayoutToMerchant = async (req, res) => {
       });
     }
 
+    // Get merchant details first
+    const merchant = await User.findById(merchantId);
+    if (!merchant || merchant.role !== 'merchant') {
+      return res.status(404).json({ 
+        success: false,
+        message: "Merchant not found" 
+      });
+    }
+
     // Update merchant balance with atomic operation
     const payoutAmount = parseFloat(amount);
     const updatedMerchant = await User.findOneAndUpdate(
@@ -73,26 +83,54 @@ export const createPayoutToMerchant = async (req, res) => {
       });
     }
 
-    // Create Payout Transaction
+    // Generate unique IDs
+    const payoutId = `P${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const utr = `UTR${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    // Create Payout Transaction with ALL required fields
     const newPayout = new PayoutTransaction({
+      // Required unique identifiers
+      payoutId,
+      transactionId,
+      utr,
+      
+      // Merchant information
       merchantId,
-      merchantName: updatedMerchant.company || `${updatedMerchant.firstname} ${updatedMerchant.lastname}`,
+      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      merchantEmail: merchant.email || customerEmail,
+      mid: merchant.mid || `MID${merchantId.toString().slice(-6)}`,
+      
+      // Settlement information
+      settlementAmount: payoutAmount,
+      
+      // Recipient bank details
       recipientBankName: bankName,
       recipientAccountNumber: accountNumber,
       recipientIfscCode: ifscCode,
       recipientAccountHolderName: accountHolderName,
       recipientAccountType: accountType || 'Saving',
+      
+      // Transaction details
       amount: payoutAmount,
       currency: 'INR',
       paymentMode: paymentMode || 'IMPS',
       transactionType: 'Debit',
       status: 'Success',
+      
+      // Customer information
       customerEmail,
       customerPhoneNumber,
-      remark,
+      
+      // Additional fields
+      remark: remark || "Payout transaction",
       responseUrl,
-      utr: generateUtr(),
-      transactionId: `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      
+      // Default fields for UI
+      accountNumber: "N/A",
+      connector: "Manual",
+      webhook: "N/A",
+      feeApplied: false,
     });
     
     const savedPayout = await newPayout.save();
@@ -116,10 +154,12 @@ export const createPayoutToMerchant = async (req, res) => {
       });
     }
     
+    // More detailed error information
     res.status(500).json({ 
       success: false,
       message: "Server error during payout creation",
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
