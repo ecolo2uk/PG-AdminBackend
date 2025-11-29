@@ -37,6 +37,7 @@ import syncRoutes from './routes/syncRoutes.js';
 import settlementRoutes from './routes/settlementRoutes.js';
 import  autoSettlement  from './routes/autoSettlement.js';
 import settlementCalculatorRoutes from './routes/settlementCalculator.js';
+import bankSettlementRoutes from './routes/bankSettlement.js';
 
 
 dotenv.config();
@@ -82,6 +83,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/settlement', settlementRoutes);
 app.use('/api/auto-settlement', autoSettlement);
 app.use('/api/settlement-calculator', settlementCalculatorRoutes);
+app.use('/api/bank-settlement', bankSettlementRoutes);
 
 // Basic root route
 app.get('/', (req, res) => {
