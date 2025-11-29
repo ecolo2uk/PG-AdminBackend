@@ -17,7 +17,7 @@ router.get('/merchants', getMerchantsForSettlement);
 router.post('/', createPayoutSettlement);
 router.get('/history', getSettlementHistory);
 router.get('/export', exportSettlementHistory);
-router.get('/history', auth, async (req, res) => {
+router.get('/history',  async (req, res) => {
     try {
         const { page = 1, limit = 10, merchantId, startDate, endDate } = req.query;
         
