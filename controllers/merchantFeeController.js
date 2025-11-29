@@ -42,10 +42,13 @@ export const createMerchantFee = async (req, res) => {
       });
     }
 
+    // Create merchant name from firstname and lastname
+    const merchantName = `${merchant.firstname} ${merchant.lastname}`.trim();
+
     // Create merchant fee
     const merchantFee = new MerchantFee({
       merchantId,
-      merchantName: merchant.name,
+      merchantName: merchantName,
       merchantEmail: merchant.email,
       amount: parseFloat(amount),
       feeType,
@@ -134,7 +137,7 @@ export const getMerchantFeeHistory = async (req, res) => {
     }
 
     const fees = await MerchantFee.find(query)
-      .populate('merchantId', 'name email companyName')
+      .populate('merchantId', 'firstname lastname email company')
       .sort({ appliedDate: -1, createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -178,13 +181,43 @@ export const getMerchantFeeHistory = async (req, res) => {
   }
 };
 
+// Get merchants list for dropdown
+export const getMerchantsList = async (req, res) => {
+  try {
+    const merchants = await User.find({ 
+      role: 'merchant',
+      status: 'Active'
+    }).select('firstname lastname email company');
+
+    // Format merchant data with full name
+    const formattedMerchants = merchants.map(merchant => ({
+      _id: merchant._id,
+      name: `${merchant.firstname} ${merchant.lastname}`.trim(),
+      email: merchant.email,
+      companyName: merchant.company || 'No Company'
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedMerchants
+    });
+  } catch (error) {
+    console.error('❌ Error fetching merchants list:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching merchants list',
+      error: error.message
+    });
+  }
+};
+
 // Get Merchant Fee by ID
 export const getMerchantFeeById = async (req, res) => {
   try {
     const { id } = req.params;
 
     const fee = await MerchantFee.findById(id)
-      .populate('merchantId', 'name email companyName phone address');
+      .populate('merchantId', 'firstname lastname email company phone');
 
     if (!fee) {
       return res.status(404).json({
@@ -269,27 +302,7 @@ export const deleteMerchantFee = async (req, res) => {
   }
 };
 
-// Get merchants list for dropdown
-export const getMerchantsList = async (req, res) => {
-  try {
-    const merchants = await User.find({ 
-      role: 'merchant',
-      status: 'active'
-    }).select('name email companyName');
 
-    res.status(200).json({
-      success: true,
-      data: merchants
-    });
-  } catch (error) {
-    console.error('❌ Error fetching merchants list:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching merchants list',
-      error: error.message
-    });
-  }
-};
 
 // Get fee statistics
 export const getFeeStatistics = async (req, res) => {
