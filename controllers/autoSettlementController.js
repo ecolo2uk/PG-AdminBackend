@@ -80,7 +80,7 @@ export const createAutoSettlement = async (req, res) => {
       settlementType,
       minimumAmount,
       status: isActive ? 'ACTIVE' : 'INACTIVE',
-      createdBy: req.user?.id || 'system' // Add fallback
+ createdBy: req.user?.id || req.user?._id 
     });
 
     await autoSettlement.save();
