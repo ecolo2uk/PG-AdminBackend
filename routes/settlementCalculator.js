@@ -1,4 +1,3 @@
-// routes/settlementCalculator.js
 import express from 'express';
 import {
   calculateSettlement,
@@ -10,7 +9,6 @@ import {
 
 const router = express.Router();
 
-// Remove auth temporarily for testing
 router.post('/calculate', calculateSettlement);
 router.get('/history', getCalculationHistory);
 router.get('/history/:id', getCalculationById);

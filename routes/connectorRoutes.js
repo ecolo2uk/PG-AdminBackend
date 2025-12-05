@@ -1,4 +1,3 @@
-// backend/routes/connectorRoutes.js
 import express from 'express';
 import {
     getAllConnectors,
@@ -7,7 +6,7 @@ import {
     updateConnector,
     deleteConnector,
     updateConnectorStatus
-} from '../controllers/connectorController.js'; // <--- ADDED .js HERE!
+} from '../controllers/connectorController.js'; 
 
 const router = express.Router();
 
@@ -16,6 +15,6 @@ router.get('/:id', getConnectorById);
 router.post('/', createConnector);
 router.put('/:id', updateConnector);
 router.delete('/:id', deleteConnector);
-router.patch('/:id/status', updateConnectorStatus); // For updating just the status
+router.patch('/:id/status', updateConnectorStatus); 
 
 export default router;

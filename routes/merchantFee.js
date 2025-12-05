@@ -1,4 +1,3 @@
-// routes/merchantFee.js
 import express from 'express';
 import {
   createMerchantFee,
@@ -12,7 +11,6 @@ import {
 
 const router = express.Router();
 
-// Merchant Fee Routes
 router.post('/create', createMerchantFee);
 router.get('/history', getMerchantFeeHistory);
 router.get('/statistics', getFeeStatistics);

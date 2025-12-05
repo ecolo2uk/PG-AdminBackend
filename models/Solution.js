@@ -1,19 +1,18 @@
-// backend/models/Solution.js
 import mongoose from 'mongoose';
 
 const SolutionSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    unique: true, // Solution names should ideally be unique
+    unique: true, 
   },
   iconClass: {
     type: String,
-    required: false, // Optional
+    required: false, 
   },
   iconImage: {
     type: String,
-    required: false, // Optional, can be a URL or reference to an uploaded image
+    required: false, 
   },
   createdAt: {
     type: Date,
@@ -25,7 +24,6 @@ const SolutionSchema = new mongoose.Schema({
   },
 });
 
-// Update the 'updatedAt' field automatically on save
 SolutionSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();

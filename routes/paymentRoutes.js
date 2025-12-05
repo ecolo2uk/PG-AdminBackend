@@ -1,5 +1,4 @@
-// routes/paymentRoutes.js - UPDATED VERSION
-import express from 'express';
+import express from "express";
 import {
   generatePaymentLink,
   getMerchants,
@@ -19,46 +18,49 @@ import {
   testCashfreeConnectionEnhanced,
   debugCashfreeSetup,
   validatePaymentSession,
-  getTransactionByShortLink ,
-   debugEnpayIntegrationKeys,
-   debugIntegrationKeys
-} from '../controllers/paymentLinkController.js';
+  getTransactionByShortLink,
+  debugEnpayIntegrationKeys,
+  debugIntegrationKeys,
+  enpayWebhook,
+  redirectAfterPayment,
+  checkTransactionStatus,
+  updateTransactions,
+} from "../controllers/paymentLinkController.js";
 
 const router = express.Router();
 
-// ==================== PAYMENT LINK GENERATION ====================
-router.post('/generate-link', generatePaymentLink);
+router.post("/generate-link", generatePaymentLink);
 
-// ==================== MERCHANT & CONNECTOR ROUTES ====================
-router.get('/merchants', getMerchants);
-router.get('/methods', getPaymentMethods);
-router.get('/:merchantId/connector-accounts', getMerchantConnectors);
+router.get("/merchants", getMerchants);
+router.get("/methods", getPaymentMethods);
+router.get("/:merchantId/connector-accounts", getMerchantConnectors);
 
-// ==================== TRANSACTION ROUTES ====================
-router.get('/transaction/:shortLinkId', getTransactionByShortLink); // ✅ ADD THIS
+router.get("/transaction/:shortLinkId", getTransactionByShortLink);
 
-// ==================== CASHFREE SPECIFIC ROUTES ====================
-router.get('/cashfree/return', handleCashfreeReturn);
-router.post('/cashfree/webhook', handleCashfreeWebhook);
-router.get('/cashfree/test/:merchantId', testCashfreeConnection);
-router.get('/cashfree/test-enhanced/:merchantId', testCashfreeConnectionEnhanced);
-router.get('/cashfree/check-environment/:merchantId', checkCashfreeEnvironment);
-router.get('/cashfree/debug-setup/:merchantId', debugCashfreeSetup);
-router.get('/cashfree/debug-credentials/:merchantId', debugCashfreeCredentials);
-router.get('/cashfree/validate-session/:sessionId', validatePaymentSession);
+router.get("/cashfree/return", handleCashfreeReturn);
+router.post("/cashfree/webhook", handleCashfreeWebhook);
+router.get("/cashfree/test/:merchantId", testCashfreeConnection);
+router.get(
+  "/cashfree/test-enhanced/:merchantId",
+  testCashfreeConnectionEnhanced
+);
+router.get("/cashfree/check-environment/:merchantId", checkCashfreeEnvironment);
+router.get("/cashfree/debug-setup/:merchantId", debugCashfreeSetup);
+router.get("/cashfree/debug-credentials/:merchantId", debugCashfreeCredentials);
+router.get("/cashfree/validate-session/:sessionId", validatePaymentSession);
 
-// ==================== ENPAY SPECIFIC ROUTES ====================
-router.get('/enpay/test-direct', testEnpayDirect);
-router.get('/enpay/debug-credentials/:merchantId', debugEnpayCredentials);
+router.get("/enpay/test-direct", testEnpayDirect);
+router.get("/enpay/debug-credentials/:merchantId", debugEnpayCredentials);
 
-// ==================== DEBUG & TESTING ROUTES ====================
-router.get('/debug/connector/:merchantId', debugConnectorAccount);
-router.get('/debug/credentials/:merchantId', debugCashfreeCredentials);
-router.get('/debug/integration-keys/:merchantId', debugIntegrationKeys);
-router.get('/debug/enpay-keys/:merchantId', debugEnpayIntegrationKeys);
-// ==================== PAYMENT PROCESSING ROUTES ====================
-router.get('/process/:shortLinkId', processShortLink);
-router.get('/success', handleSuccess);
-router.get('/return', handleReturn);
-// router.get('/debug/enpay-keys/:merchantId', debugEnpayIntegrationKeys);
+router.get("/debug/connector/:merchantId", debugConnectorAccount);
+router.get("/debug/credentials/:merchantId", debugCashfreeCredentials);
+router.get("/debug/integration-keys/:merchantId", debugIntegrationKeys);
+router.get("/debug/enpay-keys/:merchantId", debugEnpayIntegrationKeys);
+router.get("/process/:shortLinkId", processShortLink);
+router.get("/success", handleSuccess);
+router.get("/return", handleReturn);
+router.get("/status", checkTransactionStatus);
+router.get("/updateTransactions", updateTransactions);
+router.get("/redirect", redirectAfterPayment);
+router.get("/enpay-webhook", enpayWebhook);
 export default router;

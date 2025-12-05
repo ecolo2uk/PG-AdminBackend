@@ -1,4 +1,3 @@
-// routes/merchant.js - FIXED VERSION
 import express from 'express';
 import {
   getAllMerchants,
@@ -15,7 +14,7 @@ import {
   getMerchantDashboard,
   syncMerchantTransactions,
   getMerchantConnectors ,
-  debugRoutes // ✅ Make sure this is imported
+  debugRoutes
 } from '../controllers/merchantController.js';
 
 const router = express.Router();
@@ -28,11 +27,8 @@ router.put('/users/:id', updateMerchantUser);
 router.delete('/users/:id', deleteMerchantUser);
 router.get('/users/:id', getMerchantById);
 
-// ✅ THIS IS THE CRITICAL ROUTE - Make sure it's defined
 router.get('/:merchantId/connector-accounts', getMerchantConnectors);
-// In routes/merchant.js
 router.get('/debug/:merchantId', debugRoutes);
-// Other routes...
 router.get('/:merchantId', getMerchantDetails);
 router.put('/:merchantId/balance', updateMerchantBalance);
 router.get('/:merchantId/balance-history', getMerchantBalanceHistory);

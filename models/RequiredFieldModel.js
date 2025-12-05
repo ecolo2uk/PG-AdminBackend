@@ -14,12 +14,12 @@ const requiredFieldSchema = new mongoose.Schema({
     type: {
         type: String,
         required: true,
-        enum: ['String', 'Number', 'Boolean', 'Date', 'Email', 'Array'], // Example types
+        enum: ['String', 'Number', 'Boolean', 'Date', 'Email', 'Array'], 
     },
     validation: {
         type: String,
         trim: true,
-        default: 'nullable', // e.g., 'required', 'nullable|min:5|max:100', 'required|email'
+        default: 'nullable', 
     },
 }, {
     timestamps: true,

@@ -1,4 +1,3 @@
-// models/User.js - VERIFY THIS SCHEMA
 import mongoose from "mongoose";
 
 const UserSchema = new mongoose.Schema(
@@ -86,12 +85,7 @@ const UserSchema = new mongoose.Schema(
   }
 );
 
-// TEMPORARILY REMOVE THE POST-SAVE HOOK
-/*
-UserSchema.post('save', async function(doc) {
-  // Remove this to avoid duplicate merchant creation
-});
-*/
+
 
 const User = mongoose.model("User", UserSchema);
 export default User;

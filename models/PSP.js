@@ -16,5 +16,5 @@ const PSPSchema = new mongoose.Schema({
   createdOn: { type: Date, default: Date.now }
 });
 
-const PSP = mongoose.model("PSP", PSPSchema); // Stored in a variable
+const PSP = mongoose.model("PSP", PSPSchema); 
 export default PSP; 

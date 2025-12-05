@@ -1,11 +1,10 @@
-// routes/syncRoutes.js
 import express from 'express';
 import { 
   syncAllExistingTransactions, 
   syncMerchantTransactions,
   fixTransactionBalances,
   debugTransactions 
-} from '../controllers/transactionSyncController.js'; // ← Update import path
+} from '../controllers/transactionSyncController.js'; 
 
 const router = express.Router();
 

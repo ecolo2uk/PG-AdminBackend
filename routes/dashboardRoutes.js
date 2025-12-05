@@ -9,7 +9,6 @@ import {
   checkTransaction,
   debugTransactionStatus,
   checkPendingTransactions
-  // Assuming you want this too, it's defined in the controller
 } from '../controllers/dashboardController.js';
 
 const router = express.Router();
@@ -19,9 +18,9 @@ router.get('/merchant-transaction-summary', getMerchantTransactionSummary);
 router.get('/merchants', getAllMerchants);
 router.get('/transactions-by-merchant', getTransactionsByMerchantStatus);
 router.get('/sales-report', getSalesReport);
-router.get('/all-transactions', getAllTransactions); // Added route for getAllTransactions
-router.get('/checkTransaction', checkTransaction); // Added route for checkTransactionData
-// routes.js मध्ये
+router.get('/all-transactions', getAllTransactions); 
+router.get('/checkTransaction', checkTransaction); 
+
 router.get('/transactions/debug-status', debugTransactionStatus);
 router.get('/transactions/check-pending', checkPendingTransactions);
 export default router;

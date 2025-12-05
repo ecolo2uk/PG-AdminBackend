@@ -15,7 +15,6 @@ import {
 
 const router = express.Router();
 
-// Merchant Connector Accounts
 router.get('/:merchantId/connector-accounts', getMerchantConnectorAccounts);
 router.get('/:merchantId/available-connectors', getAvailableConnectors);
 router.post('/:merchantId/connector-accounts', addMerchantConnectorAccount);
@@ -23,7 +22,6 @@ router.put('/connector-accounts/:accountId', updateMerchantConnectorAccount);
 router.delete('/connector-accounts/:accountId', deleteMerchantConnectorAccount);
 router.patch('/connector-accounts/:accountId/primary', setPrimaryAccount);
 
-// Actions specific to an account (Set Limits, Change Rates, Show Rates, View Detail)
 router.get('/connector-accounts/:accountId/limits', getAccountLimits);
 router.put('/connector-accounts/:accountId/limits', updateAccountLimits);
 router.get('/connector-accounts/:accountId/rates', getAccountRates);

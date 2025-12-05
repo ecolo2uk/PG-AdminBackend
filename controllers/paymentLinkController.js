@@ -1,20 +1,22 @@
-import Transaction from '../models/Transaction.js';
-import { encrypt, decrypt } from '../utils/encryption.js';
-import crypto from 'crypto';
-import mongoose from 'mongoose';
-import axios from 'axios';
-import MerchantConnectorAccount from '../models/MerchantConnectorAccount.js';
-import ConnectorAccount from '../models/ConnectorAccount.js';
-import User from '../models/User.js';
+import Transaction from "../models/Transaction.js";
+// import { encrypt, decrypt } from '../utils/encryption.js';
+import crypto from "crypto";
+import mongoose from "mongoose";
+import axios from "axios";
+import MerchantConnectorAccount from "../models/MerchantConnectorAccount.js";
+import ConnectorAccount from "../models/ConnectorAccount.js";
+import User from "../models/User.js";
 const ObjectId = mongoose.Types.ObjectId;
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5000';
+const FRONTEND_BASE_URL =
+  process.env.FRONTEND_URL || "http://localhost:3000/admin";
+const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:5000";
 
 // Generate short ID utility
 function generateShortId(length = 10) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
   for (let i = 0; i < length; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
@@ -35,56 +37,69 @@ function generateMerchantOrderId() {
 
 // ✅ ADD THIS FUNCTION - Extract integration keys from connector account
 function extractIntegrationKeys(connectorAccount) {
-  console.log('🔍 Extracting integration keys from:', {
+  console.log("🔍 Extracting integration keys from:", {
     hasIntegrationKeys: !!connectorAccount?.integrationKeys,
-    hasConnectorAccountId: !!connectorAccount?.connectorAccountId?.integrationKeys,
-    connectorAccountId: connectorAccount?.connectorAccountId?._id
+    hasConnectorAccountId:
+      !!connectorAccount?.connectorAccountId?.integrationKeys,
+    connectorAccountId: connectorAccount?.connectorAccountId?._id,
   });
 
   let integrationKeys = {};
 
   // ✅ Check multiple possible locations for integration keys
-  if (connectorAccount?.integrationKeys && Object.keys(connectorAccount.integrationKeys).length > 0) {
-    console.log('🎯 Found keys in connectorAccount.integrationKeys');
+  if (
+    connectorAccount?.integrationKeys &&
+    Object.keys(connectorAccount.integrationKeys).length > 0
+  ) {
+    console.log("🎯 Found keys in connectorAccount.integrationKeys");
     integrationKeys = connectorAccount.integrationKeys;
-  } 
-  else if (connectorAccount?.connectorAccountId?.integrationKeys && Object.keys(connectorAccount.connectorAccountId.integrationKeys).length > 0) {
-    console.log('🎯 Found keys in connectorAccount.connectorAccountId.integrationKeys');
+  } else if (
+    connectorAccount?.connectorAccountId?.integrationKeys &&
+    Object.keys(connectorAccount.connectorAccountId.integrationKeys).length > 0
+  ) {
+    console.log(
+      "🎯 Found keys in connectorAccount.connectorAccountId.integrationKeys"
+    );
     integrationKeys = connectorAccount.connectorAccountId.integrationKeys;
-  }
-  else {
-    console.log('⚠️ No integration keys found in standard locations');
+  } else {
+    console.log("⚠️ No integration keys found in standard locations");
   }
 
   // ✅ Convert if it's a Map or special object
   if (integrationKeys instanceof Map) {
     integrationKeys = Object.fromEntries(integrationKeys);
-    console.log('🔍 Converted Map to Object');
-  } else if (typeof integrationKeys === 'string') {
+    console.log("🔍 Converted Map to Object");
+  } else if (typeof integrationKeys === "string") {
     try {
       integrationKeys = JSON.parse(integrationKeys);
-      console.log('🔍 Parsed JSON string to Object');
+      console.log("🔍 Parsed JSON string to Object");
     } catch (e) {
-      console.error('❌ Failed to parse integrationKeys string:', e);
+      console.error("❌ Failed to parse integrationKeys string:", e);
     }
   }
 
-  console.log('🎯 Extracted Keys:', Object.keys(integrationKeys));
+  console.log("🎯 Extracted Keys:", Object.keys(integrationKeys));
   return integrationKeys;
 }
 
 export const generatePaymentLink = async (req, res) => {
   const startTime = Date.now();
-  console.log('🚀 generatePaymentLink STARTED');
-  
+  console.log("🚀 generatePaymentLink STARTED");
+
   try {
-    const { merchantId, amount, currency = 'INR', paymentMethod, paymentOption } = req.body;
-    
+    const {
+      merchantId,
+      amount,
+      currency = "INR",
+      paymentMethod,
+      paymentOption,
+    } = req.body;
+
     // Validation
     if (!merchantId || !amount) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: merchantId, amount'
+        message: "Missing required fields: merchantId, amount",
       });
     }
 
@@ -92,7 +107,7 @@ export const generatePaymentLink = async (req, res) => {
     if (isNaN(amountNum)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid amount'
+        message: "Invalid amount",
       });
     }
 
@@ -101,63 +116,63 @@ export const generatePaymentLink = async (req, res) => {
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     // Find Active Connector Account
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: new mongoose.Types.ObjectId(merchantId),
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId')
-    .populate('connectorAccountId'); // Populating the reference to get global details if needed
+      .populate("connectorId")
+      .populate("connectorAccountId"); // Populating the reference to get global details if needed
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active payment connector found'
+        message: "No active payment connector found",
       });
     }
 
     const connectorName = activeAccount.connectorId?.name;
-    console.log('🎯 Using Connector:', connectorName);
+    console.log("🎯 Using Connector:", connectorName);
 
     // Extract keys using helper function
-   const integrationKeys = extractIntegrationKeys(activeAccount);
-console.log('🔑 Integration Keys Extracted:', {
-  keysCount: Object.keys(integrationKeys).length,
-  availableKeys: Object.keys(integrationKeys)
-});
-const accountWithKeys = {
-  ...activeAccount.toObject(), // Convert mongoose document to plain object
-  extractedKeys: integrationKeys
-};
+    const integrationKeys = extractIntegrationKeys(activeAccount);
+    console.log("🔑 Integration Keys Extracted:", {
+      keysCount: Object.keys(integrationKeys).length,
+      availableKeys: Object.keys(integrationKeys),
+    });
+    const accountWithKeys = {
+      ...activeAccount.toObject(), // Convert mongoose document to plain object
+      extractedKeys: integrationKeys,
+    };
     // Attach extracted keys to the account object for the generator functions
     activeAccount.extractedKeys = integrationKeys;
 
     let paymentResult;
 
-    if (connectorName === 'Cashfree') {
+    if (connectorName === "Cashfree") {
       paymentResult = await generateCashfreePayment({
         merchant,
         amount: amountNum,
-        paymentMethod, 
+        paymentMethod,
         paymentOption,
-        connectorAccount: accountWithKeys 
+        connectorAccount: accountWithKeys,
       });
-    } else if (connectorName === 'Enpay') {
+    } else if (connectorName === "Enpay") {
       paymentResult = await generateEnpayPayment({
         merchant,
         amount: amountNum,
-        paymentMethod, 
+        paymentMethod,
         paymentOption,
-        connectorAccount: accountWithKeys 
+        connectorAccount: accountWithKeys,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: 'Unsupported connector: ' + connectorName
+        message: "Unsupported connector: " + connectorName,
       });
     }
 
@@ -165,63 +180,70 @@ const accountWithKeys = {
     const transactionData = {
       transactionId: generateTransactionId(),
       merchantOrderId: paymentResult.merchantOrderId,
-      merchantHashId: merchant.mid,
-      merchantVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+      merchantHashId: integrationKeys.merchantHashId,
+      // merchantHashId: merchant.mid,
+      // merchantVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+      merchantVpa: integrationKeys.merchantVpa,
       txnRefId: paymentResult.txnRefId,
       shortLinkId: generateShortId(),
-      
+
       merchantId: merchant._id,
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      merchantName:
+        merchant.company || `${merchant.firstname} ${merchant.lastname}`,
       mid: merchant.mid,
-      
+
       amount: amountNum,
       currency: currency,
-      status: 'INITIATED',
+      status: "INITIATED",
       paymentMethod: paymentMethod,
       paymentOption: paymentOption,
       paymentUrl: paymentResult.paymentLink,
-      
+
       connectorId: activeAccount.connectorId?._id,
       connectorAccountId: activeAccount.connectorAccountId?._id,
       connectorName: connectorName,
-      terminalId: activeAccount.terminalId || 'N/A',
-      
+      terminalId: activeAccount.terminalId || "N/A",
+
       gatewayTxnId: paymentResult.gatewayTxnId,
       gatewayPaymentLink: paymentResult.paymentLink,
       gatewayOrderId: paymentResult.gatewayOrderId,
-      
+
       customerName: `${merchant.firstname} ${merchant.lastname}`,
       customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
-      customerContact: merchant.contact || '',
-      customerEmail: merchant.email || '',
-      
+      customerContact: merchant.contact || "",
+      customerEmail: merchant.email || "",
+
       txnNote: `Payment for ${merchant.company || merchant.firstname}`,
-      source: connectorName.toLowerCase()
+      source: connectorName.toLowerCase(),
     };
 
-    if (connectorName === 'Enpay') {
-        transactionData.enpayTxnId = paymentResult.enpayTxnId;
+    if (connectorName === "Enpay") {
+      transactionData.enpayTxnId = paymentResult.enpayTxnId;
     }
 
     // Save transaction
     const newTransaction = new Transaction(transactionData);
     await newTransaction.save();
 
-    console.log(`✅ ${connectorName} payment link generated in ${Date.now() - startTime}ms`);
+    console.log(
+      `✅ ${connectorName} payment link generated in ${
+        Date.now() - startTime
+      }ms`
+    );
 
     res.json({
       success: true,
       paymentLink: paymentResult.paymentLink,
       transactionRefId: transactionData.transactionId,
-      message: `${connectorName} payment link generated successfully`
+      txnRefId: transactionData.txnRefId,
+      message: `${connectorName} payment link generated successfully`,
     });
-
   } catch (error) {
     console.error(`❌ Payment link generation failed:`, error);
     res.status(500).json({
       success: false,
       message: error.message,
-      errorType: 'GENERATION_ERROR'
+      errorType: "GENERATION_ERROR",
     });
   }
 };
@@ -229,88 +251,99 @@ const accountWithKeys = {
 export const debugEnpayIntegrationKeys = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 DEEP DEBUG: Enpay Integration Keys for merchant:', merchantId);
+
+    console.log(
+      "🔍 DEEP DEBUG: Enpay Integration Keys for merchant:",
+      merchantId
+    );
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     // Get active account with DEEP population
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId')
-    .populate('connectorAccountId');
+      .populate("connectorId")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     // Get fresh connector account data
-    const connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId);
+    const connectorAccount = await ConnectorAccount.findById(
+      activeAccount.connectorAccountId
+    );
 
     res.json({
       success: true,
       debug: {
         merchant: {
           name: `${merchant.firstname} ${merchant.lastname}`,
-          mid: merchant.mid
+          mid: merchant.mid,
         },
         activeAccount: {
           _id: activeAccount._id,
           hasIntegrationKeys: !!activeAccount.integrationKeys,
           integrationKeys: activeAccount.integrationKeys,
-          integrationKeysType: typeof activeAccount.integrationKeys
+          integrationKeysType: typeof activeAccount.integrationKeys,
         },
         connectorAccount: {
           _id: connectorAccount?._id,
           name: connectorAccount?.name,
           hasIntegrationKeys: !!connectorAccount?.integrationKeys,
           integrationKeys: connectorAccount?.integrationKeys,
-          integrationKeysType: typeof connectorAccount?.integrationKeys
+          integrationKeysType: typeof connectorAccount?.integrationKeys,
         },
-        recommendation: 'Check which location has the integration keys and update the code accordingly'
-      }
+        recommendation:
+          "Check which location has the integration keys and update the code accordingly",
+      },
     });
-
   } catch (error) {
-    console.error('❌ Deep debug error:', error);
+    console.error("❌ Deep debug error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-
-const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
+const generateEnpayPayment = async ({
+  merchant,
+  amount,
+  paymentMethod,
+  paymentOption,
+  connectorAccount,
+}) => {
   try {
-    console.log('🔹 Generating Enpay Payment');
-    
+    console.log("🔹 Generating Enpay Payment");
+
     // 1. Get Keys (Calculated in main function)
     const keys = connectorAccount.extractedKeys || {};
-    
-    const merchantKey = keys['X-Merchant-Key'];
-    const merchantSecret = keys['X-Merchant-Secret'];
-    const merchantHashId = keys['merchantHashId'];
+
+    const merchantKey = keys["X-Merchant-Key"];
+    const merchantSecret = keys["X-Merchant-Secret"];
+    const merchantHashId = keys["merchantHashId"];
+    const merchantVpa = keys["merchantVpa"];
 
     // 2. Validate Keys
-    if (!merchantKey || !merchantSecret || !merchantHashId) {
-      console.error('❌ Missing Enpay Credentials. Found:', Object.keys(keys));
-      throw new Error('No integration keys found for Enpay connector');
+    if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
+      console.error("❌ Missing Enpay Credentials. Found:", Object.keys(keys));
+      throw new Error("No integration keys found for Enpay connector");
     }
 
     // 3. Prepare IDs
     const txnRefId = generateTxnRefId();
     const merchantOrderId = generateMerchantOrderId();
     const enpayTxnId = `ENP${Date.now()}`;
-    
+
     // 4. Construct Payload (MATCHING POSTMAN EXACTLY)
     const requestData = {
       amount: String(amount.toFixed(2)), // Ensure string format "600.00"
@@ -318,39 +351,39 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       merchantOrderId: merchantOrderId,
       merchantTrnId: txnRefId,
       // ✅ FIXED: Use the EXACT VPA from your working Postman example
-      merchantVpa: "enpay1.skypal@fino", // HARDCODE THE WORKING VPA
+      merchantVpa: merchantVpa, // HARDCODE THE WORKING VPA
       returnURL: `${API_BASE_URL}/api/payment/return?transactionId=${txnRefId}`,
       successURL: `${API_BASE_URL}/api/payment/success?transactionId=${txnRefId}`,
-      txnNote: `Payment for Order`
+      txnNote: `Payment for Order`,
     };
 
-    console.log('📤 Enpay Request Payload:', requestData);
+    console.log("📤 Enpay Request Payload:", requestData);
 
     // 5. API Call
     const enpayResponse = await axios.post(
-      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest",
       requestData,
       {
         headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': merchantKey,
-          'X-Merchant-Secret': merchantSecret,
-          'Accept': 'application/json'
+          "Content-Type": "application/json",
+          "X-Merchant-Key": merchantKey,
+          "X-Merchant-Secret": merchantSecret,
+          Accept: "application/json",
         },
-        timeout: 30000
+        timeout: 30000,
       }
     );
 
-    console.log('✅ Enpay API Response:', enpayResponse.data);
+    console.log("✅ Enpay API Response:", enpayResponse.data);
 
     // 6. Extract Link
-    let paymentLink = '';
+    let paymentLink = "";
     if (enpayResponse.data && enpayResponse.data.details) {
       paymentLink = enpayResponse.data.details;
     } else if (enpayResponse.data && enpayResponse.data.paymentUrl) {
       paymentLink = enpayResponse.data.paymentUrl;
     } else {
-      throw new Error('Enpay API response missing payment URL/details');
+      throw new Error("Enpay API response missing payment URL/details");
     }
 
     return {
@@ -358,87 +391,109 @@ const generateEnpayPayment = async ({ merchant, amount, paymentMethod, paymentOp
       merchantOrderId: merchantOrderId,
       txnRefId: txnRefId,
       gatewayTxnId: enpayTxnId,
-      enpayTxnId: enpayTxnId
+      enpayTxnId: enpayTxnId,
     };
-
   } catch (error) {
-    console.error('❌ Enpay Error:', error.message);
+    console.error("❌ Enpay Error:", error.message);
     if (error.response) {
-       console.error('Enpay API Response Data:', error.response.data);
-       throw new Error(`Enpay Provider Error: ${error.response.data?.message || error.response.statusText}`);
+      console.error("Enpay API Response Data:", error.response.data);
+      throw new Error(
+        `Enpay Provider Error: ${
+          error.response.data?.message || error.response.statusText
+        }`
+      );
     }
     throw error;
   }
 };
 
 // ✅ FIXED: CASHFREE PAYMENT GENERATION
-const generateCashfreePayment = async ({ merchant, amount, paymentMethod, paymentOption, connectorAccount }) => {
+const generateCashfreePayment = async ({
+  merchant,
+  amount,
+  paymentMethod,
+  paymentOption,
+  connectorAccount,
+}) => {
   try {
-    console.log('🔗 Generating Cashfree Payment...');
-    
+    console.log("🔗 Generating Cashfree Payment...");
+
     let integrationKeys = {};
-    
+
     // ✅ CRITICAL FIX: Better integration keys extraction
     if (connectorAccount?.integrationKeys) {
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
-      } else if (typeof connectorAccount.integrationKeys === 'object') {
+      } else if (typeof connectorAccount.integrationKeys === "object") {
         integrationKeys = { ...connectorAccount.integrationKeys };
-      } else if (typeof connectorAccount.integrationKeys === 'string') {
+      } else if (typeof connectorAccount.integrationKeys === "string") {
         try {
           integrationKeys = JSON.parse(connectorAccount.integrationKeys);
         } catch (e) {
-          console.error('❌ Failed to parse integrationKeys string:', e);
+          console.error("❌ Failed to parse integrationKeys string:", e);
         }
       }
     }
 
-    console.log('🔍 Cashfree Integration Keys:', Object.keys(integrationKeys));
+    console.log("🔍 Cashfree Integration Keys:", Object.keys(integrationKeys));
 
     // Extract credentials
-    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
-    const clientSecret = integrationKeys['x-client-secret'] || integrationKeys['client_secret'] || integrationKeys['X-Client-Secret'];
-    const apiVersion = integrationKeys['x-api-version'] || integrationKeys['api_version'] || '2023-08-01';
+    const clientId =
+      integrationKeys["x-client-id"] ||
+      integrationKeys["client_id"] ||
+      integrationKeys["X-Client-Id"];
+    const clientSecret =
+      integrationKeys["x-client-secret"] ||
+      integrationKeys["client_secret"] ||
+      integrationKeys["X-Client-Secret"];
+    const apiVersion =
+      integrationKeys["x-api-version"] ||
+      integrationKeys["api_version"] ||
+      "2023-08-01";
 
-    console.log('🔐 Cashfree Credentials Extracted:', {
-      clientId: clientId ? `${clientId.substring(0, 10)}...` : 'MISSING',
-      clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'MISSING',
-      apiVersion: apiVersion
+    console.log("🔐 Cashfree Credentials Extracted:", {
+      clientId: clientId ? `${clientId.substring(0, 10)}...` : "MISSING",
+      clientSecret: clientSecret
+        ? `${clientSecret.substring(0, 10)}...`
+        : "MISSING",
+      apiVersion: apiVersion,
     });
 
     if (!clientId || !clientSecret) {
-      throw new Error('Missing Cashfree credentials: Client ID or Secret');
+      throw new Error("Missing Cashfree credentials: Client ID or Secret");
     }
 
     // ✅ FIXED: ALWAYS USE PRODUCTION FOR LIVE CREDENTIALS
-    const cashfreeBaseURL = 'https://api.cashfree.com/pg';
-    const paymentsBaseURL = 'https://payments.cashfree.com/order';
+    const cashfreeBaseURL = "https://api.cashfree.com/pg";
+    const paymentsBaseURL = "https://payments.cashfree.com/order";
 
-    console.log('🎯 Using PRODUCTION Environment:', cashfreeBaseURL);
-  const returnUrl = process.env.NODE_ENV === 'production' 
-  ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`
-  : `${API_BASE_URL}/api/payment/cashfree/return`;
+    console.log("🎯 Using PRODUCTION Environment:", cashfreeBaseURL);
+    const returnUrl =
+      process.env.NODE_ENV === "production"
+        ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`
+        : `${API_BASE_URL}/api/payment/cashfree/return`;
 
-const notifyUrl = process.env.NODE_ENV === 'production'
-  ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`
-  : `${API_BASE_URL}/api/payment/cashfree/webhook`;
+    const notifyUrl =
+      process.env.NODE_ENV === "production"
+        ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`
+        : `${API_BASE_URL}/api/payment/cashfree/webhook`;
     // Generate order ID
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 1000);
     const orderId = `order_${timestamp}_${random}`;
-    
+
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount < 1) {
-      throw new Error('Invalid amount. Minimum is 1 INR');
+      throw new Error("Invalid amount. Minimum is 1 INR");
     }
 
     // ✅ FIXED: Simplified payment methods
     const getCashfreePaymentMethods = (method) => {
       const methods = {
         upi: "upi",
-        card: "cc,dc", 
+        card: "cc,dc",
         netbanking: "nb",
-        wallet: "wallet"
+        wallet: "wallet",
       };
       return methods[method] || "upi";
     };
@@ -454,78 +509,79 @@ const notifyUrl = process.env.NODE_ENV === 'production'
         customer_id: merchant.mid || `cust_${timestamp}`,
         customer_phone: merchant.contact || "9876543210",
         customer_email: merchant.email || "customer@example.com",
-        customer_name: `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer"
+        customer_name:
+          `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer",
       },
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
-        payment_methods: cashfreeMethods
-      }
+        payment_methods: cashfreeMethods,
+      },
     };
 
-    console.log('📤 Cashfree API Request:', {
+    console.log("📤 Cashfree API Request:", {
       orderId: orderId,
       amount: orderAmount,
-      methods: cashfreeMethods
+      methods: cashfreeMethods,
     });
 
     // ✅ API CALL
     let response;
     try {
-      response = await axios.post(
-        `${cashfreeBaseURL}/orders`,
-        requestData,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-client-id': clientId.trim(),
-            'x-client-secret': clientSecret.trim(),
-            'x-api-version': apiVersion,
-            'Accept': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+      response = await axios.post(`${cashfreeBaseURL}/orders`, requestData, {
+        headers: {
+          "Content-Type": "application/json",
+          "x-client-id": clientId.trim(),
+          "x-client-secret": clientSecret.trim(),
+          "x-api-version": apiVersion,
+          Accept: "application/json",
+        },
+        timeout: 30000,
+      });
 
-      console.log('✅ Cashfree API Response Status:', response.status);
-
+      console.log("✅ Cashfree API Response Status:", response.status);
     } catch (apiError) {
-      console.error('❌ Cashfree API Call Failed:', apiError.message);
-      
+      console.error("❌ Cashfree API Call Failed:", apiError.message);
+
       if (apiError.response) {
-        console.error('🔍 Cashfree API Error Details:', {
+        console.error("🔍 Cashfree API Error Details:", {
           status: apiError.response.status,
-          data: apiError.response.data
+          data: apiError.response.data,
         });
 
         if (apiError.response.status === 401) {
-          throw new Error('Cashfree: Invalid credentials - Check Client ID/Secret');
+          throw new Error(
+            "Cashfree: Invalid credentials - Check Client ID/Secret"
+          );
         } else if (apiError.response.status === 403) {
-          throw new Error('Cashfree: Account not activated or restricted');
+          throw new Error("Cashfree: Account not activated or restricted");
         } else if (apiError.response.data?.message) {
           throw new Error(`Cashfree: ${apiError.response.data.message}`);
         }
       }
-      
+
       throw new Error(`Cashfree API call failed: ${apiError.message}`);
     }
 
     // ✅ VALIDATE RESPONSE
     if (!response.data) {
-      throw new Error('Cashfree API returned empty response');
+      throw new Error("Cashfree API returned empty response");
     }
 
     if (!response.data.payment_session_id) {
-      console.error('❌ No payment_session_id in response:', response.data);
-      throw new Error('Cashfree API did not return payment session ID');
+      console.error("❌ No payment_session_id in response:", response.data);
+      throw new Error("Cashfree API did not return payment session ID");
     }
 
     // ✅ FIXED: Generate proper payment link
     const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
 
-    console.log('🎯 Generated Payment Link Successfully');
-    console.log('🔑 Payment Session ID:', response.data.payment_session_id.substring(0, 30) + '...');
-    console.log('🔗 Full Payment Link:', paymentLink);
+    console.log("🎯 Generated Payment Link Successfully");
+    console.log(
+      "🔑 Payment Session ID:",
+      response.data.payment_session_id.substring(0, 30) + "..."
+    );
+    console.log("🔗 Full Payment Link:", paymentLink);
 
     return {
       paymentLink: paymentLink,
@@ -536,19 +592,23 @@ const notifyUrl = process.env.NODE_ENV === 'production'
       cfOrderId: response.data.cf_order_id,
       cfPaymentLink: paymentLink,
       paymentSessionId: response.data.payment_session_id,
-      environment: 'production'
+      environment: "production",
     };
-
   } catch (error) {
-    console.error('❌ Cashfree payment generation failed:', error);
-    
+    console.error("❌ Cashfree payment generation failed:", error);
+
     // Improved error messages
-    if (error.message.includes('client session is invalid')) {
-      throw new Error('Cashfree: Session expired or invalid. Please try generating a new payment link.');
-    } else if (error.message.includes('Unauthorized') || error.message.includes('401')) {
-      throw new Error('Cashfree: Invalid Client ID or Secret');
+    if (error.message.includes("client session is invalid")) {
+      throw new Error(
+        "Cashfree: Session expired or invalid. Please try generating a new payment link."
+      );
+    } else if (
+      error.message.includes("Unauthorized") ||
+      error.message.includes("401")
+    ) {
+      throw new Error("Cashfree: Invalid Client ID or Secret");
     }
-    
+
     throw new Error(`Cashfree payment failed: ${error.message}`);
   }
 };
@@ -557,15 +617,15 @@ const notifyUrl = process.env.NODE_ENV === 'production'
 export const getTransactionByShortLink = async (req, res) => {
   try {
     const { shortLinkId } = req.params;
-    
-    console.log('🔍 Fetching transaction for shortLinkId:', shortLinkId);
+
+    console.log("🔍 Fetching transaction for shortLinkId:", shortLinkId);
 
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
-    
+
     if (!transaction) {
       return res.status(404).json({
         success: false,
-        message: 'Transaction not found'
+        message: "Transaction not found",
       });
     }
 
@@ -580,35 +640,38 @@ export const getTransactionByShortLink = async (req, res) => {
         connectorName: transaction.connectorName,
         status: transaction.status,
         paymentUrl: transaction.paymentUrl,
-        createdAt: transaction.createdAt
-      }
+        createdAt: transaction.createdAt,
+      },
     });
-
   } catch (error) {
-    console.error('❌ Error fetching transaction:', error);
+    console.error("❌ Error fetching transaction:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching transaction',
-      error: error.message
+      message: "Error fetching transaction",
+      error: error.message,
     });
   }
 };
 
- export const handleSuccess = async (req, res) => {
+export const handleSuccess = async (req, res) => {
   try {
     const { transactionId } = req.query;
-    console.log('✅ Success callback for:', transactionId);
+    console.log("✅ Success callback for:", transactionId);
 
     if (transactionId) {
       await Transaction.findOneAndUpdate(
         { transactionId: transactionId },
-        { status: 'SUCCESS', updatedAt: new Date() }
+        { status: "SUCCESS", updatedAt: new Date() }
       );
     }
 
-    res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${transactionId || ''}`);
+    res.redirect(
+      `${FRONTEND_BASE_URL}/payment-success?status=success&transactionRefId=${
+        transactionId || ""
+      }`
+    );
   } catch (error) {
-    console.error('Success callback error:', error);
+    console.error("Success callback error:", error);
     res.redirect(`${FRONTEND_BASE_URL}/payment-success?status=error`);
   }
 };
@@ -616,18 +679,22 @@ export const getTransactionByShortLink = async (req, res) => {
 export const handleReturn = async (req, res) => {
   try {
     const { transactionId, status } = req.query;
-    console.log('↩️ Return callback for:', transactionId, 'status:', status);
+    console.log("↩️ Return callback for:", transactionId, "status:", status);
 
     if (transactionId) {
       await Transaction.findOneAndUpdate(
         { transactionId: transactionId },
-        { status: status || 'FAILED', updatedAt: new Date() }
+        { status: status || "FAILED", updatedAt: new Date() }
       );
     }
 
-    res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=${status || 'failed'}&transactionRefId=${transactionId || ''}`);
+    res.redirect(
+      `${FRONTEND_BASE_URL}/payment-return?status=${
+        status || "failed"
+      }&transactionRefId=${transactionId || ""}`
+    );
   } catch (error) {
-    console.error('Return callback error:', error);
+    console.error("Return callback error:", error);
     res.redirect(`${FRONTEND_BASE_URL}/payment-return?status=error`);
   }
 };
@@ -635,13 +702,13 @@ export const handleReturn = async (req, res) => {
 export const getMerchantConnectors = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 Fetching connector accounts for merchant:', merchantId);
+
+    console.log("🔍 Fetching connector accounts for merchant:", merchantId);
 
     if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid merchant ID'
+        message: "Invalid merchant ID",
       });
     }
 
@@ -649,42 +716,47 @@ export const getMerchantConnectors = async (req, res) => {
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
-    console.log('🔄 Fetching connector accounts from database...');
+    console.log("🔄 Fetching connector accounts from database...");
 
     const connectorAccounts = await MerchantConnectorAccount.find({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name connectorType description')
-    .populate('connectorAccountId', 'name currency integrationKeys terminalId')
-    .select('terminalId industry percentage isPrimary status createdAt')
-    .sort({ isPrimary: -1, createdAt: -1 });
+      .populate("connectorId", "name connectorType description")
+      .populate(
+        "connectorAccountId",
+        "name currency integrationKeys terminalId"
+      )
+      .select("terminalId industry percentage isPrimary status createdAt")
+      .sort({ isPrimary: -1, createdAt: -1 });
 
-    console.log(`✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchant.firstname} ${merchant.lastname}`);
+    console.log(
+      `✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchant.firstname} ${merchant.lastname}`
+    );
 
-    const formattedAccounts = connectorAccounts.map(account => {
+    const formattedAccounts = connectorAccounts.map((account) => {
       const connector = account.connectorId || {};
       const connectorAcc = account.connectorAccountId || {};
-      
+
       return {
         _id: account._id,
-        terminalId: account.terminalId || connectorAcc.terminalId || 'N/A',
-        connector: connector.name || 'Unknown',
-        connectorName: connector.name || 'Unknown',
-        connectorType: connector.connectorType || 'Payment',
-        assignedAccount: connectorAcc.name || 'Unknown',
-        accountName: connectorAcc.name || 'Unknown',
-        currency: connectorAcc.currency || 'INR',
-        industry: account.industry || 'General',
+        terminalId: account.terminalId || connectorAcc.terminalId || "N/A",
+        connector: connector.name || "Unknown",
+        connectorName: connector.name || "Unknown",
+        connectorType: connector.connectorType || "Payment",
+        assignedAccount: connectorAcc.name || "Unknown",
+        accountName: connectorAcc.name || "Unknown",
+        currency: connectorAcc.currency || "INR",
+        industry: account.industry || "General",
         percentage: account.percentage || 100,
         isPrimary: account.isPrimary || false,
-        status: account.status || 'Active',
+        status: account.status || "Active",
         integrationKeys: connectorAcc.integrationKeys || {},
-        createdAt: account.createdAt
+        createdAt: account.createdAt,
       };
     });
 
@@ -694,46 +766,45 @@ export const getMerchantConnectors = async (req, res) => {
       merchantInfo: {
         name: `${merchant.firstname} ${merchant.lastname}`,
         mid: merchant.mid,
-        email: merchant.email
-      }
+        email: merchant.email,
+      },
     });
-
   } catch (error) {
-    console.error('❌ Error fetching merchant connectors from database:', error);
+    console.error(
+      "❌ Error fetching merchant connectors from database:",
+      error
+    );
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching connector accounts from database',
-      error: error.message
+      message: "Server error while fetching connector accounts from database",
+      error: error.message,
     });
   }
 };
-
-
 
 // Add this to your controller
 export const validatePaymentSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    
+
     // Quick validation - if session exists and is recent
-    const transaction = await Transaction.findOne({ 
+    const transaction = await Transaction.findOne({
       paymentSessionId: sessionId,
-      createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) } // 15 minutes
+      createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) }, // 15 minutes
     });
-    
+
     if (!transaction) {
       return res.json({
         valid: false,
-        message: 'Payment session expired or invalid'
+        message: "Payment session expired or invalid",
       });
     }
-    
+
     res.json({
       valid: true,
       transactionId: transaction.transactionId,
-      amount: transaction.amount
+      amount: transaction.amount,
     });
-    
   } catch (error) {
     res.status(500).json({ valid: false, error: error.message });
   }
@@ -743,74 +814,78 @@ export const validatePaymentSession = async (req, res) => {
 export const checkCashfreeEnvironment = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
+
     const merchant = await User.findById(merchantId);
-const activeAccount = await MerchantConnectorAccount.findOne({
-  merchantId: new mongoose.Types.ObjectId(merchantId),
-  status: 'Active'
-})
-.populate('connectorId')
-.populate('connectorAccountId')
-.select('+integrationKeys'); // ✅ IMPORTANT: Include integrationKeys
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: new mongoose.Types.ObjectId(merchantId),
+      status: "Active",
+    })
+      .populate("connectorId")
+      .populate("connectorAccountId")
+      .select("+integrationKeys"); // ✅ IMPORTANT: Include integrationKeys
 
-console.log('🔍 Active Account Found:', {
-  found: !!activeAccount,
-  accountId: activeAccount?._id,
-  connectorName: activeAccount?.connectorId?.name,
-  // ✅ Check the correct location for integrationKeys
-  hasIntegrationKeys: !!activeAccount?.integrationKeys,
-  integrationKeys: activeAccount?.integrationKeys
-});
-if (!activeAccount) {
-  return res.status(404).json({
-    success: false,
-    message: 'No active payment connector found'
-  });
-}
+    console.log("🔍 Active Account Found:", {
+      found: !!activeAccount,
+      accountId: activeAccount?._id,
+      connectorName: activeAccount?.connectorId?.name,
+      // ✅ Check the correct location for integrationKeys
+      hasIntegrationKeys: !!activeAccount?.integrationKeys,
+      integrationKeys: activeAccount?.integrationKeys,
+    });
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: "No active payment connector found",
+      });
+    }
 
+    const connectorAccount = await ConnectorAccount.findById(
+      activeAccount.connectorAccountId
+    ).lean();
+    if (!connectorAccount) {
+      return res.status(404).json({
+        success: false,
+        message: "Connector account not found",
+      });
+    }
 
-
-    const connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId).lean();
-if (!connectorAccount) {
-  return res.status(404).json({
-    success: false,
-    message: 'Connector account not found'
-  });
-}
-
-
-console.log('🔍 Fresh Connector Account Data:', {
-  name: connectorAccount.name,
-  integrationKeysType: typeof connectorAccount.integrationKeys,
-  integrationKeysCount: connectorAccount.integrationKeys ? Object.keys(connectorAccount.integrationKeys).length : 0
-});
+    console.log("🔍 Fresh Connector Account Data:", {
+      name: connectorAccount.name,
+      integrationKeysType: typeof connectorAccount.integrationKeys,
+      integrationKeysCount: connectorAccount.integrationKeys
+        ? Object.keys(connectorAccount.integrationKeys).length
+        : 0,
+    });
     const integrationKeys = connectorAccount?.integrationKeys || {};
-    
+
     let keysObject = {};
     if (integrationKeys instanceof Map) {
       keysObject = Object.fromEntries(integrationKeys);
-    } else if (typeof integrationKeys === 'object') {
+    } else if (typeof integrationKeys === "object") {
       keysObject = { ...integrationKeys };
     }
 
-    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
-    
+    const clientId = keysObject["x-client-id"] || keysObject["client_id"];
+
     // Check if credentials are for test or production
-    const isTestCredentials = clientId && clientId.startsWith('TEST');
-    const isLiveCredentials = clientId && !clientId.startsWith('TEST');
+    const isTestCredentials = clientId && clientId.startsWith("TEST");
+    const isLiveCredentials = clientId && !clientId.startsWith("TEST");
 
     res.json({
       success: true,
       environment: {
         usingProductionAPI: true,
-        credentialsType: isTestCredentials ? 'TEST' : isLiveCredentials ? 'LIVE' : 'UNKNOWN',
-        clientId: clientId ? `${clientId.substring(0, 15)}...` : 'Not Found',
-        recommendedAction: isTestCredentials ? 
-          'Use TEST environment: https://sandbox.cashfree.com' : 
-          'Credentials match production environment'
-      }
+        credentialsType: isTestCredentials
+          ? "TEST"
+          : isLiveCredentials
+          ? "LIVE"
+          : "UNKNOWN",
+        clientId: clientId ? `${clientId.substring(0, 15)}...` : "Not Found",
+        recommendedAction: isTestCredentials
+          ? "Use TEST environment: https://sandbox.cashfree.com"
+          : "Credentials match production environment",
+      },
     });
-
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -820,71 +895,79 @@ console.log('🔍 Fresh Connector Account Data:', {
 export const debugIntegrationKeys = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 DEBUG: Checking integration keys for merchant:', merchantId);
+
+    console.log(
+      "🔍 DEBUG: Checking integration keys for merchant:",
+      merchantId
+    );
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     // Get active account with proper population
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId')
-    .populate('connectorAccountId')
-    .lean();
+      .populate("connectorId")
+      .populate("connectorAccountId")
+      .lean();
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     // Get fresh connector account data
-    const connectorAccount = await ConnectorAccount.findById(activeAccount.connectorAccountId).lean();
+    const connectorAccount = await ConnectorAccount.findById(
+      activeAccount.connectorAccountId
+    ).lean();
 
     let integrationKeys = {};
-    let keysSource = 'unknown';
-    
+    let keysSource = "unknown";
+
     if (connectorAccount?.integrationKeys) {
       if (connectorAccount.integrationKeys instanceof Map) {
         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
-        keysSource = 'map';
-      } else if (typeof connectorAccount.integrationKeys === 'object') {
+        keysSource = "map";
+      } else if (typeof connectorAccount.integrationKeys === "object") {
         integrationKeys = { ...connectorAccount.integrationKeys };
-        keysSource = 'object';
-      } else if (typeof connectorAccount.integrationKeys === 'string') {
+        keysSource = "object";
+      } else if (typeof connectorAccount.integrationKeys === "string") {
         try {
           integrationKeys = JSON.parse(connectorAccount.integrationKeys);
-          keysSource = 'string_json';
+          keysSource = "string_json";
         } catch (e) {
           integrationKeys = { raw_string: connectorAccount.integrationKeys };
-          keysSource = 'string_raw';
+          keysSource = "string_raw";
         }
       }
     }
 
-    const clientId = integrationKeys['x-client-id'] || integrationKeys['client_id'] || integrationKeys['X-Client-Id'];
-    const isTest = clientId && clientId.startsWith('TEST');
-    const isLive = clientId && !clientId.startsWith('TEST');
+    const clientId =
+      integrationKeys["x-client-id"] ||
+      integrationKeys["client_id"] ||
+      integrationKeys["X-Client-Id"];
+    const isTest = clientId && clientId.startsWith("TEST");
+    const isLive = clientId && !clientId.startsWith("TEST");
 
     res.json({
       success: true,
       debug: {
         merchant: {
           name: `${merchant.firstname} ${merchant.lastname}`,
-          mid: merchant.mid
+          mid: merchant.mid,
         },
         connector: {
           name: activeAccount.connectorId?.name,
-          account: connectorAccount?.name
+          account: connectorAccount?.name,
         },
         integrationKeys: {
           source: keysSource,
@@ -893,28 +976,29 @@ export const debugIntegrationKeys = async (req, res) => {
           extractedType: typeof integrationKeys,
           keysCount: Object.keys(integrationKeys).length,
           allKeys: Object.keys(integrationKeys),
-          values: integrationKeys
+          values: integrationKeys,
         },
         credentials: {
-          clientId: clientId ? `${clientId.substring(0, 15)}...` : 'NOT FOUND',
-          clientSecret: integrationKeys['x-client-secret'] ? 'PRESENT' : 'MISSING',
-          environment: isTest ? 'SANDBOX' : isLive ? 'PRODUCTION' : 'UNKNOWN',
+          clientId: clientId ? `${clientId.substring(0, 15)}...` : "NOT FOUND",
+          clientSecret: integrationKeys["x-client-secret"]
+            ? "PRESENT"
+            : "MISSING",
+          environment: isTest ? "SANDBOX" : isLive ? "PRODUCTION" : "UNKNOWN",
           isTest: isTest,
-          isLive: isLive
+          isLive: isLive,
         },
-        recommendation: isTest ? 
-          '⚠️ Using TEST credentials - Switch to LIVE for production' :
-          isLive ? 
-          '✅ Using LIVE credentials - Transactions should appear in production dashboard' :
-          '❓ Cannot determine environment'
-      }
+        recommendation: isTest
+          ? "⚠️ Using TEST credentials - Switch to LIVE for production"
+          : isLive
+          ? "✅ Using LIVE credentials - Transactions should appear in production dashboard"
+          : "❓ Cannot determine environment",
+      },
     });
-
   } catch (error) {
-    console.error('❌ Integration keys debug error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    console.error("❌ Integration keys debug error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 };
@@ -922,65 +1006,67 @@ export const debugIntegrationKeys = async (req, res) => {
 export const testCashfreeConnectionEnhanced = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🧪 Enhanced Cashfree Test for merchant:', merchantId);
+
+    console.log("🧪 Enhanced Cashfree Test for merchant:", merchantId);
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     const connectorAccount = activeAccount.connectorAccountId;
     const integrationKeys = connectorAccount?.integrationKeys || {};
-    
+
     let keysObject = {};
     if (integrationKeys instanceof Map) {
       keysObject = Object.fromEntries(integrationKeys);
-    } else if (typeof integrationKeys === 'object') {
+    } else if (typeof integrationKeys === "object") {
       keysObject = { ...integrationKeys };
     }
 
-    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
-    const clientSecret = keysObject['x-client-secret'] || keysObject['client_secret'];
-    const apiVersion = keysObject['x-api-version'] || keysObject['api_version'] || '2023-08-01';
+    const clientId = keysObject["x-client-id"] || keysObject["client_id"];
+    const clientSecret =
+      keysObject["x-client-secret"] || keysObject["client_secret"];
+    const apiVersion =
+      keysObject["x-api-version"] || keysObject["api_version"] || "2023-08-01";
 
     // Determine environment
-    const isTestMode = clientId && clientId.startsWith('TEST');
-    const cashfreeBaseURL = isTestMode 
-      ? 'https://sandbox.cashfree.com/pg' 
-      : 'https://api.cashfree.com/pg';
+    const isTestMode = clientId && clientId.startsWith("TEST");
+    const cashfreeBaseURL = isTestMode
+      ? "https://sandbox.cashfree.com/pg"
+      : "https://api.cashfree.com/pg";
 
-    console.log('🔍 Cashfree Environment Check:', {
-      clientId: clientId ? `${clientId.substring(0, 15)}...` : 'MISSING',
-      environment: isTestMode ? 'SANDBOX' : 'PRODUCTION',
-      baseURL: cashfreeBaseURL
+    console.log("🔍 Cashfree Environment Check:", {
+      clientId: clientId ? `${clientId.substring(0, 15)}...` : "MISSING",
+      environment: isTestMode ? "SANDBOX" : "PRODUCTION",
+      baseURL: cashfreeBaseURL,
     });
 
     if (!clientId || !clientSecret) {
       return res.json({
         success: false,
-        message: 'Missing Cashfree credentials',
+        message: "Missing Cashfree credentials",
         debug: {
           availableKeys: Object.keys(keysObject),
-          integrationKeys: keysObject
-        }
+          integrationKeys: keysObject,
+        },
       });
     }
 
@@ -993,19 +1079,19 @@ export const testCashfreeConnectionEnhanced = async (req, res) => {
         customer_id: "test_customer_001",
         customer_phone: "9876543210",
         customer_email: "testcustomer@example.com",
-        customer_name: "Test Customer"
+        customer_name: "Test Customer",
       },
       order_meta: {
         return_url: "https://example.com/return",
         notify_url: "https://example.com/webhook",
-        payment_methods: "cc,dc,upi"
+        payment_methods: "cc,dc,upi",
       },
-      order_note: "Test payment connection"
+      order_note: "Test payment connection",
     };
 
-    console.log('📤 Testing Cashfree API with:', {
+    console.log("📤 Testing Cashfree API with:", {
       url: `${cashfreeBaseURL}/orders`,
-      environment: isTestMode ? 'SANDBOX' : 'PRODUCTION'
+      environment: isTestMode ? "SANDBOX" : "PRODUCTION",
     });
 
     const testResponse = await axios.post(
@@ -1013,66 +1099,69 @@ export const testCashfreeConnectionEnhanced = async (req, res) => {
       testOrderData,
       {
         headers: {
-          'Content-Type': 'application/json',
-          'x-client-id': clientId.trim(),
-          'x-client-secret': clientSecret.trim(),
-          'x-api-version': apiVersion
+          "Content-Type": "application/json",
+          "x-client-id": clientId.trim(),
+          "x-client-secret": clientSecret.trim(),
+          "x-api-version": apiVersion,
         },
-        timeout: 15000
+        timeout: 15000,
       }
     );
 
-    console.log('✅ Cashfree Test Response:', testResponse.data);
+    console.log("✅ Cashfree Test Response:", testResponse.data);
 
     if (testResponse.data && testResponse.data.payment_session_id) {
       const paymentsBaseURL = isTestMode
-        ? 'https://sandbox.cashfree.com/order'
-        : 'https://payments.cashfree.com/order';
-        
+        ? "https://sandbox.cashfree.com/order"
+        : "https://payments.cashfree.com/order";
+
       const paymentLink = `${paymentsBaseURL}/#${testResponse.data.payment_session_id}`;
-      
+
       res.json({
         success: true,
-        message: `Cashfree ${isTestMode ? 'Sandbox' : 'Production'} connection successful!`,
+        message: `Cashfree ${
+          isTestMode ? "Sandbox" : "Production"
+        } connection successful!`,
         paymentLink: paymentLink,
-        environment: isTestMode ? 'sandbox' : 'production',
+        environment: isTestMode ? "sandbox" : "production",
         orderId: testResponse.data.order_id,
         cfOrderId: testResponse.data.cf_order_id,
         paymentSessionId: testResponse.data.payment_session_id,
         debug: {
-          credentialsType: isTestMode ? 'TEST' : 'LIVE',
-          baseURLUsed: cashfreeBaseURL
-        }
+          credentialsType: isTestMode ? "TEST" : "LIVE",
+          baseURLUsed: cashfreeBaseURL,
+        },
       });
     } else {
       res.json({
         success: false,
-        message: 'Cashfree API response missing payment session',
-        response: testResponse.data
+        message: "Cashfree API response missing payment session",
+        response: testResponse.data,
       });
     }
-
   } catch (error) {
-    console.error('❌ Enhanced Cashfree test failed:', error);
-    
-    let errorMessage = 'Cashfree connection test failed';
+    console.error("❌ Enhanced Cashfree test failed:", error);
+
+    let errorMessage = "Cashfree connection test failed";
     let errorDetails = {};
 
     if (error.response) {
       errorDetails = {
         status: error.response.status,
         statusText: error.response.statusText,
-        data: error.response.data
+        data: error.response.data,
       };
 
       if (error.response.status === 401) {
-        errorMessage = 'Invalid Cashfree credentials (Unauthorized) - Check Client ID/Secret';
+        errorMessage =
+          "Invalid Cashfree credentials (Unauthorized) - Check Client ID/Secret";
       } else if (error.response.status === 403) {
-        errorMessage = 'Cashfree account not activated or restricted';
+        errorMessage = "Cashfree account not activated or restricted";
       } else if (error.response.status === 400) {
         errorMessage = `Bad request to Cashfree API: ${error.response.data?.message}`;
       } else if (error.response.status === 404) {
-        errorMessage = 'Cashfree API endpoint not found - check environment (sandbox vs production)';
+        errorMessage =
+          "Cashfree API endpoint not found - check environment (sandbox vs production)";
       }
     }
 
@@ -1080,7 +1169,7 @@ export const testCashfreeConnectionEnhanced = async (req, res) => {
       success: false,
       message: errorMessage,
       error: errorDetails,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
@@ -1090,54 +1179,61 @@ export const testCashfreeConnectionEnhanced = async (req, res) => {
 export const handleCashfreeReturn = async (req, res) => {
   try {
     const { order_id, order_status, payment_status, reference_id } = req.query;
-    
-    console.log('🔁 Cashfree Return Callback:', {
+
+    console.log("🔁 Cashfree Return Callback:", {
       order_id,
-      order_status, 
+      order_status,
       payment_status,
-      reference_id
+      reference_id,
     });
 
     // Update transaction status
     if (order_id) {
-      const transaction = await Transaction.findOne({ 
+      const transaction = await Transaction.findOne({
         $or: [
           { merchantOrderId: order_id },
           { gatewayOrderId: order_id },
-          { cfOrderId: order_id }
-        ]
+          { cfOrderId: order_id },
+        ],
       });
 
       if (transaction) {
-        let status = 'PENDING';
-        if (order_status === 'PAID') status = 'SUCCESS';
-        else if (order_status === 'EXPIRED') status = 'FAILED';
+        let status = "PENDING";
+        if (order_status === "PAID") status = "SUCCESS";
+        else if (order_status === "EXPIRED") status = "FAILED";
 
         await Transaction.findOneAndUpdate(
           { _id: transaction._id },
-          { 
+          {
             status: status,
             updatedAt: new Date(),
-            gatewayTxnId: reference_id || transaction.gatewayTxnId
+            gatewayTxnId: reference_id || transaction.gatewayTxnId,
           }
         );
 
-        console.log(`✅ Transaction ${transaction.transactionId} updated to: ${status}`);
+        console.log(
+          `✅ Transaction ${transaction.transactionId} updated to: ${status}`
+        );
       }
     }
 
     // Use HTTPS for frontend redirect in production
-    const frontendBaseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://your-frontend-domain.com' 
-      : FRONTEND_BASE_URL;
+    const frontendBaseUrl =
+      process.env.NODE_ENV === "production"
+        ? "https://your-frontend-domain.com"
+        : FRONTEND_BASE_URL;
 
-    res.redirect(`${frontendBaseUrl}/payment-success?status=${order_status === 'PAID' ? 'success' : 'failed'}&transactionRefId=${order_id || ''}`);
-    
+    res.redirect(
+      `${frontendBaseUrl}/payment-success?status=${
+        order_status === "PAID" ? "success" : "failed"
+      }&transactionRefId=${order_id || ""}`
+    );
   } catch (error) {
-    console.error('❌ Cashfree return handler error:', error);
-    const frontendBaseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://your-frontend-domain.com' 
-      : FRONTEND_BASE_URL;
+    console.error("❌ Cashfree return handler error:", error);
+    const frontendBaseUrl =
+      process.env.NODE_ENV === "production"
+        ? "https://your-frontend-domain.com"
+        : FRONTEND_BASE_URL;
     res.redirect(`${frontendBaseUrl}/payment-return?status=error`);
   }
 };
@@ -1146,18 +1242,19 @@ export const handleCashfreeReturn = async (req, res) => {
 export const handleCashfreeWebhook = async (req, res) => {
   try {
     const webhookData = req.body;
-    
-    console.log('📩 Cashfree Webhook Received:', webhookData);
+
+    console.log("📩 Cashfree Webhook Received:", webhookData);
 
     const { data, type } = webhookData;
-    
-    if (type === 'TRANSACTION_STATUS' && data) {
-      const { orderId, referenceId, txStatus, txMsg, paymentMode, txTime } = data;
-      
-      let status = 'PENDING';
-      if (txStatus === 'SUCCESS') status = 'SUCCESS';
-      else if (txStatus === 'FAILED') status = 'FAILED';
-      else if (txStatus === 'USER_DROPPED') status = 'CANCELLED';
+
+    if (type === "TRANSACTION_STATUS" && data) {
+      const { orderId, referenceId, txStatus, txMsg, paymentMode, txTime } =
+        data;
+
+      let status = "PENDING";
+      if (txStatus === "SUCCESS") status = "SUCCESS";
+      else if (txStatus === "FAILED") status = "FAILED";
+      else if (txStatus === "USER_DROPPED") status = "CANCELLED";
 
       // Update transaction in database
       await Transaction.findOneAndUpdate(
@@ -1165,25 +1262,24 @@ export const handleCashfreeWebhook = async (req, res) => {
           $or: [
             { merchantOrderId: orderId },
             { gatewayOrderId: orderId },
-            { cfOrderId: orderId }
-          ]
+            { cfOrderId: orderId },
+          ],
         },
         {
           status: status,
           gatewayTxnId: referenceId,
           paymentMethod: paymentMode,
           updatedAt: new Date(),
-          ...(txStatus === 'SUCCESS' && { settledAt: new Date(txTime) })
+          ...(txStatus === "SUCCESS" && { settledAt: new Date(txTime) }),
         }
       );
 
       console.log(`✅ Webhook: Order ${orderId} updated to ${status}`);
     }
 
-    res.status(200).json({ success: true, message: 'Webhook processed' });
-    
+    res.status(200).json({ success: true, message: "Webhook processed" });
   } catch (error) {
-    console.error('❌ Cashfree webhook error:', error);
+    console.error("❌ Cashfree webhook error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1193,80 +1289,86 @@ export const handleCashfreeWebhook = async (req, res) => {
 export const debugCashfreeSetup = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 DEBUG: Checking Cashfree setup for merchant:', merchantId);
+
+    console.log("🔍 DEBUG: Checking Cashfree setup for merchant:", merchantId);
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     const connectorAccount = activeAccount.connectorAccountId;
     const integrationKeys = connectorAccount?.integrationKeys || {};
-    
+
     let keysObject = {};
     if (integrationKeys instanceof Map) {
       keysObject = Object.fromEntries(integrationKeys);
-    } else if (typeof integrationKeys === 'object') {
+    } else if (typeof integrationKeys === "object") {
       keysObject = { ...integrationKeys };
     }
 
-    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
-    const clientSecret = keysObject['x-client-secret'] || keysObject['client_secret'];
-    
-    const isTestCredentials = clientId && clientId.startsWith('TEST');
-    const isLiveCredentials = clientId && !clientId.startsWith('TEST');
+    const clientId = keysObject["x-client-id"] || keysObject["client_id"];
+    const clientSecret =
+      keysObject["x-client-secret"] || keysObject["client_secret"];
+
+    const isTestCredentials = clientId && clientId.startsWith("TEST");
+    const isLiveCredentials = clientId && !clientId.startsWith("TEST");
 
     res.json({
       success: true,
       merchant: {
         id: merchant._id,
         name: `${merchant.firstname} ${merchant.lastname}`,
-        mid: merchant.mid
+        mid: merchant.mid,
       },
       connector: {
         name: activeAccount.connectorId?.name,
         account: connectorAccount?.name,
-        terminalId: activeAccount.terminalId
+        terminalId: activeAccount.terminalId,
       },
       credentials: {
-        clientId: clientId ? `${clientId.substring(0, 15)}...` : 'NOT FOUND',
-        clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'NOT FOUND',
-        type: isTestCredentials ? 'TEST' : isLiveCredentials ? 'LIVE' : 'UNKNOWN',
-        environment: process.env.NODE_ENV || 'development'
+        clientId: clientId ? `${clientId.substring(0, 15)}...` : "NOT FOUND",
+        clientSecret: clientSecret
+          ? `${clientSecret.substring(0, 10)}...`
+          : "NOT FOUND",
+        type: isTestCredentials
+          ? "TEST"
+          : isLiveCredentials
+          ? "LIVE"
+          : "UNKNOWN",
+        environment: process.env.NODE_ENV || "development",
       },
       urls: {
         apiBase: process.env.API_BASE_URL,
-        frontendBase: process.env.FRONTEND_URL
+        frontendBase: process.env.FRONTEND_URL,
       },
-      recommendation: isTestCredentials ? 
-        '⚠️ Switch to LIVE credentials for production' :
-        '✅ Using LIVE credentials for production'
+      recommendation: isTestCredentials
+        ? "⚠️ Switch to LIVE credentials for production"
+        : "✅ Using LIVE credentials for production",
     });
-
   } catch (error) {
-    console.error('❌ Cashfree debug setup error:', error);
-    res.status(500).json({ 
-      success: false, 
+    console.error("❌ Cashfree debug setup error:", error);
+    res.status(500).json({
+      success: false,
       error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
@@ -1274,62 +1376,67 @@ export const debugCashfreeSetup = async (req, res) => {
 export const testCashfreeConnection = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🧪 Testing Cashfree connection for merchant:', merchantId);
+
+    console.log("🧪 Testing Cashfree connection for merchant:", merchantId);
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     const connectorAccount = activeAccount.connectorAccountId;
     const integrationKeys = connectorAccount?.integrationKeys || {};
-    
+
     // Convert to plain object
     let keysObject = {};
     if (integrationKeys instanceof Map) {
       keysObject = Object.fromEntries(integrationKeys);
-    } else if (typeof integrationKeys === 'object' && integrationKeys !== null) {
+    } else if (
+      typeof integrationKeys === "object" &&
+      integrationKeys !== null
+    ) {
       keysObject = { ...integrationKeys };
     }
 
-    const clientId = keysObject['x-client-id'] || keysObject['client_id'];
-    const clientSecret = keysObject['x-client-secret'] || keysObject['client_secret'];
-    const apiVersion = keysObject['x-api-version'] || keysObject['api_version'] || '2023-08-01';
+    const clientId = keysObject["x-client-id"] || keysObject["client_id"];
+    const clientSecret =
+      keysObject["x-client-secret"] || keysObject["client_secret"];
+    const apiVersion =
+      keysObject["x-api-version"] || keysObject["api_version"] || "2023-08-01";
 
-    console.log('🔍 Cashfree Credentials Found:', {
-      clientId: clientId ? 'PRESENT' : 'MISSING',
-      clientSecret: clientSecret ? 'PRESENT' : 'MISSING',
+    console.log("🔍 Cashfree Credentials Found:", {
+      clientId: clientId ? "PRESENT" : "MISSING",
+      clientSecret: clientSecret ? "PRESENT" : "MISSING",
       apiVersion: apiVersion,
-      allKeys: Object.keys(keysObject)
+      allKeys: Object.keys(keysObject),
     });
 
     if (!clientId || !clientSecret) {
       return res.json({
         success: false,
-        message: 'Missing Cashfree credentials',
+        message: "Missing Cashfree credentials",
         missing: {
           clientId: !clientId,
-          clientSecret: !clientSecret
+          clientSecret: !clientSecret,
         },
-        availableKeys: Object.keys(keysObject)
+        availableKeys: Object.keys(keysObject),
       });
     }
 
@@ -1342,34 +1449,34 @@ export const testCashfreeConnection = async (req, res) => {
         customer_id: "test_customer",
         customer_phone: "9999999999",
         customer_email: "test@example.com",
-        customer_name: "Test Customer"
-      }
+        customer_name: "Test Customer",
+      },
     };
 
-    console.log('📤 Testing Cashfree API with data:', testOrderData);
+    console.log("📤 Testing Cashfree API with data:", testOrderData);
 
     const testResponse = await axios.post(
-      'https://api.cashfree.com/pg/orders',
+      "https://api.cashfree.com/pg/orders",
       testOrderData,
       {
         headers: {
-          'Content-Type': 'application/json',
-          'x-client-id': clientId.trim(),
-          'x-client-secret': clientSecret.trim(),
-          'x-api-version': apiVersion
+          "Content-Type": "application/json",
+          "x-client-id": clientId.trim(),
+          "x-client-secret": clientSecret.trim(),
+          "x-api-version": apiVersion,
         },
-        timeout: 15000
+        timeout: 15000,
       }
     );
 
-    console.log('✅ Cashfree Test Response:', testResponse.data);
+    console.log("✅ Cashfree Test Response:", testResponse.data);
 
     if (testResponse.data && testResponse.data.payment_session_id) {
       const paymentLink = `https://payments.cashfree.com/order/#${testResponse.data.payment_session_id}`;
-      
+
       res.json({
         success: true,
-        message: 'Cashfree connection test successful!',
+        message: "Cashfree connection test successful!",
         paymentLink: paymentLink,
         orderId: testResponse.data.order_id,
         cfOrderId: testResponse.data.cf_order_id,
@@ -1377,39 +1484,38 @@ export const testCashfreeConnection = async (req, res) => {
         credentials: {
           clientId: `${clientId.substring(0, 10)}...`,
           clientSecret: `${clientSecret.substring(0, 10)}...`,
-          apiVersion: apiVersion
-        }
+          apiVersion: apiVersion,
+        },
       });
     } else {
       res.json({
         success: false,
-        message: 'Cashfree API response missing payment session',
-        response: testResponse.data
+        message: "Cashfree API response missing payment session",
+        response: testResponse.data,
       });
     }
-
   } catch (error) {
-    console.error('❌ Cashfree connection test failed:', error);
-    
-    let errorMessage = 'Cashfree connection test failed';
+    console.error("❌ Cashfree connection test failed:", error);
+
+    let errorMessage = "Cashfree connection test failed";
     let errorDetails = {};
 
     if (error.response) {
       errorDetails = {
         status: error.response.status,
         statusText: error.response.statusText,
-        data: error.response.data
+        data: error.response.data,
       };
 
       if (error.response.status === 401) {
-        errorMessage = 'Invalid Cashfree credentials (Unauthorized)';
+        errorMessage = "Invalid Cashfree credentials (Unauthorized)";
       } else if (error.response.status === 403) {
-        errorMessage = 'Cashfree account not activated or restricted';
+        errorMessage = "Cashfree account not activated or restricted";
       } else if (error.response.status === 400) {
-        errorMessage = 'Bad request to Cashfree API';
+        errorMessage = "Bad request to Cashfree API";
       }
-    } else if (error.code === 'ECONNABORTED') {
-      errorMessage = 'Cashfree API timeout';
+    } else if (error.code === "ECONNABORTED") {
+      errorMessage = "Cashfree API timeout";
     } else {
       errorMessage = error.message;
     }
@@ -1418,7 +1524,7 @@ export const testCashfreeConnection = async (req, res) => {
       success: false,
       message: errorMessage,
       error: errorDetails,
-      stack: error.stack
+      stack: error.stack,
     });
   }
 };
@@ -1426,81 +1532,94 @@ export const testCashfreeConnection = async (req, res) => {
 export const debugCashfreeCredentials = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 Debugging Cashfree credentials for merchant:', merchantId);
+
+    console.log("🔍 Debugging Cashfree credentials for merchant:", merchantId);
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     const connectorAccount = activeAccount.connectorAccountId;
-    
+
     const integrationKeys = connectorAccount?.integrationKeys || {};
-    
+
     let keysObject = {};
     if (integrationKeys instanceof Map) {
       keysObject = Object.fromEntries(integrationKeys);
-    } else if (typeof integrationKeys === 'object' && integrationKeys !== null) {
+    } else if (
+      typeof integrationKeys === "object" &&
+      integrationKeys !== null
+    ) {
       keysObject = { ...integrationKeys };
     }
 
-    console.log('🔍 Raw Integration Keys:', integrationKeys);
-    console.log('🔍 Processed Keys Object:', keysObject);
-    console.log('🔍 Keys Object Type:', typeof keysObject);
-    console.log('🔍 Keys Object Keys:', Object.keys(keysObject));
+    console.log("🔍 Raw Integration Keys:", integrationKeys);
+    console.log("🔍 Processed Keys Object:", keysObject);
+    console.log("🔍 Keys Object Type:", typeof keysObject);
+    console.log("🔍 Keys Object Keys:", Object.keys(keysObject));
 
-    const clientId = keysObject['x-client-id'] || keysObject['x_client_id'] || keysObject['client_id'];
-    const clientSecret = keysObject['x-client-secret'] || keysObject['x_client_secret'] || keysObject['client_secret'];
-    const apiVersion = keysObject['x-api-version'] || keysObject['x_api_version'] || keysObject['api_version'];
+    const clientId =
+      keysObject["x-client-id"] ||
+      keysObject["x_client_id"] ||
+      keysObject["client_id"];
+    const clientSecret =
+      keysObject["x-client-secret"] ||
+      keysObject["x_client_secret"] ||
+      keysObject["client_secret"];
+    const apiVersion =
+      keysObject["x-api-version"] ||
+      keysObject["x_api_version"] ||
+      keysObject["api_version"];
 
     res.json({
       success: true,
       merchant: {
         name: `${merchant.firstname} ${merchant.lastname}`,
         mid: merchant.mid,
-        email: merchant.email
+        email: merchant.email,
       },
       connector: {
         name: activeAccount.connectorId?.name,
-        terminalId: activeAccount.terminalId
+        terminalId: activeAccount.terminalId,
       },
       credentials: {
         hasClientId: !!clientId,
         hasClientSecret: !!clientSecret,
         hasApiVersion: !!apiVersion,
-        clientId: clientId ? `${clientId.substring(0, 10)}...` : 'Not Found',
-        clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...` : 'Not Found',
-        apiVersion: apiVersion || 'Not Found'
+        clientId: clientId ? `${clientId.substring(0, 10)}...` : "Not Found",
+        clientSecret: clientSecret
+          ? `${clientSecret.substring(0, 10)}...`
+          : "Not Found",
+        apiVersion: apiVersion || "Not Found",
       },
       allIntegrationKeys: Object.keys(keysObject),
       integrationKeys: keysObject,
       debug: {
         rawIntegrationKeysType: typeof integrationKeys,
         isMap: integrationKeys instanceof Map,
-        connectorAccountId: connectorAccount?._id
-      }
+        connectorAccountId: connectorAccount?._id,
+      },
     });
-
   } catch (error) {
-    console.error('❌ Cashfree debug error:', error);
+    console.error("❌ Cashfree debug error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1511,60 +1630,67 @@ export const debugCashfreeCredentials = async (req, res) => {
 export const debugCurrentEnpayCredentials = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 DEBUG: Checking current Enpay credentials for merchant:', merchantId);
+
+    console.log(
+      "🔍 DEBUG: Checking current Enpay credentials for merchant:",
+      merchantId
+    );
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
     const connectorAccount = activeAccount.connectorAccountId;
     const integrationKeys = connectorAccount?.integrationKeys || {};
 
-    console.log('🔍 CURRENT CREDENTIALS IN DATABASE:', integrationKeys);
+    console.log("🔍 CURRENT CREDENTIALS IN DATABASE:", integrationKeys);
 
     res.json({
       success: true,
       merchant: {
         name: `${merchant.firstname} ${merchant.lastname}`,
-        mid: merchant.mid
+        mid: merchant.mid,
       },
       connector: {
         name: activeAccount.connectorId?.name,
-        terminalId: activeAccount.terminalId
+        terminalId: activeAccount.terminalId,
       },
       credentials: {
-        merchantKey: integrationKeys['X-Merchant-Key'],
-        merchantSecret: integrationKeys['X-Merchant-Secret'] ? '***' + integrationKeys['X-Merchant-Secret'].slice(-4) : 'MISSING',
-        merchantHashId: integrationKeys['merchantHashId'],
-        baseUrl: integrationKeys['baseUrl']
+        merchantKey: integrationKeys["X-Merchant-Key"],
+        merchantSecret: integrationKeys["X-Merchant-Secret"]
+          ? "***" + integrationKeys["X-Merchant-Secret"].slice(-4)
+          : "MISSING",
+        merchantHashId: integrationKeys["merchantHashId"],
+        baseUrl: integrationKeys["baseUrl"],
       },
       matchWithCorrect: {
-        merchantKey: integrationKeys['X-Merchant-Key'] === '0851439b-03df-4983-88d6-32399b1e4514',
-        merchantHashId: integrationKeys['merchantHashId'] === 'MERCDSH51Y7CD4YJLFIZR8NF'
-      }
+        merchantKey:
+          integrationKeys["X-Merchant-Key"] ===
+          "0851439b-03df-4983-88d6-32399b1e4514",
+        merchantHashId:
+          integrationKeys["merchantHashId"] === "MERCDSH51Y7CD4YJLFIZR8NF",
+      },
     });
-
   } catch (error) {
-    console.error('❌ Debug error:', error);
+    console.error("❌ Debug error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1573,28 +1699,28 @@ export const debugCurrentEnpayCredentials = async (req, res) => {
 export const testEnpayConnection = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🧪 Testing Enpay connection for merchant:', merchantId);
+
+    console.log("🧪 Testing Enpay connection for merchant:", merchantId);
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
@@ -1610,57 +1736,61 @@ export const testEnpayConnection = async (req, res) => {
       merchantVpa: "test@fino",
       returnURL: "https://example.com/return",
       successURL: "https://example.com/success",
-      txnnNote: "Test payment"
+      txnnNote: "Test payment",
     };
 
-    console.log('📤 Testing with credentials:', {
-      merchantKey: integrationKeys['X-Merchant-Key'] ? 'PRESENT' : 'MISSING',
-      merchantSecret: integrationKeys['X-Merchant-Secret'] ? 'PRESENT' : 'MISSING',
-      merchantHashId: integrationKeys.merchantHashId
+    console.log("📤 Testing with credentials:", {
+      merchantKey: integrationKeys["X-Merchant-Key"] ? "PRESENT" : "MISSING",
+      merchantSecret: integrationKeys["X-Merchant-Secret"]
+        ? "PRESENT"
+        : "MISSING",
+      merchantHashId: integrationKeys.merchantHashId,
     });
 
     const enpayResponse = await axios.post(
-      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest",
       testData,
       {
         headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
-          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
-          'Accept': 'application/json'
+          "Content-Type": "application/json",
+          "X-Merchant-Key": integrationKeys["X-Merchant-Key"],
+          "X-Merchant-Secret": integrationKeys["X-Merchant-Secret"],
+          Accept: "application/json",
         },
-        timeout: 30000
+        timeout: 30000,
       }
     );
 
-    console.log('✅ Enpay API Success:', enpayResponse.data);
+    console.log("✅ Enpay API Success:", enpayResponse.data);
 
     res.json({
       success: true,
-      message: 'Enpay connection test successful!',
+      message: "Enpay connection test successful!",
       paymentLink: enpayResponse.data.details || enpayResponse.data.paymentUrl,
       debug: {
         credentialsUsed: {
-          merchantKey: integrationKeys['X-Merchant-Key'] ? `${integrationKeys['X-Merchant-Key'].substring(0, 10)}...` : 'MISSING',
-          merchantHashId: integrationKeys.merchantHashId
-        }
-      }
+          merchantKey: integrationKeys["X-Merchant-Key"]
+            ? `${integrationKeys["X-Merchant-Key"].substring(0, 10)}...`
+            : "MISSING",
+          merchantHashId: integrationKeys.merchantHashId,
+        },
+      },
     });
-
   } catch (error) {
-    console.error('❌ Enpay connection test failed:', error);
-    
-    let errorMessage = 'Enpay connection test failed';
+    console.error("❌ Enpay connection test failed:", error);
+
+    let errorMessage = "Enpay connection test failed";
     let errorDetails = {};
 
     if (error.response) {
       errorDetails = {
         status: error.response.status,
-        data: error.response.data
+        data: error.response.data,
       };
 
       if (error.response.status === 401) {
-        errorMessage = 'Invalid Enpay credentials (Unauthorized) - Check Merchant Key/Secret';
+        errorMessage =
+          "Invalid Enpay credentials (Unauthorized) - Check Merchant Key/Secret";
       } else if (error.response.status === 400) {
         errorMessage = `Bad request to Enpay API: ${error.response.data?.message}`;
       }
@@ -1669,31 +1799,31 @@ export const testEnpayConnection = async (req, res) => {
     res.json({
       success: false,
       message: errorMessage,
-      error: errorDetails
+      error: errorDetails,
     });
   }
 };
 
 export const testEnpayDirect = async (req, res) => {
   try {
-    console.log('🧪 TEST: Enhanced Direct Enpay Connection');
-    
-    const connectorAccount = await ConnectorAccount.findOne({ name: 'enpay' });
+    console.log("🧪 TEST: Enhanced Direct Enpay Connection");
+
+    const connectorAccount = await ConnectorAccount.findOne({ name: "enpay" });
     if (!connectorAccount) {
       return res.json({
         success: false,
-        message: 'Enpay connector account not found'
+        message: "Enpay connector account not found",
       });
     }
 
     const integrationKeys = connectorAccount.integrationKeys || {};
-    
-    console.log('🔐 Credentials Check:', {
-      hasMerchantKey: !!integrationKeys['X-Merchant-Key'],
-      hasMerchantSecret: !!integrationKeys['X-Merchant-Secret'], 
-      hasMerchantHashId: !!integrationKeys['merchantHashId'],
-      merchantKeyLength: integrationKeys['X-Merchant-Key']?.length,
-      merchantSecretLength: integrationKeys['X-Merchant-Secret']?.length
+
+    console.log("🔐 Credentials Check:", {
+      hasMerchantKey: !!integrationKeys["X-Merchant-Key"],
+      hasMerchantSecret: !!integrationKeys["X-Merchant-Secret"],
+      hasMerchantHashId: !!integrationKeys["merchantHashId"],
+      merchantKeyLength: integrationKeys["X-Merchant-Key"]?.length,
+      merchantSecretLength: integrationKeys["X-Merchant-Secret"]?.length,
     });
 
     // Test data
@@ -1704,61 +1834,64 @@ export const testEnpayDirect = async (req, res) => {
       merchantTxnId: `TXNTEST${Date.now()}`,
       merchantVpa: "test@fino",
       returnURL: "https://example.com/return",
-      successURL: "https://example.com/success", 
-      txnnNote: "Test payment"
+      successURL: "https://example.com/success",
+      txnnNote: "Test payment",
     };
 
-    console.log('📤 Calling Enpay API with headers:', {
-      'X-Merchant-Key': integrationKeys['X-Merchant-Key'] ? 'PRESENT' : 'MISSING',
-      'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'] ? 'PRESENT' : 'MISSING'
+    console.log("📤 Calling Enpay API with headers:", {
+      "X-Merchant-Key": integrationKeys["X-Merchant-Key"]
+        ? "PRESENT"
+        : "MISSING",
+      "X-Merchant-Secret": integrationKeys["X-Merchant-Secret"]
+        ? "PRESENT"
+        : "MISSING",
     });
 
     const enpayResponse = await axios.post(
-      'https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest',
+      "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/initiateCollectRequest",
       testData,
       {
         headers: {
-          'Content-Type': 'application/json',
-          'X-Merchant-Key': integrationKeys['X-Merchant-Key'],
-          'X-Merchant-Secret': integrationKeys['X-Merchant-Secret'],
-          'Accept': 'application/json'
+          "Content-Type": "application/json",
+          "X-Merchant-Key": integrationKeys["X-Merchant-Key"],
+          "X-Merchant-Secret": integrationKeys["X-Merchant-Secret"],
+          Accept: "application/json",
         },
-        timeout: 30000
+        timeout: 30000,
       }
     );
 
-    console.log('✅ Enpay API Success:', enpayResponse.data);
+    console.log("✅ Enpay API Success:", enpayResponse.data);
 
     res.json({
       success: true,
-      message: 'Direct Enpay test successful!',
+      message: "Direct Enpay test successful!",
       paymentLink: enpayResponse.data.details || enpayResponse.data.paymentUrl,
       debug: {
         credentialsValid: true,
-        headersSent: true
-      }
+        headersSent: true,
+      },
     });
-
   } catch (error) {
-    console.error('❌ Enhanced Test failed:', error);
-    
+    console.error("❌ Enhanced Test failed:", error);
+
     let errorDetails = {
-      message: error.message
+      message: error.message,
     };
-    
+
     if (error.response) {
       errorDetails = {
         status: error.response.status,
         data: error.response.data,
-        headers: error.response.headers
+        headers: error.response.headers,
       };
-      console.error('🔍 Full error response:', errorDetails);
+      console.error("🔍 Full error response:", errorDetails);
     }
-    
+
     res.json({
       success: false,
-      error: 'Enpay API call failed',
-      details: errorDetails
+      error: "Enpay API call failed",
+      details: errorDetails,
     });
   }
 };
@@ -1767,11 +1900,11 @@ export const testEnpayDirect = async (req, res) => {
 export const processShortLink = async (req, res) => {
   try {
     const { shortLinkId } = req.params;
-    console.log('🔄 Process route called for shortLinkId:', shortLinkId);
+    console.log("🔄 Process route called for shortLinkId:", shortLinkId);
 
     // Find transaction
     const transaction = await Transaction.findOne({ shortLinkId: shortLinkId });
-    
+
     if (!transaction) {
       return res.status(404).send(`
         <html>
@@ -1787,7 +1920,7 @@ export const processShortLink = async (req, res) => {
     // ✅ CHECK IF SESSION IS RECENT (less than 15 minutes)
     const sessionAge = Date.now() - new Date(transaction.createdAt).getTime();
     const maxSessionAge = 15 * 60 * 1000; // 15 minutes
-    
+
     if (sessionAge > maxSessionAge) {
       return res.status(410).send(`
         <html>
@@ -1795,28 +1928,32 @@ export const processShortLink = async (req, res) => {
           <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #dc3545;">Payment Link Expired</h2>
             <p>This payment link has expired. Please generate a new one.</p>
-            <p>Session created: ${new Date(transaction.createdAt).toLocaleString()}</p>
+            <p>Session created: ${new Date(
+              transaction.createdAt
+            ).toLocaleString()}</p>
           </body>
         </html>
       `);
     }
 
-    console.log('✅ Transaction found, redirecting to:', transaction.paymentUrl);
+    console.log(
+      "✅ Transaction found, redirecting to:",
+      transaction.paymentUrl
+    );
 
     // Update status and redirect
     await Transaction.findOneAndUpdate(
       { shortLinkId: shortLinkId },
-      { 
-        status: 'REDIRECTED', 
-        redirectedAt: new Date()
+      {
+        status: "REDIRECTED",
+        redirectedAt: new Date(),
       }
     );
 
     // ✅ IMMEDIATE REDIRECT
     res.redirect(302, transaction.paymentUrl);
-
   } catch (error) {
-    console.error('🔥 ERROR in process route:', error);
+    console.error("🔥 ERROR in process route:", error);
     res.status(500).send(`
       <html>
         <head><title>Payment Error</title></head>
@@ -1833,35 +1970,40 @@ export const processShortLink = async (req, res) => {
 export const debugConnectorAccount = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 DEBUG: Checking connector account for merchant:', merchantId);
+
+    console.log(
+      "🔍 DEBUG: Checking connector account for merchant:",
+      merchantId
+    );
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
-    console.log('✅ Merchant found:', merchant.firstname, merchant.lastname);
+    console.log("✅ Merchant found:", merchant.firstname, merchant.lastname);
 
     // Check connector accounts
     const connectorAccounts = await MerchantConnectorAccount.find({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId')
-    .populate('connectorAccountId');
+      .populate("connectorId")
+      .populate("connectorAccountId");
 
     console.log(`🔍 Found ${connectorAccounts.length} connector accounts`);
 
     const detailedAccounts = [];
     for (const account of connectorAccounts) {
       let connectorAccountDetails = null;
-      
+
       if (!account.connectorAccountId && account.connectorAccountId) {
-        connectorAccountDetails = await ConnectorAccount.findById(account.connectorAccountId);
+        connectorAccountDetails = await ConnectorAccount.findById(
+          account.connectorAccountId
+        );
       } else {
         connectorAccountDetails = account.connectorAccountId;
       }
@@ -1871,17 +2013,19 @@ export const debugConnectorAccount = async (req, res) => {
         connectorId: account.connectorId?._id,
         connectorName: account.connectorId?.name,
         connectorAccountId: account.connectorAccountId?._id,
-        connectorAccountName: connectorAccountDetails?.name || 'Not Found',
+        connectorAccountName: connectorAccountDetails?.name || "Not Found",
         terminalId: account.terminalId,
         status: account.status,
         isPrimary: account.isPrimary,
         hasConnectorAccount: !!connectorAccountDetails,
-        hasIntegrationKeys: connectorAccountDetails?.integrationKeys ? true : false,
-        integrationKeys: connectorAccountDetails?.integrationKeys || {}
+        hasIntegrationKeys: connectorAccountDetails?.integrationKeys
+          ? true
+          : false,
+        integrationKeys: connectorAccountDetails?.integrationKeys || {},
       };
 
       detailedAccounts.push(accountInfo);
-      
+
       console.log(`🔍 Account Details:`, accountInfo);
     }
 
@@ -1890,18 +2034,17 @@ export const debugConnectorAccount = async (req, res) => {
       merchant: {
         _id: merchant._id,
         name: `${merchant.firstname} ${merchant.lastname}`,
-        mid: merchant.mid
+        mid: merchant.mid,
       },
       connectorAccounts: detailedAccounts,
-      totalAccounts: connectorAccounts.length
+      totalAccounts: connectorAccounts.length,
     });
-
   } catch (error) {
-    console.error('❌ Debug error:', error);
-    res.status(500).json({ 
-      success: false, 
+    console.error("❌ Debug error:", error);
+    res.status(500).json({
+      success: false,
       error: error.message,
-      stack: error.stack 
+      stack: error.stack,
     });
   }
 };
@@ -1910,28 +2053,28 @@ export const debugConnectorAccount = async (req, res) => {
 export const debugEnpayCredentials = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    
-    console.log('🔍 Debugging Enpay credentials for merchant:', merchantId);
+
+    console.log("🔍 Debugging Enpay credentials for merchant:", merchantId);
 
     const merchant = await User.findById(merchantId);
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: merchantId,
-      status: 'Active'
+      status: "Active",
     })
-    .populate('connectorId', 'name')
-    .populate('connectorAccountId');
+      .populate("connectorId", "name")
+      .populate("connectorAccountId");
 
     if (!activeAccount) {
       return res.status(404).json({
         success: false,
-        message: 'No active connector account found'
+        message: "No active connector account found",
       });
     }
 
@@ -1943,24 +2086,23 @@ export const debugEnpayCredentials = async (req, res) => {
       merchant: {
         name: `${merchant.firstname} ${merchant.lastname}`,
         mid: merchant.mid,
-        email: merchant.email
+        email: merchant.email,
       },
       connector: {
         name: activeAccount.connectorId?.name,
-        terminalId: activeAccount.terminalId
+        terminalId: activeAccount.terminalId,
       },
       credentials: {
-        hasMerchantKey: !!integrationKeys['X-Merchant-Key'],
-        hasMerchantSecret: !!integrationKeys['X-Merchant-Secret'],
-        hasMerchantHashId: !!integrationKeys['merchantHashId'],
-        merchantHashId: integrationKeys['merchantHashId'],
-        baseUrl: integrationKeys['baseUrl']
+        hasMerchantKey: !!integrationKeys["X-Merchant-Key"],
+        hasMerchantSecret: !!integrationKeys["X-Merchant-Secret"],
+        hasMerchantHashId: !!integrationKeys["merchantHashId"],
+        merchantHashId: integrationKeys["merchantHashId"],
+        baseUrl: integrationKeys["baseUrl"],
       },
-      integrationKeys: integrationKeys
+      integrationKeys: integrationKeys,
     });
-
   } catch (error) {
-    console.error('❌ Debug error:', error);
+    console.error("❌ Debug error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1968,15 +2110,17 @@ export const debugEnpayCredentials = async (req, res) => {
 // Existing functions
 export const getMerchants = async (req, res) => {
   try {
-    console.log('🔍 Fetching merchants from database...');
-    
-    const merchants = await User.find({ role: 'merchant' })
-      .select('_id firstname lastname company email mid status contact balance unsettleBalance createdAt')
+    console.log("🔍 Fetching merchants from database...");
+
+    const merchants = await User.find({ role: "merchant" })
+      .select(
+        "_id firstname lastname company email mid status contact balance unsettleBalance createdAt"
+      )
       .sort({ createdAt: -1 });
 
     console.log(`✅ Found ${merchants.length} merchants from database`);
 
-    const formattedMerchants = merchants.map(merchant => ({
+    const formattedMerchants = merchants.map((merchant) => ({
       _id: merchant._id,
       firstname: merchant.firstname,
       lastname: merchant.lastname,
@@ -1987,51 +2131,318 @@ export const getMerchants = async (req, res) => {
       contact: merchant.contact,
       balance: merchant.balance,
       unsettleBalance: merchant.unsettleBalance,
-      merchantName: merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      merchantName:
+        merchant.company || `${merchant.firstname} ${merchant.lastname}`,
       hashId: merchant.mid,
-      vpa: `${merchant.mid.toLowerCase()}@skypal`
+      vpa: `${merchant.mid.toLowerCase()}@skypal`,
     }));
 
     res.json({
       success: true,
       data: formattedMerchants,
-      count: formattedMerchants.length
+      count: formattedMerchants.length,
     });
-
   } catch (error) {
-    console.error('❌ Error fetching merchants from database:', error);
+    console.error("❌ Error fetching merchants from database:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching merchants from database',
-      error: error.message
+      message: "Error fetching merchants from database",
+      error: error.message,
     });
   }
 };
 
-
 export const getPaymentMethods = async (req, res) => {
   try {
-    console.log('🔍 Fetching payment methods...');
-    
+    console.log("🔍 Fetching payment methods...");
+
     const methods = [
       { id: "upi", name: "UPI" },
       { id: "card", name: "Credit/Debit Card" },
       { id: "netbanking", name: "Net Banking" },
-      { id: "wallet", name: "Wallet" }
+      { id: "wallet", name: "Wallet" },
     ];
 
-    console.log('✅ Payment methods:', methods);
+    console.log("✅ Payment methods:", methods);
 
     res.json({
       success: true,
-      methods: methods
+      methods: methods,
     });
   } catch (error) {
-    console.error('❌ Error fetching payment methods:', error);
+    console.error("❌ Error fetching payment methods:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching payment methods',
-      error: error.message
+      message: "Error fetching payment methods",
+      error: error.message,
     });
+  }
+};
+
+export const checkTransactionStatus = async (req, res) => {
+  try {
+    console.log(req.params, req.query, "checkTransactionS");
+    const { txnRefId } = req.query;
+
+    if (!txnRefId) {
+      return res.status(400).json({
+        success: false,
+        message: "txnRefId is required",
+      });
+    }
+
+    const txn = await Transaction.findOne({ txnRefId });
+
+    if (!txn) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
+    }
+
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: txn.merchantId,
+      status: "Active",
+    }).populate("connectorAccountId");
+
+    const keys = extractIntegrationKeys(activeAccount);
+    // console.log(keys);
+    const merchantKey = keys["X-Merchant-Key"];
+    const merchantSecret = keys["X-Merchant-Secret"];
+    const merchantHashId = keys["merchantHashId"];
+    const merchantVpa = keys["merchantVpa"];
+
+    if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
+      console.error("❌ Missing Enpay Credentials. Found:", Object.keys(keys));
+      throw new Error("No integration keys found for Enpay connector");
+    }
+
+    const response = await axios.post(
+      "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+      { txnRefId: txnRefId, merchantHashId: merchantHashId },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Merchant-Key": merchantKey,
+          "X-Merchant-Secret": merchantSecret,
+          Accept: "application/json",
+        },
+        timeout: 20000,
+      }
+    );
+    console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
+
+    return res.json({
+      success: true,
+      enpayResponse: response.data,
+    });
+  } catch (error) {
+    console.error(
+      "❌ Enpay Status API Error:",
+      error.response?.data || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch Enpay transaction status",
+      error: error.response?.data || error.message,
+    });
+  }
+};
+
+export const updateTransactions = async (req, res) => {
+  try {
+    // Fetch all initiated transactions
+    const transactions = await Transaction.find({ status: "INITIATED" });
+
+    if (!transactions || transactions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No initiated transactions found",
+      });
+    }
+
+    // Create an array of promises for parallel processing
+    const updatePromises = transactions.map(async (txn) => {
+      // Get active merchant connector account
+      const activeAccount = await MerchantConnectorAccount.findOne({
+        merchantId: txn.merchantId,
+        status: "Active",
+      }).populate("connectorAccountId");
+
+      const keys = extractIntegrationKeys(activeAccount);
+      const merchantKey = keys["X-Merchant-Key"];
+      const merchantSecret = keys["X-Merchant-Secret"];
+      const merchantHashId = keys["merchantHashId"];
+      const merchantVpa = keys["merchantVpa"];
+
+      if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
+        console.error(
+          `❌ Missing Enpay Credentials for txnRefId: ${txn.txnRefId}`
+        );
+        return {
+          txnRefId: txn.txnRefId,
+          success: false,
+          message: "Missing credentials",
+        };
+      }
+
+      try {
+        const response = await axios.post(
+          "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+          { txnRefId: txn.txnRefId, merchantHashId },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-Merchant-Key": merchantKey,
+              "X-Merchant-Secret": merchantSecret,
+              Accept: "application/json",
+            },
+            timeout: 20000,
+          }
+        );
+
+        const enpayData = response.data.details;
+        // Convert timestamps if they exist
+        console.log(enpayData, "ENPAY");
+        const transactionInitiatedAt = enpayData.transactionInitiatedAt
+          ? new Date(enpayData.transactionInitiatedAt)
+          : null;
+
+        const transactionCompletedAt = enpayData.transactionCompletedAt
+          ? new Date(enpayData.transactionCompletedAt)
+          : null;
+
+        console.log(
+          transactionCompletedAt,
+          transactionInitiatedAt,
+          "Transaction Completed On",
+          {
+            status: enpayData.status || txn.status,
+            transactionInitiatedAt,
+            transactionCompletedAt,
+            transactionMerchantName: enpayData.merchantName,
+            transactionMerchantID: enpayData.merchantId,
+            transactionOrderID: enpayData.orderId,
+            currency: enpayData.currency,
+            customerVpa: enpayData.customerVpa,
+            customerName: enpayData.customerName,
+            utr: enpayData.utr,
+            updatedAt: new Date(),
+          }
+        );
+        // Update transaction with Enpay response
+
+        await Transaction.updateOne(
+          { _id: txn._id },
+          {
+            $set: {
+              status: enpayData.status || txn.status,
+              transactionInitiatedAt,
+              transactionCompletedAt,
+              transactionMerchantName: enpayData.merchantName,
+              transactionMerchantID: enpayData.merchantId,
+              transactionOrderID: enpayData.orderId,
+              currency: enpayData.currency,
+              customerVpa: enpayData.customerVpa,
+              customerName: enpayData.customerName,
+              utr: enpayData.utr,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        return {
+          txnRefId: txn.txnRefId,
+          success: true,
+          status: enpayData.status,
+        };
+      } catch (err) {
+        console.error(
+          `❌ Failed to fetch Enpay status for txnRefId: ${txn.txnRefId}`,
+          err.response?.data || err.message
+        );
+        return {
+          txnRefId: txn.txnRefId,
+          success: false,
+          message: err.response?.data || err.message,
+        };
+      }
+    });
+
+    // Wait for all updates to finish
+    const results = await Promise.allSettled(updatePromises);
+
+    return res.json({
+      success: true,
+      message: "Transactions processed",
+      results,
+    });
+  } catch (error) {
+    console.error("❌ Error updating transactions:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update transactions",
+      error: error.message,
+    });
+  }
+};
+
+export const enpayWebhook = async (req, res) => {
+  try {
+    console.log("🔔 Enpay Webhook Received:", req.body);
+
+    const {
+      merchantTrnId, // = txnRefId
+      status, // SUCCESS / FAILED / PENDING
+      enpayTxnId,
+    } = req.body;
+
+    const transaction = await Transaction.findOne({
+      txnRefId: merchantTrnId,
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ message: "Transaction not found" });
+    }
+
+    transaction.status = status;
+    transaction.gatewayTxnId = enpayTxnId;
+    transaction.gatewayResponse = req.body;
+    transaction.updatedAt = new Date();
+
+    await transaction.save();
+
+    console.log("✅ Enpay Transaction Updated via Webhook");
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Enpay Webhook Error:", err);
+    return res.status(500).json({ success: false });
+  }
+};
+
+export const redirectAfterPayment = async (req, res) => {
+  try {
+    const { txnRefId } = req.query;
+
+    const txn = await Transaction.findOne({ txnRefId });
+
+    if (!txn) {
+      return res.status(404).json({ message: "Transaction not found" });
+    }
+
+    if (txn.status !== "SUCCESS") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment not successful yet",
+      });
+    }
+
+    return res.json({
+      success: true,
+      redirectUrl: `${FRONTEND_BASE_URL}/payment-success?status==${txn.status}&transactionId=${txnRefId}`,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false });
   }
 };

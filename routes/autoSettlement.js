@@ -1,4 +1,4 @@
-// routes/autoSettlement.js
+
 import express from 'express';
 import {
   createAutoSettlement,
@@ -14,7 +14,6 @@ import {
 
 const router = express.Router();
 
-// Auto Settlement CRUD
 router.post('/create',  createAutoSettlement);
 router.get('/list',  getAutoSettlements);
 router.get('/:id',  getAutoSettlementById);
@@ -23,7 +22,6 @@ router.delete('/delete/:id',  deleteAutoSettlement);
 router.patch('/toggle-status/:id',  toggleStatus);
 router.post('/trigger/:id',  triggerSettlement);
 
-// Connector related routes
 router.get('/connectors/payout-supported',  getPayoutConnectors);
 router.get('/connector-accounts/:connectorId',  getConnectorAccounts);
 

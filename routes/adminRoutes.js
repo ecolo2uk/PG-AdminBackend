@@ -6,16 +6,15 @@ import {
   createAdminUser,
   updateAdminUser,
   deleteAdminUser
-} from '../controllers/adminController.js'; // This is now correct
+} from '../controllers/adminController.js'; 
 router.get('/users', getAdminUsers);
 
-// Create admin user
 router.post('/users', createAdminUser);
 
-// Update admin user
+
 router.put('/users/:id', updateAdminUser);
 
-// Delete admin user
+
 router.delete('/users/:id', deleteAdminUser);
 
 export default router;

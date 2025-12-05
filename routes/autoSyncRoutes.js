@@ -1,4 +1,3 @@
-// routes/autoSyncRoutes.js - नवीन file तयार करा
 import express from 'express';
 import { 
   syncAllExistingTransactions, 

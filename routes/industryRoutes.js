@@ -9,7 +9,6 @@ import {
 
 const router = express.Router();
 
-// Define industry routes
 router.get('/', getIndustries);
 router.get('/:id', getIndustryById);
 router.post('/', createIndustry);

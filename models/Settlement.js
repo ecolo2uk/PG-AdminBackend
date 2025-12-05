@@ -1,4 +1,3 @@
-// models/Settlement.js
 import mongoose from 'mongoose';
 
 const settlementSchema = new mongoose.Schema({
@@ -13,7 +12,6 @@ const settlementSchema = new mongoose.Schema({
     unique: true
   },
   
-  // Settlement details
   totalAmount: {
     type: Number,
     required: true
@@ -27,14 +25,12 @@ const settlementSchema = new mongoose.Schema({
     default: Date.now
   },
   
-  // Status
   status: {
     type: String,
     enum: ['INITIATED', 'PROCESSING', 'COMPLETED', 'FAILED', 'PARTIAL'],
     default: 'INITIATED'
   },
   
-  // Selected merchants for settlement
   selectedMerchants: [{
     merchantId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -63,7 +59,6 @@ const settlementSchema = new mongoose.Schema({
     }
   }],
   
-  // Processing information
   processedBy: {
     type: String,
     default: 'Admin'
@@ -71,14 +66,12 @@ const settlementSchema = new mongoose.Schema({
   processedAt: Date,
   completedAt: Date,
   
-  // Additional details
   remarks: String,
   failureReason: String
 }, {
   timestamps: true
 });
 
-// Generate settlement IDs
 settlementSchema.pre('save', async function(next) {
   if (!this.settlementId) {
     this.settlementId = `STL${Date.now()}`;

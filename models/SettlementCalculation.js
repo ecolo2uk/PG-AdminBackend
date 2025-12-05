@@ -1,4 +1,3 @@
-// models/SettlementCalculation.js
 import mongoose from 'mongoose';
 
 const settlementCalculationSchema = new mongoose.Schema({

@@ -4,7 +4,7 @@ const paymentOptionSchema = new mongoose.Schema({
     name: {
         type: String,
         required: true,
-        unique: true, // Assuming payment option names should be unique
+        unique: true,  
         trim: true
     },
     iconClass: {

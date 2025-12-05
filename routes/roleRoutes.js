@@ -1,9 +1,8 @@
-// roleRoutes.js
 import express from 'express';
 const router = express.Router();
 import * as roleController from '../controllers/roleController.js';
 
-router.post('/', roleController.createRole); // Used for creating the role
+router.post('/', roleController.createRole); 
 router.get('/', roleController.getRoles);
 router.get('/:id', roleController.getRoleById);
 router.put('/:id', roleController.updateRole);

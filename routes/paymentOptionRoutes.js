@@ -9,7 +9,6 @@ import {
 
 const router = express.Router();
 
-// Routes for Payment Options
 router.get('/', getAllPaymentOptions);
 router.get('/:id', getPaymentOptionById);
 router.post('/', createPaymentOption);

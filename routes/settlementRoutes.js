@@ -1,4 +1,3 @@
-// routes/settlementRoutes.js
 import express from 'express';
 import {
   getSettlementMerchants,
@@ -10,7 +9,6 @@ import {
 
 const router = express.Router();
 
-// Settlement routes
 router.get('/merchants', getSettlementMerchants);
 router.post('/process', processSettlement);
 router.get('/merchant/:merchantId', getMerchantSettlementDetails);

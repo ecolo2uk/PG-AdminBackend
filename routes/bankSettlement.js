@@ -1,4 +1,3 @@
-// routes/bankSettlement.js
 import express from 'express';
 import {
   createBankSettlement,
@@ -12,7 +11,6 @@ import {
 
 const router = express.Router();
 
-// Bank Settlement Routes
 router.post('/create', createBankSettlement);
 router.get('/history', getBankSettlementHistory);
 router.get('/:id', getBankSettlementById);

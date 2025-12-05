@@ -12,13 +12,12 @@ const permissionSchema = new mongoose.Schema({
     required: true
   },
   operations: {
-    type: [String], // e.g., ['read', 'create', 'update', 'delete']
+    type: [String], 
 
     default: [],
   }
 }, { timestamps: true });
 
-// Ensure unique combination of role and submodule
 permissionSchema.index({ roleId: 1, submoduleId: 1 }, { unique: true });
 const Permission = mongoose.model('Permission', permissionSchema);
 export default Permission;

@@ -1,4 +1,4 @@
-// routes/payoutTransaction.js - CLEAN VERSION
+
 import express from 'express';
 import {
   createPayoutToMerchant,
@@ -14,12 +14,10 @@ import {
 
 const router = express.Router();
 
-// POST Routes
 router.post('/to-merchant', createPayoutToMerchant);
 router.post('/internal', createInternalPayoutTransaction);
 router.post('/', createPayoutTransaction);
 
-// GET Routes
 router.get('/', getPayoutTransactions);
 router.get('/merchants/list', getAllMerchantsForPayout);
 router.get('/connectors/list', getConnectors);

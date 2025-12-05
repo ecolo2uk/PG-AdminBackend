@@ -1,4 +1,3 @@
-// backend/routes/solutionRoutes.js
 import express from 'express';
 import {
   getSolutions,

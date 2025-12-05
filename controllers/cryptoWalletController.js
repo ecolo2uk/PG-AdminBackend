@@ -40,7 +40,9 @@ export const createWallet = async (req, res) => {
     res.status(201).json(createdWallet);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: "Crypto wallet with this name already exists." });
+      return res
+        .status(400)
+        .json({ message: "Crypto wallet with this name already exists." });
     }
     res.status(500).json({ message: error.message });
   }
@@ -64,7 +66,9 @@ export const updateWallet = async (req, res) => {
     }
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: "Crypto wallet with this name already exists." });
+      return res
+        .status(400)
+        .json({ message: "Crypto wallet with this name already exists." });
     }
     res.status(500).json({ message: error.message });
   }

@@ -4,19 +4,19 @@ const pluginSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    unique: true, // Plugins should probably have unique names
+    unique: true, 
   },
   iconClass: {
     type: String,
-    default: null, // Optional icon class (e.g., for FontAwesome)
+    default: null, 
   },
   iconImage: {
     type: String,
-    default: null, // Optional URL for an icon image
+    default: null, 
   },
-  // You might want to add other fields like 'description', 'version', 'isActive', etc.
+
 }, {
-  timestamps: true, // Adds createdAt and updatedAt fields
+  timestamps: true, 
 });
 
 const Plugin = mongoose.model('Plugin', pluginSchema);

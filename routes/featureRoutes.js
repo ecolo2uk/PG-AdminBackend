@@ -1,4 +1,3 @@
-// routes/featureRoutes.js
 import express from 'express';
 const router = express.Router();
 import {
@@ -9,18 +8,15 @@ import {
     deleteFeature,
 } from '../controllers/featureController.js';
 
-// If you have authentication middleware (e.g., `protect` and `admin`),
-// you would add them here. For simplicity, I'm omitting them,
-// but remember to secure your routes in a real application.
-// import { protect, admin } from '../middleware/authMiddleware.js';
+
 
 router.route('/')
     .get(getFeatures)
-    .post(createFeature); // Add protect, admin if needed
+    .post(createFeature); 
 
 router.route('/:id')
     .get(getFeatureById)
-    .put(updateFeature) // Add protect, admin if needed
-    .delete(deleteFeature); // Add protect, admin if needed
+    .put(updateFeature) 
+    .delete(deleteFeature); 
 
 export default router;
