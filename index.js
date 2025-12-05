@@ -81,6 +81,7 @@ app.use("/api/sync", syncRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/settlement", settlementRoutes);
 app.use("/api/auto-settlement", autoSettlement);
+
 app.use("/api/settlement-calculator", settlementCalculatorRoutes);
 app.use("/api/bank-settlement", bankSettlementRoutes);
 app.use("/api/merchant-fee", merchantFeeRoutes);
