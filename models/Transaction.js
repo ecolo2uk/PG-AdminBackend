@@ -43,6 +43,7 @@ const transactionSchema = new mongoose.Schema(
     transactionMerchantName: String,
     transactionMerchantID: String,
     transactionOrderID: String,
+    utr: String,
 
     mid: {
       type: String,

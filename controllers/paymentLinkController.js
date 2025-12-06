@@ -2203,6 +2203,7 @@ export const checkTransactionStatus = async (req, res) => {
 
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: txn.merchantId,
+      connectorAccountId: txn.connectorAccountId,
       status: "Active",
     }).populate("connectorAccountId");
 
@@ -2268,6 +2269,7 @@ export const updateTransactions = async (req, res) => {
       // Get active merchant connector account
       const activeAccount = await MerchantConnectorAccount.findOne({
         merchantId: txn.merchantId,
+        connectorAccountId: txn.connectorAccountId,
         status: "Active",
       }).populate("connectorAccountId");
 
