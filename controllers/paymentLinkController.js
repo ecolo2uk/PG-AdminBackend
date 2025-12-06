@@ -123,6 +123,7 @@ export const generatePaymentLink = async (req, res) => {
     // Find Active Connector Account
     const activeAccount = await MerchantConnectorAccount.findOne({
       merchantId: new mongoose.Types.ObjectId(merchantId),
+      isPrimary: true,
       status: "Active",
     })
       .populate("connectorId")
