@@ -38,7 +38,7 @@ export const getAllTransactionsSimple = async (req, res) => {
       transactionDate: transaction.createdAt,
       paymentMethod: transaction.paymentMethod,
       customerName: transaction.customerName,
-      customerVpa: transaction.customerVPA,
+      customerVpa: transaction.customerVpa,
       settlementStatus: "Pending", // Default value
     }));
 
@@ -142,7 +142,7 @@ export const getAllPaymentTransactions = async (req, res) => {
           paymentMethod: 1,
           paymentOption: 1,
           customerName: 1,
-          customerVPA: 1,
+          customerVpa: 1,
           customerContact: 1,
           txnRefId: 1,
           enpayTxnId: 1,
@@ -466,7 +466,7 @@ export const createPaymentTransaction = async (req, res) => {
       amount,
       currency = "INR",
       customerName,
-      customerVPA,
+      customerVpa,
       customerContact,
       paymentMethod = "UPI",
       paymentOption = "UPI_COLLECT",
@@ -502,7 +502,7 @@ export const createPaymentTransaction = async (req, res) => {
       currency,
       status: "PENDING",
       customerName,
-      customerVPA,
+      customerVpa,
       customerContact,
       paymentMethod,
       paymentOption,

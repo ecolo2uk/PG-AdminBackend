@@ -237,6 +237,7 @@ export const generatePaymentLink = async (req, res) => {
       paymentLink: paymentResult.paymentLink,
       transactionRefId: transactionData.transactionId,
       txnRefId: transactionData.txnRefId,
+      connectorName,
       message: `${connectorName} payment link generated successfully`,
     });
   } catch (error) {
