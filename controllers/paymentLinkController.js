@@ -250,6 +250,174 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
+export const generatePaymentLinkTransaction = async (req, res) => {
+  const startTime = Date.now();
+  console.log("🚀 generatePaymentLink STARTED", req.body);
+
+  try {
+    const {
+      merchantId,
+      amount,
+      currency = "INR",
+      paymentMethod,
+      paymentOption,
+    } = req.body;
+
+    // Validation
+    if (!merchantId || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: merchantId, amount",
+      });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid amount",
+      });
+    }
+
+    // Find merchant
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found",
+      });
+    }
+
+    // Find Active Connector Account
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: new mongoose.Types.ObjectId(merchantId),
+      isPrimary: true,
+      status: "Active",
+    })
+      .populate("connectorId")
+      .populate("connectorAccountId"); // Populating the reference to get global details if needed
+
+    if (!activeAccount) {
+      return res.status(404).json({
+        success: false,
+        message: "No active payment connector found",
+      });
+    }
+
+    const connectorName = activeAccount.connectorId?.name;
+    console.log("🎯 Using Connector:", connectorName);
+
+    // Extract keys using helper function
+    const integrationKeys = extractIntegrationKeys(activeAccount);
+    console.log("🔑 Integration Keys Extracted:", {
+      keysCount: Object.keys(integrationKeys).length,
+      availableKeys: Object.keys(integrationKeys),
+    });
+    const accountWithKeys = {
+      ...activeAccount.toObject(), // Convert mongoose document to plain object
+      extractedKeys: integrationKeys,
+    };
+    // Attach extracted keys to the account object for the generator functions
+    activeAccount.extractedKeys = integrationKeys;
+
+    let paymentResult;
+
+    if (connectorName === "Cashfree") {
+      paymentResult = await generateCashfreePayment({
+        merchant,
+        amount: amountNum,
+        paymentMethod,
+        paymentOption,
+        connectorAccount: accountWithKeys,
+      });
+    } else if (connectorName === "Enpay") {
+      paymentResult = await generateEnpayPayment({
+        merchant,
+        amount: amountNum,
+        paymentMethod,
+        paymentOption,
+        connectorAccount: accountWithKeys,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported connector: " + connectorName,
+      });
+    }
+
+    // Create transaction record
+    const transactionData = {
+      transactionId: generateTransactionId(),
+      merchantOrderId: paymentResult.merchantOrderId,
+      merchantHashId: integrationKeys.merchantHashId,
+      // merchantHashId: merchant.mid,
+      // merchantVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+      merchantVpa: integrationKeys.merchantVpa,
+      txnRefId: paymentResult.txnRefId,
+      shortLinkId: generateShortId(),
+
+      merchantId: merchant._id,
+      merchantName:
+        merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      mid: merchant.mid,
+
+      amount: amountNum,
+      currency: currency,
+      status: "INITIATED",
+      paymentMethod: paymentMethod,
+      paymentOption: paymentOption,
+      paymentUrl: paymentResult.paymentLink,
+
+      connectorId: activeAccount.connectorId?._id,
+      connectorAccountId: activeAccount.connectorAccountId?._id,
+      connectorName: connectorName,
+      terminalId: activeAccount.terminalId || "N/A",
+
+      gatewayTxnId: paymentResult.gatewayTxnId,
+      gatewayPaymentLink: paymentResult.paymentLink,
+      gatewayOrderId: paymentResult.gatewayOrderId,
+
+      customerName: `${merchant.firstname} ${merchant.lastname}`,
+      customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+      customerContact: merchant.contact || "",
+      customerEmail: merchant.email || "",
+
+      txnNote: `Payment for ${merchant.company || merchant.firstname}`,
+      source: connectorName.toLowerCase(),
+    };
+
+    if (connectorName === "Enpay") {
+      transactionData.enpayTxnId = paymentResult.enpayTxnId;
+    }
+
+    // Save transaction
+    const newTransaction = new Transaction(transactionData);
+    await newTransaction.save();
+
+    console.log(
+      `✅ ${connectorName} payment link generated in ${
+        Date.now() - startTime
+      }ms`
+    );
+
+    res.json({
+      success: true,
+      paymentLink: paymentResult.paymentLink,
+      transactionRefId: transactionData.transactionId,
+      txnRefId: transactionData.txnRefId,
+      connectorName,
+      message: `${connectorName} payment link generated successfully`,
+    });
+  } catch (error) {
+    console.error(`❌ Payment link generation failed:`, error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      errorType: "GENERATION_ERROR",
+    });
+  }
+};
+
 export const debugEnpayIntegrationKeys = async (req, res) => {
   try {
     const { merchantId } = req.params;
