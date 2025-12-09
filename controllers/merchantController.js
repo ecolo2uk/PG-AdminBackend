@@ -5,6 +5,7 @@ import PayoutTransaction from "../models/PayoutTransaction.js";
 import mongoose from "mongoose";
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 // ✅ CORRECT IMPORT - Make sure this path is correct
 import MerchantConnectorAccount from "../models/MerchantConnectorAccount.js";
@@ -1378,7 +1379,18 @@ export const createMerchantUser = async (req, res) => {
 
     console.log("🔄 STEP 8: Updating user with merchant reference...");
 
+    const payload = {
+      userId: savedUser._id,
+      password: password,
+    };
+    const headerKey = jwt.sign(
+      payload,
+      process.env.JWT_SECRET || "mysecretkey" // Use environment variable for secret
+      // { expiresIn: "365d" }
+    );
+    // console.log(headerKey, "HEADERKEY");
     // 3. UPDATE USER WITH MERCHANT REFERENCE
+    savedUser.headerKey = headerKey;
     savedUser.merchantRef = savedMerchant._id;
     await savedUser.save({ session });
 

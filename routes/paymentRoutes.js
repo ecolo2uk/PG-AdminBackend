@@ -31,7 +31,7 @@ import {
 const router = express.Router();
 
 router.post("/generate-link", generatePaymentLink);
-router.post("/generate-payment-link", generatePaymentLinkTransaction);
+// router.post("/generate-payment-link", generatePaymentLinkTransaction);
 
 router.get("/merchants", getMerchants);
 router.get("/methods", getPaymentMethods);
@@ -61,7 +61,7 @@ router.get("/debug/enpay-keys/:merchantId", debugEnpayIntegrationKeys);
 router.get("/process/:shortLinkId", processShortLink);
 router.get("/success", handleSuccess);
 router.get("/return", handleReturn);
-router.get("/status", checkTransactionStatus);
+router.post("/status", checkTransactionStatus);
 router.get("/updateTransactions", updateTransactions);
 router.get("/redirect", redirectAfterPayment);
 router.get("/enpay-webhook", enpayWebhook);

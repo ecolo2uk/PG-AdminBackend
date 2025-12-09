@@ -2351,8 +2351,8 @@ export const getPaymentMethods = async (req, res) => {
 
 export const checkTransactionStatus = async (req, res) => {
   try {
-    console.log(req.params, req.query, "checkTransactionS");
-    const { txnRefId } = req.query;
+    console.log(req.body, req.query, "checkTransactionS");
+    const { txnRefId } = req.body;
 
     if (!txnRefId) {
       return res.status(400).json({

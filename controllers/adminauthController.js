@@ -45,7 +45,7 @@ export const loginAdmin = async (req, res) => {
         firstname: user.firstname,
         lastname: user.lastname,
       }, // Include mid in token if needed
-      process.env.JWT_MERCHANT_SECRET || "your_merchant_secret_key", // Use environment variable for secret
+      process.env.JWT_SECRET || "mysecretkey", // Use environment variable for secret
       { expiresIn: "1d" }
     );
 
