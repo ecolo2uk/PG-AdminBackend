@@ -1,4 +1,4 @@
-import express from 'express';
+import express from "express";
 import {
   getAllMerchants,
   getMerchantUsers,
@@ -13,28 +13,32 @@ import {
   getMerchantTransactionStats,
   getMerchantDashboard,
   syncMerchantTransactions,
-  getMerchantConnectors ,
-  debugRoutes
-} from '../controllers/merchantController.js';
+  getMerchantConnectors,
+  debugRoutes,
+  setMerchantTransactionLimit,
+  changeMerchantPassword,
+} from "../controllers/merchantController.js";
 
 const router = express.Router();
 
 // Merchant routes
-router.get('/', getAllMerchants);
-router.get('/users', getMerchantUsers);
-router.post('/users', createMerchantUser);
-router.put('/users/:id', updateMerchantUser);
-router.delete('/users/:id', deleteMerchantUser);
-router.get('/users/:id', getMerchantById);
+router.get("/", getAllMerchants);
+router.get("/users", getMerchantUsers);
+router.post("/users", createMerchantUser);
+router.put("/users/:id", updateMerchantUser);
+router.put("/users/setLimit/:id", setMerchantTransactionLimit);
+router.put("/users/changePassword/:id", changeMerchantPassword);
+router.delete("/users/:id", deleteMerchantUser);
+router.get("/users/:id", getMerchantById);
 
-router.get('/:merchantId/connector-accounts', getMerchantConnectors);
-router.get('/debug/:merchantId', debugRoutes);
-router.get('/:merchantId', getMerchantDetails);
-router.put('/:merchantId/balance', updateMerchantBalance);
-router.get('/:merchantId/balance-history', getMerchantBalanceHistory);
-router.get('/:merchantId/transactions', getMerchantWithTransactions);
-router.get('/:merchantId/transaction-stats', getMerchantTransactionStats);
-router.get('/:merchantId/dashboard', getMerchantDashboard);
-router.post('/:merchantId/sync-transactions', syncMerchantTransactions);
+router.get("/:merchantId/connector-accounts", getMerchantConnectors);
+router.get("/debug/:merchantId", debugRoutes);
+router.get("/:merchantId", getMerchantDetails);
+router.put("/:merchantId/balance", updateMerchantBalance);
+router.get("/:merchantId/balance-history", getMerchantBalanceHistory);
+router.get("/:merchantId/transactions", getMerchantWithTransactions);
+router.get("/:merchantId/transaction-stats", getMerchantTransactionStats);
+router.get("/:merchantId/dashboard", getMerchantDashboard);
+router.post("/:merchantId/sync-transactions", syncMerchantTransactions);
 
 export default router;

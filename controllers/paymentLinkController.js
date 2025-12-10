@@ -23,6 +23,23 @@ function generateShortId(length = 10) {
   return result;
 }
 
+const todayFilter = () => {
+  const now = new Date();
+
+  let start, end;
+  start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    createdAt: {
+      $gte: start,
+      $lte: end,
+    },
+  };
+};
+
 function generateTransactionId() {
   return `TRN${Date.now()}${Math.floor(Math.random() * 1000)}`;
 }
@@ -101,6 +118,30 @@ export const generatePaymentLink = async (req, res) => {
         success: false,
         message: "Missing required fields: merchantId, amount",
       });
+    }
+
+    let user;
+    if (merchantId) user = await User.findOne({ _id: merchantId });
+
+    const dateFilter = todayFilter();
+    // console.log(dateFilter, user._id, user.transactionLimit);
+    const transactionLimit = await Transaction.find({
+      merchantId,
+      ...dateFilter,
+    });
+
+    // console.log(transactionLimit.length, "transactionLimit");
+
+    const used = Number(transactionLimit?.length || 0);
+    const limit = Number(user?.transactionLimit || 0);
+
+    if (user.transactionLimit) {
+      if (used >= limit) {
+        return res.status(403).json({
+          success: false,
+          message: "Transaction limit has been exceeded for today!",
+        });
+      }
     }
 
     const amountNum = parseFloat(amount);

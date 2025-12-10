@@ -1537,6 +1537,127 @@ export const updateMerchantUser = async (req, res) => {
   }
 };
 
+export const setMerchantTransactionLimit = async (req, res) => {
+  try {
+    console.log("🔄 Updating merchant user limit:", req.params.id, req.body);
+
+    const { transactionLimit } = req.body;
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user || user.role !== "merchant") {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant user not found or is not a merchant.",
+      });
+    }
+
+    if (!user || user.role !== "merchant") {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant user not found or is not a merchant.",
+      });
+    }
+    // console.log(" req.params.id", transactionLimit);
+
+    const userData = await User.findByIdAndUpdate(
+      userId,
+      { $set: { transactionLimit: transactionLimit } },
+      { new: true, runValidators: true }
+    );
+
+    // console.log("✅ Merchant transaction limit set successfully");
+
+    res.status(200).json({
+      success: true,
+      message: "Merchant transaction limit set successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error updating merchant transaction limit :", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating merchant transaction limit.",
+      error: error.message,
+    });
+  }
+};
+
+export const changeMerchantPassword = async (req, res) => {
+  try {
+    console.log("🔄 Updating merchant password:", req.params.id, req.body);
+
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password is missing",
+      });
+    }
+
+    const userId = req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "Merchant Id is missing",
+      });
+    }
+    // console.log(" req.params.id", password);
+
+    const user = await User.findById(userId);
+    if (!user || user.role !== "merchant") {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant user not found or is not a merchant.",
+      });
+    }
+
+    if (!user || user.role !== "merchant") {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant user not found or is not a merchant.",
+      });
+    }
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const payload = {
+      userId: userId,
+      password: password,
+    };
+    const headerKey = jwt.sign(
+      payload,
+      process.env.JWT_SECRET || "mysecretkey" // Use environment variable for secret
+    );
+    // console.log(payload, headerKey, "HEADERKEY");
+
+    // return res.json({ success: true });
+    const userData = await User.findByIdAndUpdate(
+      userId,
+      { $set: { password: hashedPassword, headerKey: headerKey } },
+      { new: true, runValidators: true }
+    );
+
+    // console.log("✅ Merchant transaction limit set successfully");
+
+    res.status(200).json({
+      success: true,
+      message: "Merchant transaction limit set successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error updating merchant transaction limit :", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating merchant transaction limit.",
+      error: error.message,
+    });
+  }
+};
+
 // Delete Merchant User
 export const deleteMerchantUser = async (req, res) => {
   try {

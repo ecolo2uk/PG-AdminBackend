@@ -31,6 +31,10 @@ const UserSchema = new mongoose.Schema(
     headerKey: {
       type: String,
     },
+    transactionLimit: {
+      type: Number,
+      // default: 0,
+    },
     role: {
       type: String,
       required: [true, "Role is required"],
