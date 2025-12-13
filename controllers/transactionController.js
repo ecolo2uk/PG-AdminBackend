@@ -7,12 +7,17 @@ import User from "../models/User.js";
 // --- Simple version without pagination for testing ---
 export const getAllTransactionsSimple = async (req, res) => {
   try {
-    const { limit = 100 } = req.query;
+    // console.log("LIMIT", req.query);
+    // const { page = 1, limit = 10 } = req.query;
+    // const skip = (page - 1) * limit;
 
-    const transactions = await Transaction.find({})
+    const transactions = await Transaction.find({
+      paymentMethod: { $regex: /^upi$/i },
+    })
       .populate("merchantId", "company firstname lastname email")
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
+      .sort({ createdAt: -1 });
+    // .skip(skip)
+    // .limit(parseInt(limit));
 
     // Format transactions for frontend
     const formattedTransactions = transactions.map((transaction) => ({
@@ -21,6 +26,7 @@ export const getAllTransactionsSimple = async (req, res) => {
       merchantOrderId: transaction.merchantOrderId || "N/A",
       txnRefId: transaction.txnRefId || "N/A",
       utr: transaction.utr || "N/A",
+      merchantId: transaction.merchantId,
       merchantName:
         transaction.merchantName ||
         (transaction.merchantId

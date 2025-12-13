@@ -1176,26 +1176,109 @@ export const getAllMerchants = async (req, res) => {
 };
 
 // Get Merchant Users
+// export const getMerchantUsers = async (req, res) => {
+//   try {
+//     console.log("🔍 Fetching merchant users...");
+
+//     const users = await User.find({ role: "merchant" })
+//       .select("-password")
+//       .sort({ createdAt: -1 });
+
+//     console.log(`✅ Found ${users.length} merchant users`);
+
+//     const usersWithFinancialData = users.map((user) => ({
+//       ...user._doc,
+//       holdAmount: user.holdAmount || 0,
+//       unsettleBal: user.unsettleBalance || 0,
+//       todayNetPayin: 0,
+//       availableBal: user.balance || 0,
+//       payoutBal: 0,
+//       payoutMid: "N/A",
+//       // payoutBal: Math.random() > 0.5 ? 1500 : 1000,
+//       // payoutMid: Math.random() > 0.5 ? "PayoutOne/1 L" : "NA / NA",
+//       status: user.status || "Active",
+//     }));
+
+//     res.status(200).json({
+//       success: true,
+//       data: usersWithFinancialData,
+//     });
+//   } catch (error) {
+//     console.error("❌ Error fetching merchant users:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Server error while fetching merchant users.",
+//       error: error.message,
+//     });
+//   }
+// };
+
 export const getMerchantUsers = async (req, res) => {
   try {
-    console.log("🔍 Fetching merchant users...");
+    console.log("🔍 Fetching merchant users with today net payin...");
 
-    const users = await User.find({ role: "merchant" })
-      .select("-password")
-      .sort({ createdAt: -1 });
+    // 🔥 Start of today
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-    console.log(`✅ Found ${users.length} merchant users`);
+    const users = await User.aggregate([
+      {
+        $match: { role: "merchant" },
+      },
+      {
+        $lookup: {
+          from: "transactions",
+          let: { merchantId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$merchantId", "$$merchantId"] },
+                    { $eq: ["$status", "Success"] },
+                    { $gte: ["$createdAt", startOfDay] },
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                todayNetPayin: { $sum: "$amount" },
+              },
+            },
+          ],
+          as: "todayPayinData",
+        },
+      },
+      {
+        $addFields: {
+          todayNetPayin: {
+            $ifNull: [
+              { $arrayElemAt: ["$todayPayinData.todayNetPayin", 0] },
+              0,
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          password: 0,
+          todayPayinData: 0,
+        },
+      },
+      {
+        $sort: { createdAt: -1 },
+      },
+    ]);
 
     const usersWithFinancialData = users.map((user) => ({
-      ...user._doc,
+      ...user,
       holdAmount: user.holdAmount || 0,
       unsettleBal: user.unsettleBalance || 0,
-      todayNetPayin: 0,
       availableBal: user.balance || 0,
       payoutBal: 0,
       payoutMid: "N/A",
-      // payoutBal: Math.random() > 0.5 ? 1500 : 1000,
-      // payoutMid: Math.random() > 0.5 ? "PayoutOne/1 L" : "NA / NA",
       status: user.status || "Active",
     }));
 

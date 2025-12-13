@@ -1,27 +1,28 @@
 // controllers/merchantFeeController.js
-import MerchantFee from '../models/MerchantFee.js';
-import User from '../models/User.js';
+import MerchantFee from "../models/MerchantFee.js";
+import User from "../models/User.js";
 
 // Create Merchant Fee
 export const createMerchantFee = async (req, res) => {
   try {
-    const { 
-      merchantId, 
-      amount, 
-      feeType, 
-      description, 
-      currency = 'INR',
-      status = 'PROCESSED',
-      metadata = {}
+    const {
+      merchantId,
+      amount,
+      feeType,
+      description,
+      currency = "INR",
+      status = "PROCESSED",
+      metadata = {},
     } = req.body;
 
-    console.log('💰 Creating merchant fee:', { merchantId, amount, feeType });
+    console.log("💰 Creating merchant fee:", { merchantId, amount, feeType });
 
     // Validate required fields
     if (!merchantId || !amount || !feeType || !description) {
       return res.status(400).json({
         success: false,
-        message: 'All fields are required: merchantId, amount, feeType, description'
+        message:
+          "All fields are required: merchantId, amount, feeType, description",
       });
     }
 
@@ -30,7 +31,7 @@ export const createMerchantFee = async (req, res) => {
     if (!merchant) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant not found'
+        message: "Merchant not found",
       });
     }
 
@@ -38,7 +39,7 @@ export const createMerchantFee = async (req, res) => {
     if (amount <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be greater than 0'
+        message: "Amount must be greater than 0",
       });
     }
 
@@ -56,25 +57,24 @@ export const createMerchantFee = async (req, res) => {
       currency,
       status,
       metadata,
-      processedBy: req.user?.name || 'Admin'
+      processedBy: req.user?.name || "Admin",
     });
 
     await merchantFee.save();
 
-    console.log('✅ Merchant fee created successfully:', merchantFee._id);
+    console.log("✅ Merchant fee created successfully:", merchantFee._id);
 
     res.status(201).json({
       success: true,
-      message: 'Merchant fee created successfully',
-      data: merchantFee
+      message: "Merchant fee created successfully",
+      data: merchantFee,
     });
-
   } catch (error) {
-    console.error('❌ Error creating merchant fee:', error);
+    console.error("❌ Error creating merchant fee:", error);
     res.status(500).json({
       success: false,
-      message: 'Error creating merchant fee',
-      error: error.message
+      message: "Error creating merchant fee",
+      error: error.message,
     });
   }
 };
@@ -82,19 +82,24 @@ export const createMerchantFee = async (req, res) => {
 // Get Merchant Fee History
 export const getMerchantFeeHistory = async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      search, 
-      startDate, 
-      endDate, 
-      feeType, 
+    const {
+      // page = 1,
+      // limit = 10,
+      search,
+      startDate,
+      endDate,
+      feeType,
       status,
-      merchantId 
+      merchantId,
     } = req.query;
 
-    console.log('📊 Fetching merchant fee history with filters:', { 
-      search, startDate, endDate, feeType, status, merchantId 
+    console.log("📊 Fetching merchant fee history with filters:", {
+      search,
+      startDate,
+      endDate,
+      feeType,
+      status,
+      merchantId,
     });
 
     // Build query
@@ -103,10 +108,10 @@ export const getMerchantFeeHistory = async (req, res) => {
     // Search filter
     if (search) {
       query.$or = [
-        { merchantName: { $regex: search, $options: 'i' } },
-        { merchantEmail: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { transactionReference: { $regex: search, $options: 'i' } }
+        { merchantName: { $regex: search, $options: "i" } },
+        { merchantEmail: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+        { transactionReference: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -137,22 +142,28 @@ export const getMerchantFeeHistory = async (req, res) => {
     }
 
     const fees = await MerchantFee.find(query)
-      .populate('merchantId', 'firstname lastname email company')
-      .sort({ appliedDate: -1, createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .populate("merchantId", "firstname lastname email company")
+      .sort({ appliedDate: -1, createdAt: -1 });
+    // .limit(limit * 1)
+    // .skip((page - 1) * limit);
 
     const total = await MerchantFee.countDocuments(query);
 
     // Calculate summary statistics
     const totalAmount = await MerchantFee.aggregate([
       { $match: query },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
+      { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
 
     const feeTypeSummary = await MerchantFee.aggregate([
       { $match: query },
-      { $group: { _id: '$feeType', total: { $sum: '$amount' }, count: { $sum: 1 } } }
+      {
+        $group: {
+          _id: "$feeType",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
     ]);
 
     res.status(200).json({
@@ -161,22 +172,21 @@ export const getMerchantFeeHistory = async (req, res) => {
       summary: {
         totalAmount: totalAmount[0]?.total || 0,
         totalFees: total,
-        feeTypeSummary
+        feeTypeSummary,
       },
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: parseInt(limit)
-      }
+      // pagination: {
+      //   currentPage: parseInt(page),
+      //   totalPages: Math.ceil(total / limit),
+      //   totalItems: total,
+      //   itemsPerPage: parseInt(limit)
+      // }
     });
-
   } catch (error) {
-    console.error('❌ Error fetching merchant fee history:', error);
+    console.error("❌ Error fetching merchant fee history:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching merchant fee history',
-      error: error.message
+      message: "Error fetching merchant fee history",
+      error: error.message,
     });
   }
 };
@@ -184,29 +194,29 @@ export const getMerchantFeeHistory = async (req, res) => {
 // Get merchants list for dropdown
 export const getMerchantsList = async (req, res) => {
   try {
-    const merchants = await User.find({ 
-      role: 'merchant',
-      status: 'Active'
-    }).select('firstname lastname email company');
+    const merchants = await User.find({
+      role: "merchant",
+      status: "Active",
+    }).select("firstname lastname email company");
 
     // Format merchant data with full name
-    const formattedMerchants = merchants.map(merchant => ({
+    const formattedMerchants = merchants.map((merchant) => ({
       _id: merchant._id,
       name: `${merchant.firstname} ${merchant.lastname}`.trim(),
       email: merchant.email,
-      companyName: merchant.company || 'No Company'
+      companyName: merchant.company || "No Company",
     }));
 
     res.status(200).json({
       success: true,
-      data: formattedMerchants
+      data: formattedMerchants,
     });
   } catch (error) {
-    console.error('❌ Error fetching merchants list:', error);
+    console.error("❌ Error fetching merchants list:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching merchants list',
-      error: error.message
+      message: "Error fetching merchants list",
+      error: error.message,
     });
   }
 };
@@ -216,26 +226,28 @@ export const getMerchantFeeById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const fee = await MerchantFee.findById(id)
-      .populate('merchantId', 'firstname lastname email company phone');
+    const fee = await MerchantFee.findById(id).populate(
+      "merchantId",
+      "firstname lastname email company phone"
+    );
 
     if (!fee) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant fee not found'
+        message: "Merchant fee not found",
       });
     }
 
     res.status(200).json({
       success: true,
-      data: fee
+      data: fee,
     });
   } catch (error) {
-    console.error('❌ Error fetching merchant fee:', error);
+    console.error("❌ Error fetching merchant fee:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching merchant fee',
-      error: error.message
+      message: "Error fetching merchant fee",
+      error: error.message,
     });
   }
 };
@@ -250,7 +262,7 @@ export const updateMerchantFee = async (req, res) => {
     if (!fee) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant fee not found'
+        message: "Merchant fee not found",
       });
     }
 
@@ -260,15 +272,15 @@ export const updateMerchantFee = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Merchant fee updated successfully',
-      data: fee
+      message: "Merchant fee updated successfully",
+      data: fee,
     });
   } catch (error) {
-    console.error('❌ Error updating merchant fee:', error);
+    console.error("❌ Error updating merchant fee:", error);
     res.status(500).json({
       success: false,
-      message: 'Error updating merchant fee',
-      error: error.message
+      message: "Error updating merchant fee",
+      error: error.message,
     });
   }
 };
@@ -282,7 +294,7 @@ export const deleteMerchantFee = async (req, res) => {
     if (!fee) {
       return res.status(404).json({
         success: false,
-        message: 'Merchant fee not found'
+        message: "Merchant fee not found",
       });
     }
 
@@ -290,62 +302,77 @@ export const deleteMerchantFee = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Merchant fee deleted successfully'
+      message: "Merchant fee deleted successfully",
     });
   } catch (error) {
-    console.error('❌ Error deleting merchant fee:', error);
+    console.error("❌ Error deleting merchant fee:", error);
     res.status(500).json({
       success: false,
-      message: 'Error deleting merchant fee',
-      error: error.message
+      message: "Error deleting merchant fee",
+      error: error.message,
     });
   }
 };
 
-
-
 // Get fee statistics
 export const getFeeStatistics = async (req, res) => {
   try {
-    const { period = 'month' } = req.query; // day, week, month, year
-    
+    const { period = "month" } = req.query; // day, week, month, year
+
     let groupFormat;
     switch (period) {
-      case 'day':
-        groupFormat = { day: { $dayOfMonth: '$appliedDate' }, month: { $month: '$appliedDate' }, year: { $year: '$appliedDate' } };
+      case "day":
+        groupFormat = {
+          day: { $dayOfMonth: "$appliedDate" },
+          month: { $month: "$appliedDate" },
+          year: { $year: "$appliedDate" },
+        };
         break;
-      case 'week':
-        groupFormat = { week: { $week: '$appliedDate' }, year: { $year: '$appliedDate' } };
+      case "week":
+        groupFormat = {
+          week: { $week: "$appliedDate" },
+          year: { $year: "$appliedDate" },
+        };
         break;
-      case 'year':
-        groupFormat = { year: { $year: '$appliedDate' } };
+      case "year":
+        groupFormat = { year: { $year: "$appliedDate" } };
         break;
       default:
-        groupFormat = { month: { $month: '$appliedDate' }, year: { $year: '$appliedDate' } };
+        groupFormat = {
+          month: { $month: "$appliedDate" },
+          year: { $year: "$appliedDate" },
+        };
     }
 
     const statistics = await MerchantFee.aggregate([
       {
         $group: {
           _id: groupFormat,
-          totalAmount: { $sum: '$amount' },
+          totalAmount: { $sum: "$amount" },
           totalFees: { $sum: 1 },
-          averageAmount: { $avg: '$amount' }
-        }
+          averageAmount: { $avg: "$amount" },
+        },
       },
-      { $sort: { '_id.year': -1, '_id.month': -1, '_id.week': -1, '_id.day': -1 } }
+      {
+        $sort: {
+          "_id.year": -1,
+          "_id.month": -1,
+          "_id.week": -1,
+          "_id.day": -1,
+        },
+      },
     ]);
 
     res.status(200).json({
       success: true,
-      data: statistics
+      data: statistics,
     });
   } catch (error) {
-    console.error('❌ Error fetching fee statistics:', error);
+    console.error("❌ Error fetching fee statistics:", error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching fee statistics',
-      error: error.message
+      message: "Error fetching fee statistics",
+      error: error.message,
     });
   }
 };

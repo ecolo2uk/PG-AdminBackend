@@ -2517,7 +2517,7 @@ export const updateTransactions = async (req, res) => {
 
         const enpayData = response.data.details;
         // Convert timestamps if they exist
-        console.log(enpayData, "ENPAY");
+        // console.log(enpayData, "ENPAY");
         const transactionInitiatedAt = enpayData.transactionInitiatedAt
           ? new Date(enpayData.transactionInitiatedAt)
           : null;
@@ -2526,24 +2526,24 @@ export const updateTransactions = async (req, res) => {
           ? new Date(enpayData.transactionCompletedAt)
           : null;
 
-        console.log(
-          transactionCompletedAt,
-          transactionInitiatedAt,
-          "Transaction Completed On",
-          {
-            status: enpayData.status || txn.status,
-            transactionInitiatedAt,
-            transactionCompletedAt,
-            transactionMerchantName: enpayData.merchantName,
-            transactionMerchantID: enpayData.merchantId,
-            transactionOrderID: enpayData.orderId,
-            currency: enpayData.currency,
-            customerVpa: enpayData.customerVpa,
-            customerName: enpayData.customerName,
-            utr: enpayData.utr,
-            updatedAt: new Date(),
-          }
-        );
+        // console.log(
+        //   transactionCompletedAt,
+        //   transactionInitiatedAt,
+        //   "Transaction Completed On",
+        //   {
+        //     status: enpayData.status || txn.status,
+        //     transactionInitiatedAt,
+        //     transactionCompletedAt,
+        //     transactionMerchantName: enpayData.merchantName,
+        //     transactionMerchantID: enpayData.merchantId,
+        //     transactionOrderID: enpayData.orderId,
+        //     currency: enpayData.currency,
+        //     customerVpa: enpayData.customerVpa,
+        //     customerName: enpayData.customerName,
+        //     utr: enpayData.utr,
+        //     updatedAt: new Date(),
+        //   }
+        // );
         // Update transaction with Enpay response
 
         await Transaction.updateOne(
