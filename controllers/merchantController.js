@@ -1235,7 +1235,7 @@ export const getMerchantUsers = async (req, res) => {
                 $expr: {
                   $and: [
                     { $eq: ["$merchantId", "$$merchantId"] },
-                    { $eq: ["$status", "Success"] },
+                    { $eq: ["$status", "SUCCESS"] },
                     { $gte: ["$createdAt", startOfDay] },
                   ],
                 },
