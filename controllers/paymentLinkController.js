@@ -2323,7 +2323,7 @@ export const getMerchants = async (req, res) => {
   try {
     console.log("🔍 Fetching merchants from database...");
 
-    const merchants = await User.find({ role: "merchant" })
+    const merchants = await User.find({ role: "merchant", status: "Active" })
       .select(
         "_id firstname lastname company email mid status contact balance unsettleBalance createdAt"
       )

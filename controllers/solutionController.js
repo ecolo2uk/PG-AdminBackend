@@ -1,12 +1,12 @@
 // backend/controllers/solutionController.js
-import Solution from '../models/Solution.js';
+import Solution from "../models/Solution.js";
 
 // @desc    Get all solutions
 // @route   GET /api/solutions
 // @access  Public (or Private, depending on your auth middleware)
 export const getSolutions = async (req, res) => {
   try {
-    const solutions = await Solution.find({});
+    const solutions = await Solution.find({ status: "Active" });
     res.status(200).json(solutions);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -22,7 +22,7 @@ export const getSolutionById = async (req, res) => {
     if (solution) {
       res.status(200).json(solution);
     } else {
-      res.status(404).json({ message: 'Solution not found' });
+      res.status(404).json({ message: "Solution not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -36,13 +36,15 @@ export const createSolution = async (req, res) => {
   const { name, iconClass, iconImage } = req.body;
 
   if (!name) {
-    return res.status(400).json({ message: 'Solution name is required' });
+    return res.status(400).json({ message: "Solution name is required" });
   }
 
   try {
     const existingSolution = await Solution.findOne({ name });
     if (existingSolution) {
-      return res.status(400).json({ message: 'A solution with this name already exists' });
+      return res
+        .status(400)
+        .json({ message: "A solution with this name already exists" });
     }
 
     const solution = new Solution({
@@ -70,20 +72,27 @@ export const updateSolution = async (req, res) => {
     if (solution) {
       if (name !== solution.name) {
         const existingSolution = await Solution.findOne({ name });
-        if (existingSolution && String(existingSolution._id) !== String(solution._id)) {
-          return res.status(400).json({ message: 'A solution with this name already exists' });
+        if (
+          existingSolution &&
+          String(existingSolution._id) !== String(solution._id)
+        ) {
+          return res
+            .status(400)
+            .json({ message: "A solution with this name already exists" });
         }
       }
 
       solution.name = name || solution.name;
-      solution.iconClass = iconClass !== undefined ? iconClass : solution.iconClass;
-      solution.iconImage = iconImage !== undefined ? iconImage : solution.iconImage;
+      solution.iconClass =
+        iconClass !== undefined ? iconClass : solution.iconClass;
+      solution.iconImage =
+        iconImage !== undefined ? iconImage : solution.iconImage;
       // Mongoose pre-save hook will update 'updatedAt'
 
       const updatedSolution = await solution.save();
       res.status(200).json(updatedSolution);
     } else {
-      res.status(404).json({ message: 'Solution not found' });
+      res.status(404).json({ message: "Solution not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -98,10 +107,21 @@ export const deleteSolution = async (req, res) => {
     const solution = await Solution.findById(req.params.id);
 
     if (solution) {
-      await solution.deleteOne(); // Use deleteOne()
-      res.status(200).json({ message: 'Solution removed' });
+      // await solution.deleteOne(); // Use deleteOne()
+      const updateSolution = await Solution.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            status: "Inactive",
+          },
+        },
+        {
+          new: true,
+        }
+      );
+      res.status(200).json({ message: "Solution removed" });
     } else {
-      res.status(404).json({ message: 'Solution not found' });
+      res.status(404).json({ message: "Solution not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });

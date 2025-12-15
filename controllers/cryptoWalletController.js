@@ -2,7 +2,7 @@ import CryptoWallet from "../models/cryptoWalletModel.js";
 
 export const getWallets = async (req, res) => {
   try {
-    const wallets = await CryptoWallet.find({});
+    const wallets = await CryptoWallet.find({ status: "Active" });
     res.status(200).json(wallets);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -79,7 +79,18 @@ export const deleteWallet = async (req, res) => {
     const wallet = await CryptoWallet.findById(req.params.id);
 
     if (wallet) {
-      await CryptoWallet.deleteOne({ _id: req.params.id });
+      // await CryptoWallet.deleteOne({ _id: req.params.id });
+      const updatedWallet = await CryptoWallet.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            status: "Inactive",
+          },
+        },
+        {
+          new: true,
+        }
+      );
       res.status(200).json({ message: "Crypto wallet removed" });
     } else {
       res.status(404).json({ message: "Crypto wallet not found" });

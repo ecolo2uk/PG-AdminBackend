@@ -18,6 +18,11 @@ const cryptoWalletSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    status: {
+      type: String,
+      enum: ["Active", "Inactive"],
+      default: "Active",
+    },
   },
   {
     timestamps: true,

@@ -1,12 +1,15 @@
-import User from '../models/User.js';
-import bcrypt from 'bcryptjs';
+import User from "../models/User.js";
+import bcrypt from "bcryptjs";
 
 // Get all admin users (admin, super admin, Editor, Viewer)
-export const getAdminUsers = async (req, res) => { // Changed here
+export const getAdminUsers = async (req, res) => {
+  // Changed here
   try {
     const users = await User.find({
-      role: { $in: [ "admin"]  }
+      role: { $in: ["admin"] },
+      status: "Active",
     }).sort({ createdAt: -1 });
+
     res.json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -14,14 +17,15 @@ export const getAdminUsers = async (req, res) => { // Changed here
 };
 
 // Create admin user
-export const createAdminUser = async (req, res) => { // Changed here
+export const createAdminUser = async (req, res) => {
+  // Changed here
   try {
     const { firstname, lastname, email, password, role, company } = req.body;
 
     // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: "User already exists" });
     }
 
     // Hash password
@@ -34,23 +38,26 @@ export const createAdminUser = async (req, res) => { // Changed here
       email,
       password: hashedPassword,
       role,
-      company
+      company,
     });
 
-    res.status(201).json({ message: 'Admin user created successfully', user: newUser });
+    res
+      .status(201)
+      .json({ message: "Admin user created successfully", user: newUser });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 // Update admin user
-export const updateAdminUser = async (req, res) => { // Changed here
+export const updateAdminUser = async (req, res) => {
+  // Changed here
   try {
     const { firstname, lastname, email, role, status, company } = req.body;
 
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -66,16 +73,28 @@ export const updateAdminUser = async (req, res) => { // Changed here
 };
 
 // Delete admin user
-export const deleteAdminUser = async (req, res) => { // Changed here
+export const deleteAdminUser = async (req, res) => {
+  // Changed here
   try {
     const user = await User.findById(req.params.id);
 
-    if (user.role === 'super admin') {
-      return res.status(400).json({ message: 'Cannot delete super admin' });
+    if (user.role === "super admin") {
+      return res.status(400).json({ message: "Cannot delete super admin" });
     }
 
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'User deleted successfully' });
+    // await User.findByIdAndDelete(req.params.id);
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          status: "Inactive",
+        },
+      },
+      {
+        new: true,
+      }
+    );
+    res.json({ message: "User deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

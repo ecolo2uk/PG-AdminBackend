@@ -1763,7 +1763,19 @@ export const deleteMerchantUser = async (req, res) => {
       });
     }
 
-    await User.findByIdAndDelete(req.params.id);
+    // await User.findByIdAndDelete(req.params.id);
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          status: "Inactive",
+        },
+      },
+      {
+        new: true,
+      }
+    );
 
     console.log("✅ Merchant user deleted successfully");
 

@@ -1,10 +1,13 @@
-import User from '../models/User.js';
-import bcrypt from 'bcryptjs';
+import User from "../models/User.js";
+import bcrypt from "bcryptjs";
 
 // Get all PSP users
-export const getPSPUsers = async (req, res) => { // Changed here
+export const getPSPUsers = async (req, res) => {
+  // Changed here
   try {
-    const users = await User.find({ role: 'psp' }).sort({ createdAt: -1 });
+    const users = await User.find({ role: "psp", status: "Active" }).sort({
+      createdAt: -1,
+    });
     res.json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -12,14 +15,15 @@ export const getPSPUsers = async (req, res) => { // Changed here
 };
 
 // Create PSP user
-export const createPSPUser = async (req, res) => { // Changed here
+export const createPSPUser = async (req, res) => {
+  // Changed here
   try {
     const { firstname, lastname, email, password, company, contact } = req.body;
 
     // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: "User already exists" });
     }
 
     // Hash password
@@ -27,7 +31,7 @@ export const createPSPUser = async (req, res) => { // Changed here
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Generate PSP ID
-    const pspId = 'PSP' + Date.now();
+    const pspId = "PSP" + Date.now();
 
     // Create user
     const user = new User({
@@ -35,10 +39,10 @@ export const createPSPUser = async (req, res) => { // Changed here
       lastname,
       email,
       password: hashedPassword,
-      role: 'psp',
+      role: "psp",
       company,
       contact,
-      pspId
+      pspId,
     });
 
     const savedUser = await user.save();
@@ -49,13 +53,14 @@ export const createPSPUser = async (req, res) => { // Changed here
 };
 
 // Update PSP user
-export const updatePSPUser = async (req, res) => { // Changed here
+export const updatePSPUser = async (req, res) => {
+  // Changed here
   try {
     const { firstname, lastname, email, company, contact, status } = req.body;
 
     const user = await User.findById(req.params.id);
-    if (!user || user.role !== 'psp') {
-      return res.status(404).json({ message: 'PSP user not found' });
+    if (!user || user.role !== "psp") {
+      return res.status(404).json({ message: "PSP user not found" });
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -71,16 +76,28 @@ export const updatePSPUser = async (req, res) => { // Changed here
 };
 
 // Delete PSP user
-export const deletePSPUser = async (req, res) => { // Changed here
+export const deletePSPUser = async (req, res) => {
+  // Changed here
   try {
     const user = await User.findById(req.params.id);
 
-    if (!user || user.role !== 'psp') {
-      return res.status(404).json({ message: 'PSP user not found' });
+    if (!user || user.role !== "psp") {
+      return res.status(404).json({ message: "PSP user not found" });
     }
 
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'PSP user deleted successfully' });
+    // await User.findByIdAndDelete(req.params.id);
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          status: "Inactive",
+        },
+      },
+      {
+        new: true,
+      }
+    );
+    res.json({ message: "PSP user deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

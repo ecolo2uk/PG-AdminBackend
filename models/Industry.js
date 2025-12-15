@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const industrySchema = new mongoose.Schema({
   name: {
@@ -15,14 +15,19 @@ const industrySchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  status: {
+    type: String,
+    enum: ["Active", "Inactive"],
+    default: "Active",
+  },
 });
 
 // Update 'updatedAt' field on save
-industrySchema.pre('save', function (next) {
+industrySchema.pre("save", function (next) {
   this.updatedAt = Date.now();
   next();
 });
 
-const Industry = mongoose.model('Industry', industrySchema);
+const Industry = mongoose.model("Industry", industrySchema);
 
 export default Industry;

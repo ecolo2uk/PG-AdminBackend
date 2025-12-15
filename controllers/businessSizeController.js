@@ -1,5 +1,5 @@
 // controllers/businessSizeController.js
-import BusinessSize from '../models/BusinessSize.js';
+import BusinessSize from "../models/BusinessSize.js";
 
 // @desc    Create a new business size
 // @route   POST /api/business-sizes
@@ -17,8 +17,11 @@ export const createBusinessSize = async (req, res) => {
     const createdBusinessSize = await businessSize.save();
     res.status(201).json(createdBusinessSize);
   } catch (error) {
-    if (error.code === 11000) { // Duplicate key error
-      res.status(400).json({ message: 'Business size with this name already exists.' });
+    if (error.code === 11000) {
+      // Duplicate key error
+      res
+        .status(400)
+        .json({ message: "Business size with this name already exists." });
     } else {
       res.status(500).json({ message: error.message });
     }
@@ -30,7 +33,9 @@ export const createBusinessSize = async (req, res) => {
 // @access  Private
 export const getAllBusinessSizes = async (req, res) => {
   try {
-    const businessSizes = await BusinessSize.find({});
+    const businessSizes = await BusinessSize.find({
+      status: "Active",
+    });
     res.json(businessSizes);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -47,7 +52,7 @@ export const getBusinessSizeById = async (req, res) => {
     if (businessSize) {
       res.json(businessSize);
     } else {
-      res.status(404).json({ message: 'Business size not found' });
+      res.status(404).json({ message: "Business size not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -71,11 +76,14 @@ export const updateBusinessSize = async (req, res) => {
       const updatedBusinessSize = await businessSize.save();
       res.json(updatedBusinessSize);
     } else {
-      res.status(404).json({ message: 'Business size not found' });
+      res.status(404).json({ message: "Business size not found" });
     }
   } catch (error) {
-    if (error.code === 11000) { // Duplicate key error
-      res.status(400).json({ message: 'Business size with this name already exists.' });
+    if (error.code === 11000) {
+      // Duplicate key error
+      res
+        .status(400)
+        .json({ message: "Business size with this name already exists." });
     } else {
       res.status(500).json({ message: error.message });
     }
@@ -90,10 +98,21 @@ export const deleteBusinessSize = async (req, res) => {
     const businessSize = await BusinessSize.findById(req.params.id);
 
     if (businessSize) {
-      await businessSize.deleteOne(); // Use deleteOne() for Mongoose 6+
-      res.json({ message: 'Business size removed' });
+      // await businessSize.deleteOne(); // Use deleteOne() for Mongoose 6+
+      const updatedBusinessSize = await BusinessSize.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            status: "Inactive",
+          },
+        },
+        {
+          new: true,
+        }
+      );
+      res.json({ message: "Business size removed" });
     } else {
-      res.status(404).json({ message: 'Business size not found' });
+      res.status(404).json({ message: "Business size not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });

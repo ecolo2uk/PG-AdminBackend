@@ -1,23 +1,31 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const agreementSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    trim: true,
+const agreementSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    type: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      default: "",
+    },
+    status: {
+      type: String,
+      enum: ["Active", "Inactive"],
+      default: "Active",
+    },
   },
-  type: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  description: {
-    type: String,
-    default: '',
-  },
-}, {
-  timestamps: true,
-});
+  {
+    timestamps: true,
+  }
+);
 
-const Agreement = mongoose.model('Agreement', agreementSchema);
+const Agreement = mongoose.model("Agreement", agreementSchema);
 export default Agreement;

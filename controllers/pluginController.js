@@ -1,11 +1,11 @@
-import Plugin from '../models/pluginModel.js';
+import Plugin from "../models/pluginModel.js";
 
 // @desc    Get all plugins
 // @route   GET /api/plugins
 // @access  Private (You'll want to add authentication/authorization middleware)
 const getPlugins = async (req, res) => {
   try {
-    const plugins = await Plugin.find({});
+    const plugins = await Plugin.find({ status: "Active" });
     res.status(200).json(plugins);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -21,7 +21,7 @@ const getPluginById = async (req, res) => {
     if (plugin) {
       res.status(200).json(plugin);
     } else {
-      res.status(404).json({ message: 'Plugin not found' });
+      res.status(404).json({ message: "Plugin not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -36,13 +36,15 @@ const createPlugin = async (req, res) => {
 
   // Basic validation
   if (!name) {
-    return res.status(400).json({ message: 'Plugin name is required' });
+    return res.status(400).json({ message: "Plugin name is required" });
   }
 
   try {
     const pluginExists = await Plugin.findOne({ name });
     if (pluginExists) {
-      return res.status(400).json({ message: 'Plugin with this name already exists' });
+      return res
+        .status(400)
+        .json({ message: "Plugin with this name already exists" });
     }
 
     const plugin = await Plugin.create({
@@ -74,7 +76,7 @@ const updatePlugin = async (req, res) => {
       const updatedPlugin = await plugin.save();
       res.status(200).json(updatedPlugin);
     } else {
-      res.status(404).json({ message: 'Plugin not found' });
+      res.status(404).json({ message: "Plugin not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -89,20 +91,25 @@ const deletePlugin = async (req, res) => {
     const plugin = await Plugin.findById(req.params.id);
 
     if (plugin) {
-      await Plugin.deleteOne({ _id: req.params.id }); // Using deleteOne for Mongoose 6+
-      res.status(200).json({ message: 'Plugin removed' });
+      // await Plugin.deleteOne({ _id: req.params.id }); // Using deleteOne for Mongoose 6+
+      const updatePlugin = await Plugin.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            status: "Inactive",
+          },
+        },
+        {
+          new: true,
+        }
+      );
+      res.status(200).json({ message: "Plugin removed" });
     } else {
-      res.status(404).json({ message: 'Plugin not found' });
+      res.status(404).json({ message: "Plugin not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-export {
-  getPlugins,
-  getPluginById,
-  createPlugin,
-  updatePlugin,
-  deletePlugin,
-};
+export { getPlugins, getPluginById, createPlugin, updatePlugin, deletePlugin };

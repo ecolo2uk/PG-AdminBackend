@@ -1,18 +1,23 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const SolutionSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    unique: true, 
+    unique: true,
   },
   iconClass: {
     type: String,
-    required: false, 
+    required: false,
   },
   iconImage: {
     type: String,
-    required: false, 
+    required: false,
+  },
+  status: {
+    type: String,
+    enum: ["Active", "Inactive"],
+    default: "Active",
   },
   createdAt: {
     type: Date,
@@ -24,10 +29,10 @@ const SolutionSchema = new mongoose.Schema({
   },
 });
 
-SolutionSchema.pre('save', function(next) {
+SolutionSchema.pre("save", function (next) {
   this.updatedAt = Date.now();
   next();
 });
 
-const Solution = mongoose.model('Solution', SolutionSchema);
+const Solution = mongoose.model("Solution", SolutionSchema);
 export default Solution;
