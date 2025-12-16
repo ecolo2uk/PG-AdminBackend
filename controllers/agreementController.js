@@ -71,11 +71,17 @@ export const deleteAgreement = async (req, res) => {
     if (!deletedAgreement) {
       return res.status(404).json({ message: "Agreement not found" });
     }
-    const updatedAgreement = await Agreement.findByIdAndUpdate(id, {
-      $set: {
-        status: "Inactive",
+    const updatedAgreement = await Agreement.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: "Inactive",
+        },
       },
-    });
+      {
+        new: true,
+      }
+    );
     res.status(200).json({ message: "Agreement deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });

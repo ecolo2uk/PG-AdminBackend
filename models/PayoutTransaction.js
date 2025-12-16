@@ -4,7 +4,7 @@ const payoutTransactionSchema = new mongoose.Schema(
   {
     payoutId: {
       type: String,
-      required: true,
+      // required: true,
       unique: true,
     },
     utr: {
@@ -46,7 +46,7 @@ const payoutTransactionSchema = new mongoose.Schema(
     },
     settlementAmount: {
       type: Number,
-      required: true,
+      // required: true,
     },
 
     accountNumber: {
@@ -159,69 +159,69 @@ const payoutTransactionSchema = new mongoose.Schema(
   }
 );
 
-payoutTransactionSchema.post("save", async function (doc) {
-  try {
-    console.log(`🔄 Auto-syncing payout to merchant: ${doc.transactionId}`);
+// payoutTransactionSchema.post("save", async function (doc) {
+//   try {
+// console.log(`🔄 Auto-syncing payout to merchant: ${doc.transactionId}`);
 
-    const Merchant = mongoose.model("Merchant");
-    const User = mongoose.model("User");
+// const Merchant = mongoose.model("Merchant");
+// const User = mongoose.model("User");
 
-    const merchant = await Merchant.findOne({ userId: doc.merchantId });
+// const merchant = await Merchant.findOne({ userId: doc.merchantId });
 
-    if (!merchant) {
-      console.log("❌ Merchant not found for payout auto-sync");
-      return;
-    }
+// if (!merchant) {
+//   console.log("❌ Merchant not found for payout auto-sync");
+//   return;
+// }
 
-    if (!merchant.payoutTransactions.includes(doc._id)) {
-      merchant.payoutTransactions.push(doc._id);
-    }
+// if (!merchant.payoutTransactions.includes(doc._id)) {
+//   merchant.payoutTransactions.push(doc._id);
+// }
 
-    const newPayout = {
-      transactionId: doc.transactionId || doc.utr,
-      type: "payout",
-      transactionType: doc.transactionType,
-      amount: doc.amount,
-      status: doc.status,
-      reference: doc.utr,
-      method: doc.paymentMode,
-      remark: doc.remark || "Payout Processed",
-      date: doc.createdAt,
-      customer: "N/A",
-    };
+// const newPayout = {
+//   transactionId: doc.transactionId || doc.utr,
+//   type: "payout",
+//   transactionType: doc.transactionType,
+//   amount: doc.amount,
+//   status: doc.status,
+//   reference: doc.utr,
+//   method: doc.paymentMode,
+//   remark: doc.remark || "Payout Processed",
+//   date: doc.createdAt,
+//   customer: "N/A",
+// };
 
-    merchant.recentTransactions.unshift(newPayout);
+// merchant.recentTransactions.unshift(newPayout);
 
-    if (merchant.recentTransactions.length > 20) {
-      merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
-    }
+// if (merchant.recentTransactions.length > 20) {
+//   merchant.recentTransactions = merchant.recentTransactions.slice(0, 20);
+// }
 
-    if (doc.status === "Success") {
-      if (doc.transactionType === "Debit") {
-        merchant.availableBalance -= doc.amount;
-        merchant.totalDebits += doc.amount;
+// if (doc.status === "Success") {
+//   if (doc.transactionType === "Debit") {
+//     merchant.availableBalance -= doc.amount;
+//     merchant.totalDebits += doc.amount;
 
-        await User.findByIdAndUpdate(doc.merchantId, {
-          $inc: { balance: -doc.amount },
-        });
-      } else if (doc.transactionType === "Credit") {
-        merchant.availableBalance += doc.amount;
-        merchant.totalCredits += doc.amount;
+//     await User.findByIdAndUpdate(doc.merchantId, {
+//       $inc: { balance: -doc.amount },
+//     });
+//   } else if (doc.transactionType === "Credit") {
+//     merchant.availableBalance += doc.amount;
+//     merchant.totalCredits += doc.amount;
 
-        await User.findByIdAndUpdate(doc.merchantId, {
-          $inc: { balance: doc.amount },
-        });
-      }
+//     await User.findByIdAndUpdate(doc.merchantId, {
+//       $inc: { balance: doc.amount },
+//     });
+//   }
 
-      merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
-    }
+//   merchant.netEarnings = merchant.totalCredits - merchant.totalDebits;
+// }
 
-    await merchant.save();
-    console.log(`✅ Auto-synced payout for merchant: ${merchant.merchantName}`);
-  } catch (error) {
-    console.error("❌ Error in payout auto-sync:", error);
-  }
-});
+// await merchant.save();
+// console.log(`✅ Auto-synced payout for merchant: ${merchant.merchantName}`);
+//   } catch (error) {
+//     console.error("❌ Error in payout auto-sync:", error);
+//   }
+// });
 // payoutTransactionSchema.index({ utr: 1 }, {
 //   unique: true,
 //   sparse: true,

@@ -58,6 +58,42 @@ export const getAllTransactionsSimple = async (req, res) => {
   }
 };
 
+// export const getAllTransactionsSimple = async (req, res) => {
+//   try {
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 20;
+//     const skip = (page - 1) * limit;
+
+//     const query = { paymentMethod: { $regex: /^upi$/i } };
+
+//     const [transactions, totalRecords] = await Promise.all([
+//       Transaction.find(query)
+//         .select(
+//           "_id transactionId merchantOrderId txnRefId utr merchantId merchantName customerEmail status amount createdAt paymentMethod customerName customerVpa"
+//         )
+//         .populate("merchantId", "company firstname lastname email")
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(limit)
+//         .lean(),
+//       Transaction.countDocuments(query),
+//     ]);
+
+//     res.status(200).json({
+//       data: transactions,
+//       pagination: {
+//         page,
+//         limit,
+//         totalRecords,
+//         totalPages: Math.ceil(totalRecords / limit),
+//       },
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ message: "Server Error" });
+//   }
+// };
+
 // --- Get All Payment Transactions with Advanced Filters & Pagination ---
 export const getAllPaymentTransactions = async (req, res) => {
   try {
@@ -452,9 +488,9 @@ export const autoSyncToMerchant = async (merchantUserId, transaction, type) => {
     ).length;
 
     await merchant.save();
-    console.log(
-      `✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`
-    );
+    // console.log(
+    //   `✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`
+    // );
   } catch (error) {
     console.error("❌ Error in auto-sync:", error);
   }

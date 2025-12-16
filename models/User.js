@@ -47,7 +47,6 @@ const UserSchema = new mongoose.Schema(
     },
     contact: {
       type: String,
-
       trim: true,
     },
     mid: {

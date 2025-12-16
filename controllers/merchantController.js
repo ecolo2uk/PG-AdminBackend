@@ -51,9 +51,9 @@ const autoSyncTransaction = async (merchantUserId, transaction, type) => {
     }
 
     await merchant.save();
-    console.log(
-      `✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`
-    );
+    // console.log(
+    //   `✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`
+    // );
   } catch (error) {
     console.error("❌ Error in auto-sync:", error);
   }
@@ -61,11 +61,11 @@ const autoSyncTransaction = async (merchantUserId, transaction, type) => {
 
 const autoSyncToMerchant = async (merchantUserId, transactionData, type) => {
   try {
-    console.log(`🔄 Auto-syncing ${type} transaction to merchant table`);
+    // console.log(`🔄 Auto-syncing ${type} transaction to merchant table`);
 
     const merchant = await Merchant.findOne({ userId: merchantUserId });
     if (!merchant) {
-      console.log("❌ Merchant not found for auto-sync");
+      // console.log("❌ Merchant not found for auto-sync");
       return;
     }
 
@@ -126,9 +126,9 @@ const autoSyncToMerchant = async (merchantUserId, transactionData, type) => {
     }
 
     await merchant.save();
-    console.log(
-      `✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`
-    );
+    // console.log(
+    //   `✅ Auto-synced ${type} transaction for merchant: ${merchant.merchantName}`
+    // );
   } catch (error) {
     console.error("❌ Error in auto-sync to merchant:", error);
   }
@@ -780,7 +780,7 @@ export const getMerchantDashboard = async (req, res) => {
   try {
     const { merchantId } = req.params;
 
-    console.log("🔄 Fetching dashboard for merchant:", merchantId);
+    // console.log("🔄 Fetching dashboard for merchant:", merchantId);
 
     // Validate merchantId
     if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
@@ -909,7 +909,7 @@ export const getMerchantDashboard = async (req, res) => {
       })),
     };
 
-    console.log("✅ Dashboard data prepared for merchant:", merchantId);
+    // console.log("✅ Dashboard data prepared for merchant:", merchantId);
 
     res.status(200).json({
       success: true,
@@ -929,7 +929,7 @@ export const syncMerchantTransactions = async (req, res) => {
   try {
     const { merchantId } = req.params;
 
-    console.log("🔄 Syncing transactions for merchant:", merchantId);
+    // console.log("🔄 Syncing transactions for merchant:", merchantId);
 
     // Validate merchantId
     if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
@@ -1020,9 +1020,9 @@ export const syncMerchantTransactions = async (req, res) => {
       }
     }
 
-    console.log(
-      `✅ Synced ${syncedCount} transactions for merchant: ${merchantId}`
-    );
+    // console.log(
+    //   `✅ Synced ${syncedCount} transactions for merchant: ${merchantId}`
+    // );
 
     res.status(200).json({
       success: true,
@@ -1215,7 +1215,7 @@ export const getAllMerchants = async (req, res) => {
 
 export const getMerchantUsers = async (req, res) => {
   try {
-    console.log("🔍 Fetching merchant users with today net payin...");
+    // console.log("🔍 Fetching merchant users with today net payin...");
 
     // 🔥 Start of today
     const startOfDay = new Date();
@@ -1223,7 +1223,7 @@ export const getMerchantUsers = async (req, res) => {
 
     const users = await User.aggregate([
       {
-        $match: { role: "merchant" },
+        $match: { role: "merchant", status: "Active" },
       },
       {
         $lookup: {
@@ -1305,7 +1305,7 @@ export const createMerchantUser = async (req, res) => {
   try {
     const { firstname, lastname, company, email, password, contact } = req.body;
 
-    console.log("🔄 STEP 1: Starting merchant creation process...", req.body);
+    // console.log("🔄 STEP 1: Starting merchant creation process...", req.body);
 
     // Enhanced Validation
     if (
@@ -1316,7 +1316,7 @@ export const createMerchantUser = async (req, res) => {
       !contact?.trim()
     ) {
       await session.abortTransaction();
-      console.log("❌ Validation failed: Missing required fields");
+      // console.log("❌ Validation failed: Missing required fields");
       return res.status(400).json({
         success: false,
         message: "Please enter all required fields.",
@@ -1327,14 +1327,14 @@ export const createMerchantUser = async (req, res) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       await session.abortTransaction();
-      console.log("❌ Validation failed: Invalid email format");
+      // console.log("❌ Validation failed: Invalid email format");
       return res.status(400).json({
         success: false,
         message: "Please enter a valid email address.",
       });
     }
 
-    console.log("🔄 STEP 2: Checking for existing user...");
+    // console.log("🔄 STEP 2: Checking for existing user...");
 
     // Check if user already exists (case insensitive)
     const existingUser = await User.findOne({
@@ -1343,14 +1343,14 @@ export const createMerchantUser = async (req, res) => {
 
     if (existingUser) {
       await session.abortTransaction();
-      console.log("❌ User already exists:", email);
+      // console.log("❌ User already exists:", email);
       return res.status(400).json({
         success: false,
         message: "A user with this email already exists.",
       });
     }
 
-    console.log("🔄 STEP 3: Generating MID and hashing password...");
+    // console.log("🔄 STEP 3: Generating MID and hashing password...");
 
     // Hash password
     const salt = await bcrypt.genSalt(10);
@@ -1364,7 +1364,7 @@ export const createMerchantUser = async (req, res) => {
         .toString()
         .padStart(3, "0");
 
-    console.log("🔄 STEP 4: Creating User document...");
+    // console.log("🔄 STEP 4: Creating User document...");
 
     // 1. FIRST CREATE USER - WITH ALL REQUIRED FIELDS
     const userData = {
@@ -1381,7 +1381,7 @@ export const createMerchantUser = async (req, res) => {
       status: "Active",
     };
 
-    console.log("📝 User data to be saved:", userData);
+    // console.log("📝 User data to be saved:", userData);
 
     const user = new User(userData);
 
@@ -1389,7 +1389,7 @@ export const createMerchantUser = async (req, res) => {
     const userValidationError = user.validateSync();
     if (userValidationError) {
       await session.abortTransaction();
-      console.log("❌ User validation failed:", userValidationError.errors);
+      // console.log("❌ User validation failed:", userValidationError.errors);
       return res.status(400).json({
         success: false,
         message: `User validation failed: ${Object.values(
@@ -1401,9 +1401,9 @@ export const createMerchantUser = async (req, res) => {
     }
 
     const savedUser = await user.save({ session });
-    console.log("✅ STEP 5: User created successfully:", savedUser._id);
+    // console.log("✅ STEP 5: User created successfully:", savedUser._id);
 
-    console.log("🔄 STEP 6: Creating Merchant document...");
+    // console.log("🔄 STEP 6: Creating Merchant document...");
 
     // 2. THEN CREATE MERCHANT RECORD
     const merchantName =
@@ -1435,7 +1435,7 @@ export const createMerchantUser = async (req, res) => {
       failedTransactions: 0,
     };
 
-    console.log("📝 Merchant data to be saved:", merchantData);
+    // console.log("📝 Merchant data to be saved:", merchantData);
 
     const merchant = new Merchant(merchantData);
 
@@ -1443,10 +1443,10 @@ export const createMerchantUser = async (req, res) => {
     const merchantValidationError = merchant.validateSync();
     if (merchantValidationError) {
       await session.abortTransaction();
-      console.log(
-        "❌ Merchant validation failed:",
-        merchantValidationError.errors
-      );
+      // console.log(
+      //   "❌ Merchant validation failed:",
+      //   merchantValidationError.errors
+      // );
       return res.status(400).json({
         success: false,
         message: `Merchant validation failed: ${Object.values(
@@ -1458,9 +1458,9 @@ export const createMerchantUser = async (req, res) => {
     }
 
     const savedMerchant = await merchant.save({ session });
-    console.log("✅ STEP 7: Merchant created successfully:", savedMerchant._id);
+    // console.log("✅ STEP 7: Merchant created successfully:", savedMerchant._id);
 
-    console.log("🔄 STEP 8: Updating user with merchant reference...");
+    // console.log("🔄 STEP 8: Updating user with merchant reference...");
 
     const payload = {
       userId: savedUser._id,
@@ -1480,12 +1480,12 @@ export const createMerchantUser = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    console.log("🎉 STEP 9: Transaction committed successfully!");
-    console.log("📊 Final Results:");
-    console.log("   👤 User ID:", savedUser._id);
-    console.log("   🏪 Merchant ID:", savedMerchant._id);
-    console.log("   📧 Email:", savedUser.email);
-    console.log("   🆔 MID:", savedUser.mid);
+    // console.log("🎉 STEP 9: Transaction committed successfully!");
+    // console.log("📊 Final Results:");
+    // console.log("   👤 User ID:", savedUser._id);
+    // console.log("   🏪 Merchant ID:", savedMerchant._id);
+    // console.log("   📧 Email:", savedUser.email);
+    // console.log("   🆔 MID:", savedUser.mid);
 
     // Prepare response without password
     const userResponse = savedUser.toObject();
@@ -1508,7 +1508,7 @@ export const createMerchantUser = async (req, res) => {
     // Handle duplicate key errors
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
-      console.log(`❌ Duplicate key error on field: ${field}`);
+      // console.log(`❌ Duplicate key error on field: ${field}`);
       return res.status(400).json({
         success: false,
         message: `A user with this ${field} already exists.`,
@@ -1518,7 +1518,7 @@ export const createMerchantUser = async (req, res) => {
     // Handle validation errors
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
-      console.log(`❌ Validation error: ${messages.join(", ")}`);
+      // console.log(`❌ Validation error: ${messages.join(", ")}`);
       return res.status(400).json({
         success: false,
         message: messages.join(", "),
@@ -1536,7 +1536,7 @@ export const createMerchantUser = async (req, res) => {
 // Update Merchant User
 export const updateMerchantUser = async (req, res) => {
   try {
-    console.log("🔄 Updating merchant user:", req.params.id, req.body);
+    // console.log("🔄 Updating merchant user:", req.params.id, req.body);
 
     const { firstname, lastname, company, email, contact, status, password } =
       req.body;
@@ -1595,7 +1595,7 @@ export const updateMerchantUser = async (req, res) => {
     const userResponse = updatedUser.toObject();
     delete userResponse.password;
 
-    console.log("✅ Merchant user updated successfully");
+    // console.log("✅ Merchant user updated successfully");
 
     res.status(200).json({
       success: true,
@@ -1622,7 +1622,7 @@ export const updateMerchantUser = async (req, res) => {
 
 export const setMerchantTransactionLimit = async (req, res) => {
   try {
-    console.log("🔄 Updating merchant user limit:", req.params.id, req.body);
+    // console.log("🔄 Updating merchant user limit:", req.params.id, req.body);
 
     const { transactionLimit } = req.body;
     const userId = req.params.id;
@@ -1668,7 +1668,7 @@ export const setMerchantTransactionLimit = async (req, res) => {
 
 export const changeMerchantPassword = async (req, res) => {
   try {
-    console.log("🔄 Updating merchant password:", req.params.id, req.body);
+    // console.log("🔄 Updating merchant password:", req.params.id, req.body);
 
     const { password } = req.body;
 
@@ -1744,7 +1744,7 @@ export const changeMerchantPassword = async (req, res) => {
 // Delete Merchant User
 export const deleteMerchantUser = async (req, res) => {
   try {
-    console.log("🗑️ Deleting merchant user:", req.params.id);
+    // console.log("🗑️ Deleting merchant user:", req.params.id);
 
     const user = await User.findById(req.params.id);
 
@@ -1777,7 +1777,7 @@ export const deleteMerchantUser = async (req, res) => {
       }
     );
 
-    console.log("✅ Merchant user deleted successfully");
+    // console.log("✅ Merchant user deleted successfully");
 
     res.status(200).json({
       success: true,
@@ -2015,7 +2015,7 @@ export const getMerchantConnectors = async (req, res) => {
   try {
     const { merchantId } = req.params;
 
-    console.log("🔍 Fetching connector accounts for merchant:", merchantId);
+    // console.log("🔍 Fetching connector accounts for merchant:", merchantId);
 
     // Validate merchantId
     if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
@@ -2043,9 +2043,9 @@ export const getMerchantConnectors = async (req, res) => {
       .select("terminalId industry percentage isPrimary status")
       .lean();
 
-    console.log(
-      `✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchantId}`
-    );
+    // console.log(
+    //   `✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchantId}`
+    // );
 
     const formattedAccounts = connectorAccounts.map((account) => ({
       _id: account._id,
@@ -2079,7 +2079,7 @@ export const getMerchantConnectors = async (req, res) => {
 export const debugRoutes = async (req, res) => {
   try {
     const { merchantId } = req.params;
-    console.log("🔍 DEBUG: Checking routes for merchant:", merchantId);
+    // console.log("🔍 DEBUG: Checking routes for merchant:", merchantId);
 
     // Check if merchant exists
     const merchant = await User.findById(merchantId);

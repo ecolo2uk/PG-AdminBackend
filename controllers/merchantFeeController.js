@@ -15,7 +15,7 @@ export const createMerchantFee = async (req, res) => {
       metadata = {},
     } = req.body;
 
-    console.log("💰 Creating merchant fee:", { merchantId, amount, feeType });
+    // console.log("💰 Creating merchant fee:", { merchantId, amount, feeType });
 
     // Validate required fields
     if (!merchantId || !amount || !feeType || !description) {
@@ -62,7 +62,7 @@ export const createMerchantFee = async (req, res) => {
 
     await merchantFee.save();
 
-    console.log("✅ Merchant fee created successfully:", merchantFee._id);
+    // console.log("✅ Merchant fee created successfully:", merchantFee._id);
 
     res.status(201).json({
       success: true,
@@ -93,14 +93,14 @@ export const getMerchantFeeHistory = async (req, res) => {
       merchantId,
     } = req.query;
 
-    console.log("📊 Fetching merchant fee history with filters:", {
-      search,
-      startDate,
-      endDate,
-      feeType,
-      status,
-      merchantId,
-    });
+    // console.log("📊 Fetching merchant fee history with filters:", {
+    //   search,
+    //   startDate,
+    //   endDate,
+    //   feeType,
+    //   status,
+    //   merchantId,
+    // });
 
     // Build query
     const query = {};

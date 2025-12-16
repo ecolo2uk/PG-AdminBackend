@@ -14,11 +14,11 @@ export const createBankSettlement = async (req, res) => {
       remarks,
     } = req.body;
 
-    console.log("🏦 Creating bank settlement:", {
-      connectorId,
-      connectorAccountId,
-      settlementAmount,
-    });
+    // console.log("🏦 Creating bank settlement:", {
+    //   connectorId,
+    //   connectorAccountId,
+    //   settlementAmount,
+    // });
 
     // Validate required fields
     if (
@@ -74,7 +74,7 @@ export const createBankSettlement = async (req, res) => {
 
     await bankSettlement.save();
 
-    console.log("✅ Bank settlement created successfully:", bankSettlement._id);
+    // console.log("✅ Bank settlement created successfully:", bankSettlement._id);
 
     res.status(201).json({
       success: true,
@@ -102,16 +102,16 @@ export const getBankSettlementHistory = async (req, res) => {
       connectorId,
     } = req.query;
 
-    console.log(
-      "📊 Fetching bank settlement history with filters:",
-      // req.query,
-      {
-        search,
-        startDate,
-        endDate,
-        connectorId,
-      }
-    );
+    // console.log(
+    //   "📊 Fetching bank settlement history with filters:",
+    //   req.query,
+    //   {
+    //     search,
+    //     startDate,
+    //     endDate,
+    //     connectorId,
+    //   }
+    // );
 
     // Build query
     const query = {};
@@ -246,7 +246,19 @@ export const deleteBankSettlement = async (req, res) => {
       });
     }
 
-    await BankSettlement.findByIdAndDelete(id);
+    // await BankSettlement.findByIdAndDelete(id);
+
+    await BankSettlement.findById(
+      id,
+      {
+        $set: {
+          status: "INACTIVE",
+        },
+      },
+      {
+        new: true,
+      }
+    );
 
     res.status(200).json({
       success: true,

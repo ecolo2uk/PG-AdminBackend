@@ -6,13 +6,13 @@ import ConnectorAccount from "../models/ConnectorAccount.js";
 // Get connectors for calculator (only active ones)
 export const getCalculatorConnectors = async (req, res) => {
   try {
-    console.log("🔍 Fetching connectors...");
+    // console.log("🔍 Fetching connectors...");
 
     const connectors = await Connector.find({
       status: "Active",
     }).select("name connectorType status isPayoutSupport");
 
-    console.log(`✅ Found ${connectors.length} connectors`);
+    // console.log(`✅ Found ${connectors.length} connectors`);
 
     res.status(200).json({
       success: true,
@@ -32,7 +32,7 @@ export const getCalculatorConnectors = async (req, res) => {
 export const getCalculatorConnectorAccounts = async (req, res) => {
   try {
     const { connectorId } = req.params;
-    console.log("🔍 Fetching connector accounts for:", connectorId);
+    // console.log("🔍 Fetching connector accounts for:", connectorId);
 
     if (!connectorId) {
       return res.status(400).json({
@@ -46,9 +46,9 @@ export const getCalculatorConnectorAccounts = async (req, res) => {
       status: "Active",
     }).select("name currency status limits integrationKeys");
 
-    console.log(
-      `✅ Found ${connectorAccounts.length} accounts for connector ${connectorId}`
-    );
+    // console.log(
+    //   `✅ Found ${connectorAccounts.length} accounts for connector ${connectorId}`
+    // );
 
     res.status(200).json({
       success: true,
@@ -69,12 +69,12 @@ export const calculateSettlement = async (req, res) => {
   try {
     const { connectorId, connectorAccountId, startDate, endDate } = req.body;
 
-    console.log("🧮 Calculating settlement with:", {
-      connectorId,
-      connectorAccountId,
-      startDate,
-      endDate,
-    });
+    // console.log("🧮 Calculating settlement with:", {
+    //   connectorId,
+    //   connectorAccountId,
+    //   startDate,
+    //   endDate,
+    // });
 
     // Validate required fields
     if (!connectorId || !connectorAccountId || !startDate || !endDate) {
@@ -145,7 +145,7 @@ export const calculateSettlement = async (req, res) => {
 
     await calculation.save();
 
-    console.log("✅ Settlement calculated successfully:", calculation._id);
+    // console.log("✅ Settlement calculated successfully:", calculation._id);
 
     res.status(200).json({
       success: true,
@@ -176,7 +176,7 @@ export const calculateSettlement = async (req, res) => {
 export const getCalculationHistory = async (req, res) => {
   try {
     const { page = 1, limit = 10, search } = req.query;
-    console.log(req.query, "Q2");
+    // console.log(req.query, "Q2");
     // const query = {};
     // if (search) {
     //   query.$or = [

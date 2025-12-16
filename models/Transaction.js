@@ -77,6 +77,14 @@ const transactionSchema = new mongoose.Schema(
       ],
     },
 
+    payInApplied: { type: Boolean, default: false },
+    wasFailed: { type: Boolean, default: false },
+    totalApplied: { type: Boolean, default: false },
+
+    previousStatus: {
+      type: String,
+    },
+
     // =========================
     // PAYMENT DETAILS
     // =========================
@@ -288,6 +296,8 @@ transactionSchema.index({ merchantId: 1, createdAt: -1 });
 transactionSchema.index({ enpayTxnId: 1 });
 transactionSchema.index({ status: 1 });
 transactionSchema.index({ createdAt: -1 });
+transactionSchema.index({ paymentMethod: 1, createdAt: -1 });
+transactionSchema.index({ status: 1, payInApplied: 1 });
 
 // =========================
 // METHODS
