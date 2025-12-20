@@ -297,7 +297,7 @@ export const generatePaymentLink = async (req, res) => {
       gatewayOrderId: paymentResult.gatewayOrderId,
 
       customerName: `${merchant.firstname} ${merchant.lastname}`,
-      customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+      customerVpa: "",
       customerContact: merchant.contact || "",
       customerEmail: merchant.email || "",
 
@@ -593,7 +593,7 @@ const generateEnpayPayment = async ({
   connectorAccount,
 }) => {
   try {
-    // console.log("🔹 Generating Enpay Payment");
+    // console.log("🔹 Generating Enpay Payment", connectorAccount);
 
     // 1. Get Keys (Calculated in main function)
     const keys = connectorAccount.extractedKeys || {};
@@ -678,6 +678,379 @@ const generateEnpayPayment = async ({
 };
 
 // ✅ FIXED: CASHFREE PAYMENT GENERATION
+// const generateCashfreePayment = async ({
+//   merchant,
+//   amount,
+//   paymentMethod,
+//   paymentOption,
+//   connectorAccount,
+// }) => {
+//   try {
+//     // console.log("🔗 Generating Cashfree Payment...", connectorAccount);
+
+//     let integrationKeys = {};
+//     // ✅ CRITICAL FIX: Better integration keys extraction
+//     if (connectorAccount?.integrationKeys) {
+//       if (connectorAccount.integrationKeys instanceof Map) {
+//         integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
+//       } else if (typeof connectorAccount.integrationKeys === "object") {
+//         integrationKeys = { ...connectorAccount.integrationKeys };
+//       } else if (typeof connectorAccount.integrationKeys === "string") {
+//         try {
+//           integrationKeys = JSON.parse(connectorAccount.integrationKeys);
+//         } catch (e) {
+//           console.error("❌ Failed to parse integrationKeys string:", e);
+//         }
+//       }
+//     }
+
+//     console.log("🔍 Cashfree Integration Keys:", Object.keys(integrationKeys));
+
+//     // Extract credentials
+//     const clientId =
+//       integrationKeys["x-client-id"] ||
+//       integrationKeys["client_id"] ||
+//       integrationKeys["X-Client-Id"];
+//     const clientSecret =
+//       integrationKeys["x-client-secret"] ||
+//       integrationKeys["client_secret"] ||
+//       integrationKeys["X-Client-Secret"];
+//     const apiVersion =
+//       integrationKeys["x-api-version"] ||
+//       integrationKeys["api_version"] ||
+//       "2023-08-01";
+
+//     // console.log("🔐 Cashfree Credentials Extracted:", {
+//     //   clientId: clientId ? `${clientId.substring(0, 10)}...` : "MISSING",
+//     //   clientSecret: clientSecret
+//     //     ? `${clientSecret.substring(0, 10)}...`
+//     //     : "MISSING",
+//     //   apiVersion: apiVersion,
+//     // });
+
+//     if (!clientId || !clientSecret) {
+//       throw new Error("Missing Cashfree credentials: Client ID or Secret");
+//     }
+
+//     // ✅ FIXED: ALWAYS USE PRODUCTION FOR LIVE CREDENTIALS
+//     const cashfreeBaseURL = "https://api.cashfree.com/pg";
+//     const paymentsBaseURL = "https://payments.cashfree.com/order";
+
+//     // console.log("🎯 Using PRODUCTION Environment:", cashfreeBaseURL);
+//     const returnUrl =
+//       process.env.NODE_ENV === "production"
+//         ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`
+//         : `${API_BASE_URL}/api/payment/cashfree/return`;
+
+//     const notifyUrl =
+//       process.env.NODE_ENV === "production"
+//         ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`
+//         : `${API_BASE_URL}/api/payment/cashfree/webhook`;
+//     // Generate order ID
+//     const timestamp = Date.now();
+//     const random = Math.floor(Math.random() * 1000);
+//     const orderId = `order_${timestamp}_${random}`;
+
+//     const orderAmount = parseFloat(amount);
+//     if (isNaN(orderAmount) || orderAmount < 1) {
+//       throw new Error("Invalid amount. Minimum is 1 INR");
+//     }
+
+//     // ✅ FIXED: Simplified payment methods
+//     const getCashfreePaymentMethods = (method) => {
+//       const methods = {
+//         upi: "upi",
+//         card: "cc,dc",
+//         netbanking: "nb",
+//         wallet: "wallet",
+//       };
+//       return methods[method] || "upi";
+//     };
+
+//     const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
+
+//     // ✅ FIXED: Clean order data without extra fields
+//     const requestData = {
+//       order_amount: orderAmount.toFixed(2),
+//       order_currency: "INR",
+//       order_id: orderId,
+//       customer_details: {
+//         customer_id: merchant.mid || `cust_${timestamp}`,
+//         customer_phone: merchant.contact || "9876543210",
+//         customer_email: merchant.email || "customer@example.com",
+//         customer_name:
+//           `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer",
+//       },
+//       order_meta: {
+//         return_url: returnUrl,
+//         notify_url: notifyUrl,
+//         payment_methods: cashfreeMethods,
+//       },
+//     };
+
+//     // console.log("📤 Cashfree API Request:", {
+//     //   orderId: orderId,
+//     //   amount: orderAmount,
+//     //   methods: cashfreeMethods,
+//     // });
+
+//     // ✅ API CALL
+//     let response;
+//     try {
+//       response = await axios.post(`${cashfreeBaseURL}/orders`, requestData, {
+//         headers: {
+//           "Content-Type": "application/json",
+//           "x-client-id": clientId.trim(),
+//           "x-client-secret": clientSecret.trim(),
+//           "x-api-version": apiVersion,
+//           Accept: "application/json",
+//         },
+//         timeout: 30000,
+//       });
+
+//       // console.log("✅ Cashfree API Response Status:", response.status);
+//     } catch (apiError) {
+//       console.error("❌ Cashfree API Call Failed:", apiError.message);
+
+//       if (apiError.response) {
+//         console.error("🔍 Cashfree API Error Details:", {
+//           status: apiError.response.status,
+//           data: apiError.response.data,
+//         });
+
+//         if (apiError.response.status === 401) {
+//           throw new Error(
+//             "Cashfree: Invalid credentials - Check Client ID/Secret"
+//           );
+//         } else if (apiError.response.status === 403) {
+//           throw new Error("Cashfree: Account not activated or restricted");
+//         } else if (apiError.response.data?.message) {
+//           throw new Error(`Cashfree: ${apiError.response.data.message}`);
+//         }
+//       }
+
+//       throw new Error(`Cashfree API call failed: ${apiError.message}`);
+//     }
+
+//     // ✅ VALIDATE RESPONSE
+//     if (!response.data) {
+//       throw new Error("Cashfree API returned empty response");
+//     }
+
+//     if (!response.data.payment_session_id) {
+//       console.error("❌ No payment_session_id in response:", response.data);
+//       throw new Error("Cashfree API did not return payment session ID");
+//     }
+
+//     // ✅ FIXED: Generate proper payment link
+//     const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
+
+//     // console.log("🎯 Generated Payment Link Successfully");
+//     // console.log(
+//     //   "🔑 Payment Session ID:",
+//     //   response.data.payment_session_id.substring(0, 30) + "..."
+//     // );
+//     // console.log("🔗 Full Payment Link:", paymentLink);
+
+//     return {
+//       paymentLink: paymentLink,
+//       merchantOrderId: orderId,
+//       txnRefId: `txn_${timestamp}_${random}`,
+//       gatewayTxnId: response.data.cf_order_id,
+//       gatewayOrderId: response.data.order_id,
+//       cfOrderId: response.data.cf_order_id,
+//       cfPaymentLink: paymentLink,
+//       paymentSessionId: response.data.payment_session_id,
+//       environment: "production",
+//     };
+//   } catch (error) {
+//     console.error("❌ Cashfree payment generation failed:", error);
+
+//     // Improved error messages
+//     if (error.message.includes("client session is invalid")) {
+//       throw new Error(
+//         "Cashfree: Session expired or invalid. Please try generating a new payment link."
+//       );
+//     } else if (
+//       error.message.includes("Unauthorized") ||
+//       error.message.includes("401")
+//     ) {
+//       throw new Error("Cashfree: Invalid Client ID or Secret");
+//     }
+
+//     throw new Error(`Cashfree payment failed: ${error.message}`);
+//   }
+// };
+
+// const generateCashfreePayment = async ({
+//   merchant,
+//   amount,
+//   paymentMethod,
+//   paymentOption,
+//   connectorAccount,
+// }) => {
+//   try {
+//     console.log("🔗 Generating Cashfree Payment...", connectorAccount);
+
+//     // 1. Get Keys (Calculated in main function)
+//     const integrationKeys = connectorAccount.extractedKeys || {};
+
+//     const clientId = integrationKeys["x-client-id"];
+//     const clientSecret = integrationKeys["x-client-secret"];
+//     const apiVersion = integrationKeys["x-api-version"];
+//     const cashfreeBaseUrl = integrationKeys["cashfreeBaseUrl"];
+//     // const paymentBaseUrl = integrationKeys["paymentBaseUrl"];
+
+//     // 2. Validate Keys
+//     if (!clientId || !clientSecret || !apiVersion || !cashfreeBaseUrl) {
+//       console.error("❌ Missing Enpay Credentials. Found:", Object.keys(keys));
+//       return res.status(400).json({
+//         success: false,
+//         message: "Integration keys missing for Cashfree connector",
+//       });
+//     }
+
+//     console.log(
+//       "🎯 Using PRODUCTION Environment:",
+//       FRONTEND_BASE_URL,
+//       API_BASE_URL
+//     );
+//     const returnUrl = `${FRONTEND_BASE_URL}/payment-success`;
+
+//     const notifyUrl = `${API_BASE_URL}/api/payment/cashfree/webhook`;
+//     // Generate order ID
+//     const random = Math.floor(Math.random() * 1000);
+//     const timestamp = Date.now();
+//     const orderId = `order_${timestamp}_${random}`;
+
+//     const txnRefId = generateTxnRefId();
+
+//     // ✅ FIXED: Simplified payment methods
+//     const getCashfreePaymentMethods = (method) => {
+//       const methods = {
+//         upi: "upi",
+//         card: "cc,dc",
+//         netbanking: "nb",
+//         wallet: "wallet",
+//       };
+//       return methods[method] || "upi";
+//     };
+
+//     const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
+
+//     // ✅ FIXED: Clean order data without extra fields
+//     const requestData = {
+//       order_id: orderId,
+//       order_amount: Number(Number(amount).toFixed(2)),
+//       order_currency: "INR",
+//       customer_details: {
+//         customer_id: merchant.mid || `cust_${timestamp}`,
+//         customer_phone: merchant.contact || "",
+//         customer_email: merchant.email || "",
+//         customer_name:
+//           `${merchant.firstname} ${merchant.lastname}`.trim() || "",
+//       },
+//       order_meta: {
+//         return_url: returnUrl,
+//         notify_url: notifyUrl,
+//         payment_methods: cashfreeMethods,
+//       },
+//     };
+
+//     console.log("📤 Cashfree API Request:", {
+//       orderId: orderId,
+//       amount: amount,
+//       methods: cashfreeMethods,
+//     });
+
+//     // ✅ API CALL
+//     let response;
+//     try {
+//       response = await axios.post(`${cashfreeBaseUrl}/links`, requestData, {
+//         headers: {
+//           "Content-Type": "application/json",
+//           "x-client-id": clientId.trim(),
+//           "x-client-secret": clientSecret.trim(),
+//           "x-api-version": apiVersion,
+//           Accept: "application/json",
+//         },
+//         timeout: 30000,
+//       });
+
+//       // console.log("✅ Cashfree API Response Status:", response.status);
+//     } catch (apiError) {
+//       console.error("❌ Cashfree API Call Failed:", apiError.message);
+
+//       if (apiError.response) {
+//         console.error("🔍 Cashfree API Error Details:", {
+//           status: apiError.response.status,
+//           data: apiError.response.data,
+//         });
+
+//         if (apiError.response.status === 401) {
+//           throw new Error(
+//             "Cashfree: Invalid credentials - Check Client ID/Secret"
+//           );
+//         } else if (apiError.response.status === 403) {
+//           throw new Error("Cashfree: Account not activated or restricted");
+//         } else if (apiError.response.data?.message) {
+//           throw new Error(`Cashfree: ${apiError.response.data.message}`);
+//         }
+//       }
+
+//       throw new Error(`Cashfree API call failed: ${apiError.message}`);
+//     }
+
+//     // ✅ VALIDATE RESPONSE
+//     if (!response.data) {
+//       throw new Error("Cashfree API returned empty response");
+//     }
+
+//     if (!response.data.payment_session_id) {
+//       console.error("❌ No payment_session_id in response:", response.data);
+//       throw new Error("Cashfree API did not return payment session ID");
+//     }
+
+//     // ✅ FIXED: Generate proper payment link
+//     const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
+
+//     // console.log("🎯 Generated Payment Link Successfully");
+//     // console.log(
+//     //   "🔑 Payment Session ID:",
+//     //   response.data.payment_session_id.substring(0, 30) + "..."
+//     // );
+//     // console.log("🔗 Full Payment Link:", paymentLink);
+
+//     return {
+//       paymentLink: paymentLink,
+//       merchantOrderId: orderId,
+//       txnRefId: `txn_${timestamp}_${random}`,
+//       gatewayTxnId: response.data.cf_order_id,
+//       gatewayOrderId: response.data.order_id,
+//       cfOrderId: response.data.cf_order_id,
+//       cfPaymentLink: paymentLink,
+//       paymentSessionId: response.data.payment_session_id,
+//       environment: "production",
+//     };
+//   } catch (error) {
+//     console.error("❌ Cashfree payment generation failed:", error);
+
+//     // Improved error messages
+//     if (error.message.includes("client session is invalid")) {
+//       throw new Error(
+//         "Cashfree: Session expired or invalid. Please try generating a new payment link."
+//       );
+//     } else if (
+//       error.message.includes("Unauthorized") ||
+//       error.message.includes("401")
+//     ) {
+//       throw new Error("Cashfree: Invalid Client ID or Secret");
+//     }
+
+//     throw new Error(`Cashfree payment failed: ${error.message}`);
+//   }
+// };
+
 const generateCashfreePayment = async ({
   merchant,
   amount,
@@ -686,199 +1059,105 @@ const generateCashfreePayment = async ({
   connectorAccount,
 }) => {
   try {
-    // console.log("🔗 Generating Cashfree Payment...");
+    console.log(
+      "🔗 Generating Cashfree Payment...",
+      FRONTEND_BASE_URL,
+      API_BASE_URL
+    );
+    // 1. Extract keys
+    const integrationKeys = connectorAccount.extractedKeys || {};
+    const clientId = integrationKeys["x-client-id"];
+    const clientSecret = integrationKeys["x-client-secret"];
+    const apiVersion = integrationKeys["x-api-version"];
+    const cashfreeBaseUrl = integrationKeys["cashfreeBaseUrl"];
 
-    let integrationKeys = {};
-
-    // ✅ CRITICAL FIX: Better integration keys extraction
-    if (connectorAccount?.integrationKeys) {
-      if (connectorAccount.integrationKeys instanceof Map) {
-        integrationKeys = Object.fromEntries(connectorAccount.integrationKeys);
-      } else if (typeof connectorAccount.integrationKeys === "object") {
-        integrationKeys = { ...connectorAccount.integrationKeys };
-      } else if (typeof connectorAccount.integrationKeys === "string") {
-        try {
-          integrationKeys = JSON.parse(connectorAccount.integrationKeys);
-        } catch (e) {
-          console.error("❌ Failed to parse integrationKeys string:", e);
-        }
-      }
+    if (!clientId || !clientSecret || !apiVersion || !cashfreeBaseUrl) {
+      throw new Error("Integration keys missing for Cashfree connector");
     }
 
-    // console.log("🔍 Cashfree Integration Keys:", Object.keys(integrationKeys));
-
-    // Extract credentials
-    const clientId =
-      integrationKeys["x-client-id"] ||
-      integrationKeys["client_id"] ||
-      integrationKeys["X-Client-Id"];
-    const clientSecret =
-      integrationKeys["x-client-secret"] ||
-      integrationKeys["client_secret"] ||
-      integrationKeys["X-Client-Secret"];
-    const apiVersion =
-      integrationKeys["x-api-version"] ||
-      integrationKeys["api_version"] ||
-      "2023-08-01";
-
-    // console.log("🔐 Cashfree Credentials Extracted:", {
-    //   clientId: clientId ? `${clientId.substring(0, 10)}...` : "MISSING",
-    //   clientSecret: clientSecret
-    //     ? `${clientSecret.substring(0, 10)}...`
-    //     : "MISSING",
-    //   apiVersion: apiVersion,
-    // });
-
-    if (!clientId || !clientSecret) {
-      throw new Error("Missing Cashfree credentials: Client ID or Secret");
-    }
-
-    // ✅ FIXED: ALWAYS USE PRODUCTION FOR LIVE CREDENTIALS
-    const cashfreeBaseURL = "https://api.cashfree.com/pg";
-    const paymentsBaseURL = "https://payments.cashfree.com/order";
-
-    // console.log("🎯 Using PRODUCTION Environment:", cashfreeBaseURL);
-    const returnUrl =
-      process.env.NODE_ENV === "production"
-        ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/return`
-        : `${API_BASE_URL}/api/payment/cashfree/return`;
-
-    const notifyUrl =
-      process.env.NODE_ENV === "production"
-        ? `https://pg-admin-backend.vercel.app/api/payment/cashfree/webhook`
-        : `${API_BASE_URL}/api/payment/cashfree/webhook`;
-    // Generate order ID
+    // 2. Build unique link ID
     const timestamp = Date.now();
-    const random = Math.floor(Math.random() * 1000);
-    const orderId = `order_${timestamp}_${random}`;
+    const randomNum = Math.floor(Math.random() * 1000);
+    const linkId = `lnk_${timestamp}_${randomNum}`;
 
-    const orderAmount = parseFloat(amount);
-    if (isNaN(orderAmount) || orderAmount < 1) {
-      throw new Error("Invalid amount. Minimum is 1 INR");
-    }
-
-    // ✅ FIXED: Simplified payment methods
-    const getCashfreePaymentMethods = (method) => {
-      const methods = {
+    // 3. Map payment methods for Cashfree (optional)
+    const getCashfreeMethods = (method) => {
+      const map = {
         upi: "upi",
         card: "cc,dc",
         netbanking: "nb",
         wallet: "wallet",
       };
-      return methods[method] || "upi";
+      return map[method] || "upi";
     };
+    const paymentMethods = getCashfreeMethods(paymentMethod);
 
-    const cashfreeMethods = getCashfreePaymentMethods(paymentMethod);
-
-    // ✅ FIXED: Clean order data without extra fields
-    const requestData = {
-      order_amount: orderAmount.toFixed(2),
-      order_currency: "INR",
-      order_id: orderId,
+    // 4. Build request payload for Payment Links
+    const body = {
+      link_id: linkId,
+      link_amount: Number(amount.toFixed(2)),
+      link_currency: "INR",
+      link_purpose: `Payment for ${merchant.company || merchant.firstname}`,
       customer_details: {
-        customer_id: merchant.mid || `cust_${timestamp}`,
-        customer_phone: merchant.contact || "9876543210",
-        customer_email: merchant.email || "customer@example.com",
-        customer_name:
-          `${merchant.firstname} ${merchant.lastname}`.trim() || "Customer",
+        customer_name: `${merchant.firstname || ""} ${
+          merchant.lastname || ""
+        }`.trim(),
+        customer_phone: merchant.contact || "",
+        customer_email: merchant.email || "",
       },
-      order_meta: {
-        return_url: returnUrl,
-        notify_url: notifyUrl,
-        payment_methods: cashfreeMethods,
+      // optional:
+      link_meta: {
+        return_url: `${FRONTEND_BASE_URL}/payment-success`,
+        notify_url: `${API_BASE_URL}/api/payment/cashfree/webhook`,
+        payment_methods: paymentMethods,
       },
+      link_notify: {
+        send_sms: true,
+        send_email: true,
+      },
+      // optionally set expiry, partial payments, notes etc.
     };
 
-    // console.log("📤 Cashfree API Request:", {
-    //   orderId: orderId,
-    //   amount: orderAmount,
-    //   methods: cashfreeMethods,
-    // });
+    console.log("📤 Cashfree Link Request:", body);
 
-    // ✅ API CALL
-    let response;
-    try {
-      response = await axios.post(`${cashfreeBaseURL}/orders`, requestData, {
-        headers: {
-          "Content-Type": "application/json",
-          "x-client-id": clientId.trim(),
-          "x-client-secret": clientSecret.trim(),
-          "x-api-version": apiVersion,
-          Accept: "application/json",
-        },
-        timeout: 30000,
-      });
+    // 5. Call Cashfree Link API
+    const response = await axios.post(`${cashfreeBaseUrl}/links`, body, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": clientId.trim(),
+        "x-client-secret": clientSecret.trim(),
+        "x-api-version": apiVersion,
+        Accept: "application/json",
+        // you can add x-idempotency-key if needed
+        // "x-idempotency-key": uniqueKey,
+      },
+      timeout: 30000,
+    });
 
-      // console.log("✅ Cashfree API Response Status:", response.status);
-    } catch (apiError) {
-      console.error("❌ Cashfree API Call Failed:", apiError.message);
+    console.log(response, "CASHFREE");
 
-      if (apiError.response) {
-        console.error("🔍 Cashfree API Error Details:", {
-          status: apiError.response.status,
-          data: apiError.response.data,
-        });
-
-        if (apiError.response.status === 401) {
-          throw new Error(
-            "Cashfree: Invalid credentials - Check Client ID/Secret"
-          );
-        } else if (apiError.response.status === 403) {
-          throw new Error("Cashfree: Account not activated or restricted");
-        } else if (apiError.response.data?.message) {
-          throw new Error(`Cashfree: ${apiError.response.data.message}`);
-        }
-      }
-
-      throw new Error(`Cashfree API call failed: ${apiError.message}`);
+    const data = response.data;
+    // 6. Validate response
+    if (!data || !data.link_url) {
+      console.error("❌ Missing link_url:", data);
+      throw new Error("Cashfree did not return payment link URL");
     }
 
-    // ✅ VALIDATE RESPONSE
-    if (!response.data) {
-      throw new Error("Cashfree API returned empty response");
-    }
-
-    if (!response.data.payment_session_id) {
-      console.error("❌ No payment_session_id in response:", response.data);
-      throw new Error("Cashfree API did not return payment session ID");
-    }
-
-    // ✅ FIXED: Generate proper payment link
-    const paymentLink = `${paymentsBaseURL}/#${response.data.payment_session_id}`;
-
-    // console.log("🎯 Generated Payment Link Successfully");
-    // console.log(
-    //   "🔑 Payment Session ID:",
-    //   response.data.payment_session_id.substring(0, 30) + "..."
-    // );
-    // console.log("🔗 Full Payment Link:", paymentLink);
-
+    // 7. Return structured result
     return {
-      paymentLink: paymentLink,
-      merchantOrderId: orderId,
-      txnRefId: `txn_${timestamp}_${random}`,
-      gatewayTxnId: response.data.cf_order_id,
-      gatewayOrderId: response.data.order_id,
-      cfOrderId: response.data.cf_order_id,
-      cfPaymentLink: paymentLink,
-      paymentSessionId: response.data.payment_session_id,
+      paymentLink: data.link_url,
+      merchantOrderId: linkId, // use linkId for tracking
+      txnRefId: `txn_${timestamp}_${randomNum}`,
+      gatewayTxnId: data.cf_link_id,
+      gatewayOrderId: data.link_id,
+      cfLinkId: data.cf_link_id,
       environment: "production",
     };
   } catch (error) {
     console.error("❌ Cashfree payment generation failed:", error);
-
-    // Improved error messages
-    if (error.message.includes("client session is invalid")) {
-      throw new Error(
-        "Cashfree: Session expired or invalid. Please try generating a new payment link."
-      );
-    } else if (
-      error.message.includes("Unauthorized") ||
-      error.message.includes("401")
-    ) {
-      throw new Error("Cashfree: Invalid Client ID or Secret");
+    if (error.response?.data?.message) {
+      throw new Error(`Cashfree: ${error.response.data.message}`);
     }
-
     throw new Error(`Cashfree payment failed: ${error.message}`);
   }
 };
@@ -2665,6 +2944,7 @@ export const updateTransactions = async (req, res) => {
     // Fetch transactions in non-final states
     const transactions = await Transaction.find({
       status: { $in: ["INITIATED", "PENDING"] },
+      // merchantId: "694238fd2475af670efbae35",
     }).limit(100); // limit for cron safety
 
     if (!transactions.length) {

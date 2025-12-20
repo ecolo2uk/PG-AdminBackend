@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import User from "../models/User.js";
 
 // --- Simple version without pagination for testing ---
-export const getAllTransactionsSimple = async (req, res) => {
+export const getAllUPITransactions = async (req, res) => {
   try {
     // console.log("LIMIT", req.query);
     // const { page = 1, limit = 10 } = req.query;
@@ -58,13 +58,104 @@ export const getAllTransactionsSimple = async (req, res) => {
   }
 };
 
-// export const getAllTransactionsSimple = async (req, res) => {
+export const getAllCardTransactions = async (req, res) => {
+  try {
+    // console.log("LIMIT", req.query);
+    // const { page = 1, limit = 10 } = req.query;
+    // const skip = (page - 1) * limit;
+
+    const transactions = await Transaction.find({
+      paymentMethod: { $regex: /^card$/i },
+    })
+      .populate("merchantId", "company firstname lastname email")
+      .sort({ createdAt: -1 });
+    // .skip(skip)
+    // .limit(parseInt(limit));
+
+    // Format transactions for frontend
+    const formattedTransactions = transactions.map((transaction) => ({
+      _id: transaction._id,
+      transactionRefId: transaction.transactionId || transaction._id,
+      merchantOrderId: transaction.merchantOrderId || "N/A",
+      txnRefId: transaction.txnRefId || "N/A",
+      utr: transaction.utr || "N/A",
+      merchantId: transaction.merchantId,
+      merchantName:
+        transaction.merchantName ||
+        (transaction.merchantId
+          ? transaction.merchantId.company ||
+            `${transaction.merchantId.firstname} ${transaction.merchantId.lastname}`
+          : "N/A"),
+      customerEmail: transaction.customerEmail || "N/A",
+      connectorName: "Enpay", // Default value
+      provider: "SKYPAL", // Default value
+      transactionStatus: transaction.status || "PENDING",
+      amount: transaction.amount
+        ? parseFloat(transaction.amount).toFixed(2)
+        : "0.00",
+      webhookStatus: "NA / NA", // Default value
+      transactionDate: transaction.createdAt,
+      paymentMethod: transaction.paymentMethod,
+      customerName: transaction.customerName,
+      customerVpa: transaction.customerVpa,
+      settlementStatus: "Pending", // Default value
+    }));
+
+    res.status(200).json(formattedTransactions);
+  } catch (error) {
+    console.error("Error fetching simple transactions:", error);
+    res.status(500).json({
+      message: "Server Error",
+      error: error.message,
+    });
+  }
+};
+
+// export const getAllUPITransactions = async (req, res) => {
 //   try {
 //     const page = parseInt(req.query.page) || 1;
 //     const limit = parseInt(req.query.limit) || 20;
 //     const skip = (page - 1) * limit;
 
-//     const query = { paymentMethod: { $regex: /^upi$/i } };
+//     let query = { paymentMethod: { $regex: /^upi$/i } };
+
+//     // if (req.query.status) query.status = req.query.status;
+
+//     const [transactions, totalRecords] = await Promise.all([
+//       Transaction.find(query)
+//         .select(
+//           "_id transactionId merchantOrderId txnRefId utr merchantId merchantName customerEmail status amount createdAt paymentMethod customerName customerVpa"
+//         )
+//         .populate("merchantId", "company firstname lastname email")
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(limit)
+//         .lean(),
+//       Transaction.countDocuments(query),
+//     ]);
+
+//     res.status(200).json({
+//       data: transactions,
+//       pagination: {
+//         page,
+//         limit,
+//         totalRecords,
+//         totalPages: Math.ceil(totalRecords / limit),
+//       },
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ message: "Server Error" });
+//   }
+// };
+
+// export const getAllCardTransactions = async (req, res) => {
+//   try {
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 20;
+//     const skip = (page - 1) * limit;
+
+//     const query = { paymentMethod: { $regex: /^card$/i } };
 
 //     const [transactions, totalRecords] = await Promise.all([
 //       Transaction.find(query)

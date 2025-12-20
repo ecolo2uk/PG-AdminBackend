@@ -34,6 +34,8 @@ const executeWithRetry = async (
 // Simple version without MongoDB transactions
 // controllers/payoutTransactionController.js - UPDATED createPayoutToMerchant
 export const createPayoutToMerchant = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const {
       merchantId,
@@ -50,7 +52,7 @@ export const createPayoutToMerchant = async (req, res) => {
       responseUrl,
     } = req.body;
 
-    // console.log("📦 Creating payout to merchant with data:", req.body);
+    console.log("📦 Creating payout to merchant with data:", req.body);
 
     // Validate required fields
     if (
@@ -61,43 +63,86 @@ export const createPayoutToMerchant = async (req, res) => {
       !ifscCode ||
       !accountHolderName
     ) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
-        message: "Missing required fields",
+        message:
+          "Missing required fields: Merchant, Amount, Bank Name, Account Number, IFSC Code, Account Holder Name",
       });
     }
 
+    // Update merchant balance with atomic operation
+    const payoutAmount = parseFloat(amount);
+    if (payoutAmount <= 0) {
+      throw new Error("Invalid payout amount");
+    }
+
     // Get merchant details first
-    const merchant = await User.findById(merchantId);
-    if (!merchant || merchant.role !== "merchant") {
+    const user = await User.findById(merchantId).session(session);
+    if (!user || user.role !== "merchant") {
+      await session.abortTransaction();
       return res.status(404).json({
         success: false,
         message: "Merchant not found",
       });
     }
 
-    // Update merchant balance with atomic operation
-    const payoutAmount = parseFloat(amount);
-    const updatedMerchant = await User.findOneAndUpdate(
-      {
-        _id: merchantId,
-        role: "merchant",
-        balance: { $gte: payoutAmount }, // Check balance atomically
-      },
-      {
-        $inc: { balance: -payoutAmount },
-      },
-      { new: true }
+    const merchant = await Merchant.findOne({ userId: merchantId }).session(
+      session
     );
 
-    if (!updatedMerchant) {
+    if (!merchant) {
+      throw new Error("Merchant not found");
+    }
+
+    merchant.payoutTransactions = merchant.payoutTransactions || 0;
+    merchant.totalLastNetPayOut = merchant.totalLastNetPayOut || 0;
+    merchant.totalCredits = merchant.totalCredits || 0;
+    merchant.availableBalance = merchant.availableBalance || 0;
+    merchant.totalTransactions = merchant.totalTransactions || 0;
+    merchant.successfulTransactions = merchant.successfulTransactions || 0;
+    merchant.failedTransactions = merchant.failedTransactions || 0;
+
+    if (merchant.availableBalance < payoutAmount) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
-        message: "Insufficient balance or merchant not found",
+        message: `Insufficient balance. Available: ₹${merchant.availableBalance}, Required: ₹${payoutAmount}`,
       });
     }
 
+    merchant.totalTransactions += 1;
+    merchant.payoutTransactions += 1;
+    merchant.availableBalance -= payoutAmount;
+    merchant.totalDebits += payoutAmount;
+    merchant.totalLastNetPayOut += payoutAmount;
+    merchant.successfulTransactions += 1;
+
+    await User.findByIdAndUpdate(merchantId, {
+      $inc: { balance: -payoutAmount },
+    }).session(session);
+    // const updatedMerchant = await User.findOneAndUpdate(
+    //   {
+    //     _id: merchantId,
+    //     role: "merchant",
+    //     balance: { $gte: payoutAmount }, // Check balance atomically
+    //   },
+    //   {
+    //     $inc: { balance: -payoutAmount },
+    //   },
+    //   { new: true }
+    // );
+
+    // if (!updatedMerchant) {
+    //   await session.abortTransaction();
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Insufficient balance or merchant not found",
+    //   });
+    // }
+
     // Generate unique IDs
+
     const payoutId = `P${Date.now()}${Math.floor(Math.random() * 1000)}`;
     const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
     const utr = `UTR${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -111,8 +156,7 @@ export const createPayoutToMerchant = async (req, res) => {
 
       // Merchant information
       merchantId,
-      merchantName:
-        merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+      merchantName: merchant.company || `${merchant.merchantName}`,
       merchantEmail: merchant.email || customerEmail,
       mid: merchant.mid || `MID${merchantId.toString().slice(-6)}`,
 
@@ -124,7 +168,7 @@ export const createPayoutToMerchant = async (req, res) => {
       recipientAccountNumber: accountNumber,
       recipientIfscCode: ifscCode,
       recipientAccountHolderName: accountHolderName,
-      recipientAccountType: accountType || "Saving",
+      recipientAccountType: accountType || "",
 
       // Transaction details
       amount: payoutAmount,
@@ -138,7 +182,7 @@ export const createPayoutToMerchant = async (req, res) => {
       customerPhoneNumber,
 
       // Additional fields
-      remark: remark || "Payout transaction",
+      remark: remark || "",
       responseUrl,
 
       // Default fields for UI
@@ -148,7 +192,13 @@ export const createPayoutToMerchant = async (req, res) => {
       feeApplied: false,
     });
 
-    const savedPayout = await newPayout.save();
+    const savedPayout = await newPayout.save({ session });
+
+    merchant.lastPayoutTransactions = savedPayout._id;
+    await merchant.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
 
     // console.log("✅ Payout created successfully:", savedPayout._id);
 
@@ -156,10 +206,11 @@ export const createPayoutToMerchant = async (req, res) => {
       success: true,
       message: "Payout initiated successfully",
       payoutTransaction: savedPayout,
-      newBalance: updatedMerchant.balance,
+      newBalance: user.balance,
     });
   } catch (error) {
     console.error("❌ Error creating payout to merchant:", error);
+    await session.abortTransaction();
 
     if (error.code === 11000) {
       return res.status(400).json({
@@ -175,6 +226,8 @@ export const createPayoutToMerchant = async (req, res) => {
       error: error.message,
       stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
+  } finally {
+    session.endSession();
   }
 };
 // Update your createPayoutTransaction function
@@ -316,12 +369,13 @@ export const createPayoutTransaction = async (req, res) => {
       feeApplied = false,
     } = req.body;
 
-    console.log(req.body);
+    // console.log(req.body);
     // 1. Validation
     if (!merchantId || !transactionType || !amount) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: merchantId, transactionType, amount",
+        message: "Missing required fields: Merchant, Transaction Type, Amount",
       });
     }
 
@@ -331,6 +385,15 @@ export const createPayoutTransaction = async (req, res) => {
     }
 
     // 2. Fetch merchant
+    const user = await User.findById(merchantId);
+    if (!user || user.role !== "merchant") {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found",
+      });
+    }
+
     const merchant = await Merchant.findOne({ userId: merchantId }).session(
       session
     );
@@ -352,6 +415,7 @@ export const createPayoutTransaction = async (req, res) => {
       transactionType === "Debit" &&
       merchant.availableBalance < payoutAmount
     ) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: `Insufficient balance. Available: ₹${merchant.availableBalance}, Required: ₹${payoutAmount}`,
@@ -377,7 +441,7 @@ export const createPayoutTransaction = async (req, res) => {
     } else {
       merchant.availableBalance += payoutAmount;
       merchant.totalCredits += payoutAmount;
-      merchant.totalLastNetPayOut += payoutAmount;
+      merchant.totalLastNetPayOut -= payoutAmount;
       merchant.successfulTransactions += 1;
 
       await User.findByIdAndUpdate(merchantId, {
@@ -423,7 +487,6 @@ export const createPayoutTransaction = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    session.endSession();
 
     console.error("❌ Payout creation failed:", error.message);
 
@@ -431,6 +494,8 @@ export const createPayoutTransaction = async (req, res) => {
       success: false,
       message: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 

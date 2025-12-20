@@ -2,6 +2,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
+dotenv.config();
 import cors from "cors";
 import bodyParser from "body-parser";
 import connectDB from "./config/db.js";
@@ -39,8 +40,6 @@ import autoSettlement from "./routes/autoSettlement.js";
 import settlementCalculatorRoutes from "./routes/settlementCalculator.js";
 import bankSettlementRoutes from "./routes/bankSettlement.js";
 import merchantFeeRoutes from "./routes/merchantFee.js";
-
-dotenv.config();
 
 const app = express();
 

@@ -1,23 +1,31 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const permissionSchema = new mongoose.Schema({
-  roleId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Role',
-    required: true
-  },
-  submoduleId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Submodule',
-    required: true
-  },
-  operations: {
-    type: [String], 
+const permissionSchema = new mongoose.Schema(
+  {
+    roleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Role",
+      required: true,
+    },
+    submoduleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Submodule",
+      required: true,
+    },
+    operations: {
+      type: [String],
 
-    default: [],
-  }
-}, { timestamps: true });
+      default: [],
+    },
+    active: {
+      type: Number,
+      default: 0,
+    },
+    deletedAt: { type: Date },
+  },
+  { timestamps: true }
+);
 
 permissionSchema.index({ roleId: 1, submoduleId: 1 }, { unique: true });
-const Permission = mongoose.model('Permission', permissionSchema);
+const Permission = mongoose.model("Permission", permissionSchema);
 export default Permission;
