@@ -8,6 +8,7 @@ import ConnectorAccount from "../models/ConnectorAccount.js";
 import User from "../models/User.js";
 import Merchant from "../models/Merchant.js";
 const ObjectId = mongoose.Types.ObjectId;
+import Razorpay from "razorpay";
 
 const FRONTEND_BASE_URL =
   process.env.FRONTEND_URL || "http://localhost:3000/admin";
@@ -129,6 +130,13 @@ export const generatePaymentLink = async (req, res) => {
     if (merchantId)
       user = await User.findOne({ _id: merchantId }).session(session);
 
+    if (!user) {
+      await session.abortTransaction();
+      return res
+        .status(400)
+        .json({ success: false, message: "Merchnat not found" });
+    }
+
     const merchantUpdate = await Merchant.findOne({ userId: user._id }).session(
       session
     );
@@ -143,6 +151,7 @@ export const generatePaymentLink = async (req, res) => {
 
     const dateFilter = todayFilter();
     // console.log(dateFilter, user._id, user.transactionLimit);
+
     const transactionLimit = await Transaction.find({
       merchantId,
       ...dateFilter,
@@ -252,11 +261,27 @@ export const generatePaymentLink = async (req, res) => {
         paymentOption,
         connectorAccount: accountWithKeys,
       });
+    } else if (connectorName === "Razorpay") {
+      paymentResult = await generateRazorpayPayment({
+        merchant,
+        amount: amountNum,
+        paymentMethod,
+        paymentOption,
+        connectorAccount: accountWithKeys,
+      });
     } else {
       await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: "Unsupported connector: " + connectorName,
+      });
+    }
+
+    if (!paymentResult) {
+      await session.abortTransaction();
+      return res.status(500).json({
+        success: false,
+        message: "Payment gateway did not return a valid response",
       });
     }
 
@@ -273,7 +298,7 @@ export const generatePaymentLink = async (req, res) => {
 
       merchantId: merchant._id,
       merchantName:
-        merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+        merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
       mid: merchant.mid,
 
       amount: amountNum,
@@ -296,7 +321,7 @@ export const generatePaymentLink = async (req, res) => {
       gatewayPaymentLink: paymentResult.paymentLink,
       gatewayOrderId: paymentResult.gatewayOrderId,
 
-      customerName: `${merchant.firstname} ${merchant.lastname}`,
+      customerName: `${merchant.firstname} ${merchant.lastname || ""}`,
       customerVpa: "",
       customerContact: merchant.contact || "",
       customerEmail: merchant.email || "",
@@ -307,6 +332,15 @@ export const generatePaymentLink = async (req, res) => {
 
     if (connectorName === "Enpay") {
       transactionData.enpayTxnId = paymentResult.enpayTxnId;
+      transactionData.enpayResponse = paymentResult.enpayResponse;
+      transactionData.enpayTransactionStatus = "CREATED";
+      transactionData.enpayInitiationStatus = "ENPAY_CREATED";
+    } else if (connectorName === "Razorpay") {
+      transactionData.txnRefId = paymentResult.razorPayTxnId; //It is used to check the payment status
+      transactionData.razorPayTxnId = paymentResult.txnRefId; //this is the Reference Id which is passed to generate Payment Link
+      transactionData.razorPayResponse = paymentResult.razorPayResponse;
+      transactionData.razorPayTransactionStatus = "CREATED";
+      transactionData.razorPayInitiationStatus = "RAZORPAY_CREATED";
     }
 
     // Save transaction
@@ -458,7 +492,7 @@ export const generatePaymentLinkTransaction = async (req, res) => {
 
       merchantId: merchant._id,
       merchantName:
-        merchant.company || `${merchant.firstname} ${merchant.lastname}`,
+        merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
       mid: merchant.mid,
 
       amount: amountNum,
@@ -477,7 +511,7 @@ export const generatePaymentLinkTransaction = async (req, res) => {
       gatewayPaymentLink: paymentResult.paymentLink,
       gatewayOrderId: paymentResult.gatewayOrderId,
 
-      customerName: `${merchant.firstname} ${merchant.lastname}`,
+      customerName: `${merchant.firstname} ${merchant.lastname || ""}`,
       customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
       customerContact: merchant.contact || "",
       customerEmail: merchant.email || "",
@@ -559,7 +593,7 @@ export const debugEnpayIntegrationKeys = async (req, res) => {
       success: true,
       debug: {
         merchant: {
-          name: `${merchant.firstname} ${merchant.lastname}`,
+          name: `${merchant.firstname} ${merchant.lastname || ""}`,
           mid: merchant.mid,
         },
         activeAccount: {
@@ -662,6 +696,7 @@ const generateEnpayPayment = async ({
       txnRefId: txnRefId,
       gatewayTxnId: enpayTxnId,
       enpayTxnId: enpayTxnId,
+      enpayResponse,
     };
   } catch (error) {
     console.error("❌ Enpay Error:", error.message);
@@ -674,6 +709,90 @@ const generateEnpayPayment = async ({
       );
     }
     throw error;
+  }
+};
+
+export const generateRazorpayPayment = async ({
+  merchant,
+  amount,
+  paymentMethod,
+  paymentOption,
+  connectorAccount,
+}) => {
+  try {
+    const integrationKeys = connectorAccount.extractedKeys || {};
+
+    const requiredKeys = ["key_id", "key_secret"];
+
+    const missingKeys = requiredKeys.filter((key) => !integrationKeys[key]);
+
+    if (missingKeys.length > 0) {
+      console.error("Razorpay keys missing:", missingKeys);
+      throw new Error(
+        `Missing Razorpay credentials: ${missingKeys.join(", ")}`
+      );
+    }
+
+    // const razorpay = new Razorpay({
+    //   key_id: integrationKeys.key_id,
+    //   key_secret: integrationKeys.key_secret,
+    // });
+    // const razorpay = new Razorpay({
+    //   key_id: "rzp_live_hn0hFtLPIXAy4d",
+    //   key_secret: "jpQD4A2rfc08bX1CGO6Udq1v",
+    // });
+
+    const txnRefId = generateTxnRefId();
+    const merchantOrderId = generateMerchantOrderId();
+    const razorpayTxnId = `RAZ${Date.now()}`;
+
+    const paymentLinkPayload = {
+      upi_link: "true",
+      amount: Math.round(amount * 100), // paise
+      currency: "INR",
+      accept_partial: false,
+      reference_id: txnRefId,
+      description: `Payment for ${
+        merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`
+      }`,
+
+      customer: {
+        name: `${merchant.firstname} ${merchant.lastname || ""}`,
+        email: merchant.email || "",
+        contact: merchant.contact || "",
+      },
+
+      notify: {
+        sms: true,
+        email: true,
+      },
+
+      reminder_enable: true,
+
+      callback_url: `${FRONTEND_BASE_URL}/payment/success?transactionId=${txnRefId}`,
+      callback_method: "get",
+    };
+
+    const razorpayResponse = await razorpay.paymentLink.create(
+      paymentLinkPayload
+    );
+
+    return {
+      paymentLink: razorpayResponse.short_url,
+      merchantOrderId,
+      txnRefId,
+      gatewayTxnId: razorpayTxnId,
+      razorPayTxnId: razorpayResponse.id,
+      razorPayResponse: razorpayResponse,
+    };
+  } catch (error) {
+    console.error("❌ Razorpay payment link error:", error?.error || error);
+
+    throw new Error(
+      error?.error?.description ||
+        error?.message ||
+        "Razorpay payment link generation failed"
+    );
   }
 };
 
@@ -1313,7 +1432,7 @@ export const getMerchantConnectors = async (req, res) => {
       success: true,
       data: formattedAccounts,
       merchantInfo: {
-        name: `${merchant.firstname} ${merchant.lastname}`,
+        name: `${merchant.firstname} ${merchant.lastname || ""}`,
         mid: merchant.mid,
         email: merchant.email,
       },
