@@ -320,6 +320,7 @@ export const generatePaymentLink = async (req, res) => {
       gatewayTxnId: paymentResult.gatewayTxnId,
       gatewayPaymentLink: paymentResult.paymentLink,
       gatewayOrderId: paymentResult.gatewayOrderId,
+      transactionType: "Link",
 
       customerName: `${merchant.firstname} ${merchant.lastname || ""}`,
       customerVpa: "",
@@ -736,10 +737,6 @@ export const generateRazorpayPayment = async ({
     // const razorpay = new Razorpay({
     //   key_id: integrationKeys.key_id,
     //   key_secret: integrationKeys.key_secret,
-    // });
-    // const razorpay = new Razorpay({
-    //   key_id: "rzp_live_hn0hFtLPIXAy4d",
-    //   key_secret: "jpQD4A2rfc08bX1CGO6Udq1v",
     // });
 
     const txnRefId = generateTxnRefId();

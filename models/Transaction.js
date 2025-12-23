@@ -40,6 +40,7 @@ const transactionSchema = new mongoose.Schema(
       required: true,
     },
 
+    transactionType: String,
     transactionMerchantName: String,
     transactionMerchantID: String,
     transactionOrderID: String,
