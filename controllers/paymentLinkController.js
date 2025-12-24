@@ -333,6 +333,7 @@ export const generatePaymentLink = async (req, res) => {
 
     if (connectorName === "Enpay") {
       transactionData.enpayTxnId = paymentResult.enpayTxnId;
+      transactionData.enpayPaymentLink = paymentResult.paymentLink;
       transactionData.enpayResponse = paymentResult.enpayResponse;
       transactionData.enpayTransactionStatus = "CREATED";
       transactionData.enpayInitiationStatus = "ENPAY_CREATED";
@@ -737,6 +738,10 @@ export const generateRazorpayPayment = async ({
     // const razorpay = new Razorpay({
     //   key_id: integrationKeys.key_id,
     //   key_secret: integrationKeys.key_secret,
+    // });
+    // const razorpay = new Razorpay({
+    //   key_id: "rzp_live_hn0hFtLPIXAy4d",
+    //   key_secret: "jpQD4A2rfc08bX1CGO6Udq1v",
     // });
 
     const txnRefId = generateTxnRefId();
@@ -2869,39 +2874,50 @@ export const checkTransactionStatus = async (req, res) => {
       merchantId: txn.merchantId,
       connectorAccountId: txn.connectorAccountId,
       status: "Active",
-    }).populate("connectorAccountId");
+      isPrimary: true,
+    })
+      .populate("connectorAccountId")
+      .populate("connectorId");
 
+    console.log(activeAccount);
     const keys = extractIntegrationKeys(activeAccount);
-    // console.log(keys);
-    const merchantKey = keys["X-Merchant-Key"];
-    const merchantSecret = keys["X-Merchant-Secret"];
-    const merchantHashId = keys["merchantHashId"];
-    const merchantVpa = keys["merchantVpa"];
+    console.log(keys);
 
-    if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
-      console.error("❌ Missing Enpay Credentials. Found:", Object.keys(keys));
-      throw new Error("No integration keys found for Enpay connector");
-    }
+    if (activeAccount.connectorId.name === "Enpay") {
+      const merchantKey = keys["X-Merchant-Key"];
+      const merchantSecret = keys["X-Merchant-Secret"];
+      const merchantHashId = keys["merchantHashId"];
+      const merchantVpa = keys["merchantVpa"];
 
-    const response = await axios.post(
-      "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
-      { txnRefId: txnRefId, merchantHashId: merchantHashId },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Merchant-Key": merchantKey,
-          "X-Merchant-Secret": merchantSecret,
-          Accept: "application/json",
-        },
-        timeout: 20000,
+      if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
+        console.error(
+          "❌ Missing Enpay Credentials. Found:",
+          Object.keys(keys)
+        );
+        throw new Error("No integration keys found for Enpay connector");
       }
-    );
-    // console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
 
-    return res.json({
-      success: true,
-      enpayResponse: response.data,
-    });
+      const response = await axios.post(
+        "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+        { txnRefId: txnRefId, merchantHashId: merchantHashId },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "X-Merchant-Key": merchantKey,
+            "X-Merchant-Secret": merchantSecret,
+            Accept: "application/json",
+          },
+          timeout: 20000,
+        }
+      );
+      // console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
+
+      return res.json({
+        success: true,
+        enpayResponse: response.data,
+      });
+    } else if (activeAccount.connectorId.name === "Razorpay") {
+    }
   } catch (error) {
     console.error(
       "❌ Enpay Status API Error:",
