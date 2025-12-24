@@ -25,7 +25,7 @@ import {
   redirectAfterPayment,
   checkTransactionStatus,
   updateTransactions,
-  generatePaymentLinkTransaction,
+  // generatePaymentLinkTransaction,
 } from "../controllers/paymentLinkController.js";
 
 const router = express.Router();

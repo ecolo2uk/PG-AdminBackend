@@ -227,7 +227,7 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    const connectorName = activeAccount.connectorId?.name;
+    const connectorName = activeAccount.connectorId?.name.toLowerCase();
     // console.log("🎯 Using Connector:", connectorName);
 
     // Extract keys using helper function
@@ -245,7 +245,7 @@ export const generatePaymentLink = async (req, res) => {
 
     let paymentResult;
 
-    if (connectorName === "Cashfree") {
+    if (connectorName === "cashfree") {
       paymentResult = await generateCashfreePayment({
         merchant,
         amount: amountNum,
@@ -253,7 +253,7 @@ export const generatePaymentLink = async (req, res) => {
         paymentOption,
         connectorAccount: accountWithKeys,
       });
-    } else if (connectorName === "Enpay") {
+    } else if (connectorName === "enpay") {
       paymentResult = await generateEnpayPayment({
         merchant,
         amount: amountNum,
@@ -261,7 +261,7 @@ export const generatePaymentLink = async (req, res) => {
         paymentOption,
         connectorAccount: accountWithKeys,
       });
-    } else if (connectorName === "Razorpay") {
+    } else if (connectorName === "razorpay") {
       paymentResult = await generateRazorpayPayment({
         merchant,
         amount: amountNum,
@@ -331,15 +331,16 @@ export const generatePaymentLink = async (req, res) => {
       source: connectorName.toLowerCase(),
     };
 
-    if (connectorName === "Enpay") {
+    if (connectorName === "enpay") {
       transactionData.enpayTxnId = paymentResult.enpayTxnId;
       transactionData.enpayPaymentLink = paymentResult.paymentLink;
       transactionData.enpayResponse = paymentResult.enpayResponse;
       transactionData.enpayTransactionStatus = "CREATED";
       transactionData.enpayInitiationStatus = "ENPAY_CREATED";
-    } else if (connectorName === "Razorpay") {
+    } else if (connectorName === "razorpay") {
       transactionData.txnRefId = paymentResult.razorPayTxnId; //It is used to check the payment status
       transactionData.razorPayTxnId = paymentResult.txnRefId; //this is the Reference Id which is passed to generate Payment Link
+      transactionData.razorPayPaymentLink = paymentResult.paymentLink;
       transactionData.razorPayResponse = paymentResult.razorPayResponse;
       transactionData.razorPayTransactionStatus = "CREATED";
       transactionData.razorPayInitiationStatus = "RAZORPAY_CREATED";
@@ -386,173 +387,173 @@ export const generatePaymentLink = async (req, res) => {
   }
 };
 
-export const generatePaymentLinkTransaction = async (req, res) => {
-  const startTime = Date.now();
-  // console.log("🚀 generatePaymentLink STARTED", req.body);
+// export const generatePaymentLinkTransaction = async (req, res) => {
+//   const startTime = Date.now();
+//   // console.log("🚀 generatePaymentLink STARTED", req.body);
 
-  try {
-    const {
-      merchantId,
-      amount,
-      currency = "INR",
-      paymentMethod,
-      paymentOption,
-    } = req.body;
+//   try {
+//     const {
+//       merchantId,
+//       amount,
+//       currency = "INR",
+//       paymentMethod,
+//       paymentOption,
+//     } = req.body;
 
-    // Validation
-    if (!merchantId || !amount) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields: merchantId, amount",
-      });
-    }
+//     // Validation
+//     if (!merchantId || !amount) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Missing required fields: merchantId, amount",
+//       });
+//     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid amount",
-      });
-    }
+//     const amountNum = parseFloat(amount);
+//     if (isNaN(amountNum)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid amount",
+//       });
+//     }
 
-    // Find merchant
-    const merchant = await User.findById(merchantId);
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found",
-      });
-    }
+//     // Find merchant
+//     const merchant = await User.findById(merchantId);
+//     if (!merchant) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Merchant not found",
+//       });
+//     }
 
-    // Find Active Connector Account
-    const activeAccount = await MerchantConnectorAccount.findOne({
-      merchantId: new mongoose.Types.ObjectId(merchantId),
-      isPrimary: true,
-      status: "Active",
-    })
-      .populate("connectorId")
-      .populate("connectorAccountId"); // Populating the reference to get global details if needed
+//     // Find Active Connector Account
+//     const activeAccount = await MerchantConnectorAccount.findOne({
+//       merchantId: new mongoose.Types.ObjectId(merchantId),
+//       isPrimary: true,
+//       status: "Active",
+//     })
+//       .populate("connectorId")
+//       .populate("connectorAccountId"); // Populating the reference to get global details if needed
 
-    if (!activeAccount) {
-      return res.status(404).json({
-        success: false,
-        message: "No active payment connector found",
-      });
-    }
+//     if (!activeAccount) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "No active payment connector found",
+//       });
+//     }
 
-    const connectorName = activeAccount.connectorId?.name;
-    // console.log("🎯 Using Connector:", connectorName);
+//     const connectorName = activeAccount.connectorId?.name.toLowerCase();
+//     // console.log("🎯 Using Connector:", connectorName);
 
-    // Extract keys using helper function
-    const integrationKeys = extractIntegrationKeys(activeAccount);
-    // console.log("🔑 Integration Keys Extracted:", {
-    //   keysCount: Object.keys(integrationKeys).length,
-    //   availableKeys: Object.keys(integrationKeys),
-    // });
-    const accountWithKeys = {
-      ...activeAccount.toObject(), // Convert mongoose document to plain object
-      extractedKeys: integrationKeys,
-    };
-    // Attach extracted keys to the account object for the generator functions
-    activeAccount.extractedKeys = integrationKeys;
+//     // Extract keys using helper function
+//     const integrationKeys = extractIntegrationKeys(activeAccount);
+//     // console.log("🔑 Integration Keys Extracted:", {
+//     //   keysCount: Object.keys(integrationKeys).length,
+//     //   availableKeys: Object.keys(integrationKeys),
+//     // });
+//     const accountWithKeys = {
+//       ...activeAccount.toObject(), // Convert mongoose document to plain object
+//       extractedKeys: integrationKeys,
+//     };
+//     // Attach extracted keys to the account object for the generator functions
+//     activeAccount.extractedKeys = integrationKeys;
 
-    let paymentResult;
+//     let paymentResult;
 
-    if (connectorName === "Cashfree") {
-      paymentResult = await generateCashfreePayment({
-        merchant,
-        amount: amountNum,
-        paymentMethod,
-        paymentOption,
-        connectorAccount: accountWithKeys,
-      });
-    } else if (connectorName === "Enpay") {
-      paymentResult = await generateEnpayPayment({
-        merchant,
-        amount: amountNum,
-        paymentMethod,
-        paymentOption,
-        connectorAccount: accountWithKeys,
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Unsupported connector: " + connectorName,
-      });
-    }
+//     if (connectorName === "cashfree") {
+//       paymentResult = await generateCashfreePayment({
+//         merchant,
+//         amount: amountNum,
+//         paymentMethod,
+//         paymentOption,
+//         connectorAccount: accountWithKeys,
+//       });
+//     } else if (connectorName === "enpay") {
+//       paymentResult = await generateEnpayPayment({
+//         merchant,
+//         amount: amountNum,
+//         paymentMethod,
+//         paymentOption,
+//         connectorAccount: accountWithKeys,
+//       });
+//     } else {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Unsupported connector: " + connectorName,
+//       });
+//     }
 
-    // Create transaction record
-    const transactionData = {
-      transactionId: generateTransactionId(),
-      merchantOrderId: paymentResult.merchantOrderId,
-      merchantHashId: integrationKeys.merchantHashId,
-      // merchantHashId: merchant.mid,
-      // merchantVpa: `${merchant.mid?.toLowerCase()}@skypal`,
-      merchantVpa: integrationKeys.merchantVpa,
-      txnRefId: paymentResult.txnRefId,
-      shortLinkId: generateShortId(),
+//     // Create transaction record
+//     const transactionData = {
+//       transactionId: generateTransactionId(),
+//       merchantOrderId: paymentResult.merchantOrderId,
+//       merchantHashId: integrationKeys.merchantHashId,
+//       // merchantHashId: merchant.mid,
+//       // merchantVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+//       merchantVpa: integrationKeys.merchantVpa,
+//       txnRefId: paymentResult.txnRefId,
+//       shortLinkId: generateShortId(),
 
-      merchantId: merchant._id,
-      merchantName:
-        merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
-      mid: merchant.mid,
+//       merchantId: merchant._id,
+//       merchantName:
+//         merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
+//       mid: merchant.mid,
 
-      amount: amountNum,
-      currency: currency,
-      status: "INITIATED",
-      paymentMethod: paymentMethod,
-      paymentOption: paymentOption,
-      paymentUrl: paymentResult.paymentLink,
+//       amount: amountNum,
+//       currency: currency,
+//       status: "INITIATED",
+//       paymentMethod: paymentMethod,
+//       paymentOption: paymentOption,
+//       paymentUrl: paymentResult.paymentLink,
 
-      connectorId: activeAccount.connectorId?._id,
-      connectorAccountId: activeAccount.connectorAccountId?._id,
-      connectorName: connectorName,
-      terminalId: activeAccount.terminalId || "N/A",
+//       connectorId: activeAccount.connectorId?._id,
+//       connectorAccountId: activeAccount.connectorAccountId?._id,
+//       connectorName: connectorName,
+//       terminalId: activeAccount.terminalId || "N/A",
 
-      gatewayTxnId: paymentResult.gatewayTxnId,
-      gatewayPaymentLink: paymentResult.paymentLink,
-      gatewayOrderId: paymentResult.gatewayOrderId,
+//       gatewayTxnId: paymentResult.gatewayTxnId,
+//       gatewayPaymentLink: paymentResult.paymentLink,
+//       gatewayOrderId: paymentResult.gatewayOrderId,
 
-      customerName: `${merchant.firstname} ${merchant.lastname || ""}`,
-      customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
-      customerContact: merchant.contact || "",
-      customerEmail: merchant.email || "",
+//       customerName: `${merchant.firstname} ${merchant.lastname || ""}`,
+//       customerVpa: `${merchant.mid?.toLowerCase()}@skypal`,
+//       customerContact: merchant.contact || "",
+//       customerEmail: merchant.email || "",
 
-      txnNote: `Payment for ${merchant.company || merchant.firstname}`,
-      source: connectorName.toLowerCase(),
-    };
+//       txnNote: `Payment for ${merchant.company || merchant.firstname}`,
+//       source: connectorName.toLowerCase(),
+//     };
 
-    if (connectorName === "Enpay") {
-      transactionData.enpayTxnId = paymentResult.enpayTxnId;
-    }
+//     if (connectorName === "enpay") {
+//       transactionData.enpayTxnId = paymentResult.enpayTxnId;
+//     }
 
-    // Save transaction
-    const newTransaction = new Transaction(transactionData);
-    await newTransaction.save();
+//     // Save transaction
+//     const newTransaction = new Transaction(transactionData);
+//     await newTransaction.save();
 
-    // console.log(
-    //   `✅ ${connectorName} payment link generated in ${
-    //     Date.now() - startTime
-    //   }ms`
-    // );
+//     // console.log(
+//     //   `✅ ${connectorName} payment link generated in ${
+//     //     Date.now() - startTime
+//     //   }ms`
+//     // );
 
-    res.json({
-      success: true,
-      paymentLink: paymentResult.paymentLink,
-      transactionRefId: transactionData.transactionId,
-      txnRefId: transactionData.txnRefId,
-      connectorName,
-      message: `${connectorName} payment link generated successfully`,
-    });
-  } catch (error) {
-    console.error(`❌ Payment link generation failed:`, error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-      errorType: "GENERATION_ERROR",
-    });
-  }
-};
+//     res.json({
+//       success: true,
+//       paymentLink: paymentResult.paymentLink,
+//       transactionRefId: transactionData.transactionId,
+//       txnRefId: transactionData.txnRefId,
+//       connectorName,
+//       message: `${connectorName} payment link generated successfully`,
+//     });
+//   } catch (error) {
+//     console.error(`❌ Payment link generation failed:`, error);
+//     res.status(500).json({
+//       success: false,
+//       message: error.message,
+//       errorType: "GENERATION_ERROR",
+//     });
+//   }
+// };
 
 export const debugEnpayIntegrationKeys = async (req, res) => {
   try {
@@ -2874,16 +2875,32 @@ export const checkTransactionStatus = async (req, res) => {
       merchantId: txn.merchantId,
       connectorAccountId: txn.connectorAccountId,
       status: "Active",
-      isPrimary: true,
+      // isPrimary: true,
     })
       .populate("connectorAccountId")
       .populate("connectorId");
 
-    console.log(activeAccount);
-    const keys = extractIntegrationKeys(activeAccount);
-    console.log(keys);
+    // console.log(activeAccount);
 
+    if (!activeAccount) {
+      return res.json({
+        success: false,
+        error: "Connector not found",
+        connectorName: "Enpay",
+      });
+    }
+
+    const keys = extractIntegrationKeys(activeAccount);
+
+    // console.log(keys);
     if (activeAccount.connectorId.name === "Enpay") {
+      if (!keys) {
+        return res.json({
+          success: false,
+          error: "No keys found for Enpay connector",
+          connectorName: "Enpay",
+        });
+      }
       const merchantKey = keys["X-Merchant-Key"];
       const merchantSecret = keys["X-Merchant-Secret"];
       const merchantHashId = keys["merchantHashId"];
@@ -2894,39 +2911,92 @@ export const checkTransactionStatus = async (req, res) => {
           "❌ Missing Enpay Credentials. Found:",
           Object.keys(keys)
         );
-        throw new Error("No integration keys found for Enpay connector");
+        throw new Error("Missing integration keys for Enpay connector");
+      }
+      try {
+        const response = await axios.post(
+          "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+          { txnRefId: txnRefId, merchantHashId: merchantHashId },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-Merchant-Key": merchantKey,
+              "X-Merchant-Secret": merchantSecret,
+              Accept: "application/json",
+            },
+            timeout: 20000,
+          }
+        );
+        // console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
+
+        return res.json({
+          success: true,
+          enpayResponse: response.data,
+        });
+      } catch (err) {
+        return res.json({
+          success: false,
+          error: err.message,
+          connectorName: "Enpay",
+        });
+      }
+    } else if (activeAccount.connectorId.name === "Razorpay") {
+      if (!keys) {
+        return res.json({
+          success: false,
+          error: "No keys found for Enpay connector",
+          connectorName: "Enpay",
+        });
+      }
+      const requiredKeys = ["key_id", "key_secret"];
+
+      const missingKeys = requiredKeys.filter((key) => !keys[key]);
+
+      if (missingKeys.length > 0) {
+        console.error("Razorpay keys missing:", missingKeys);
+        throw new Error(
+          `Missing integration keys for Razorpay connector: ${missingKeys.join(
+            ", "
+          )}`
+        );
       }
 
-      const response = await axios.post(
-        "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
-        { txnRefId: txnRefId, merchantHashId: merchantHashId },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            "X-Merchant-Key": merchantKey,
-            "X-Merchant-Secret": merchantSecret,
-            Accept: "application/json",
-          },
-          timeout: 20000,
+      let razorPayResponse;
+
+      try {
+        if (txn.transactionType === "Link") {
+          const razorpay = new Razorpay({
+            key_id: "rzp_live_hn0hFtLPIXAy4d",
+            key_secret: "jpQD4A2rfc08bX1CGO6Udq1v",
+          });
+
+          razorPayResponse = await razorpay.paymentLink.fetch(txnRefId);
+        } else if (txn.transactionType === "QR") {
+          const razorpay = new Razorpay({
+            key_id: keys.key_id,
+            key_secret: keys.key_secret,
+          });
+          razorPayResponse = await razorpay.qrCode.fetchAllPayments(txnRefId);
         }
-      );
-      // console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
+      } catch (err) {
+        return res.json({
+          success: false,
+          error: err,
+          connectorName: "Razorpay",
+        });
+      }
 
       return res.json({
         success: true,
-        enpayResponse: response.data,
+        razorPayResponse,
       });
-    } else if (activeAccount.connectorId.name === "Razorpay") {
     }
   } catch (error) {
-    console.error(
-      "❌ Enpay Status API Error:",
-      error.response?.data || error.message
-    );
+    console.error("❌ Transaction Status API Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch Enpay transaction status",
+      message: "Failed to fetch transaction status",
       error: error.response?.data || error.message,
     });
   }
