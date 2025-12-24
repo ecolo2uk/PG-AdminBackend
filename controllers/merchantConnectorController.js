@@ -324,7 +324,18 @@ export const deleteMerchantConnectorAccount = async (req, res) => {
       });
     }
 
-    await MerchantConnectorAccount.findByIdAndDelete(accountId);
+    // await MerchantConnectorAccount.findByIdAndDelete(accountId);
+    const updatedAccount = await MerchantConnectorAccount.findByIdAndUpdate(
+      accountId,
+      {
+        $set: {
+          status: "Inactive",
+        },
+      },
+      {
+        new: true,
+      }
+    );
 
     // console.log("✅ Connector account deleted successfully");
 
