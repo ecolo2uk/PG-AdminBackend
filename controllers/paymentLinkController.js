@@ -736,14 +736,10 @@ export const generateRazorpayPayment = async ({
       );
     }
 
-    // const razorpay = new Razorpay({
-    //   key_id: integrationKeys.key_id,
-    //   key_secret: integrationKeys.key_secret,
-    // });
-    // const razorpay = new Razorpay({
-    //   key_id: "rzp_live_hn0hFtLPIXAy4d",
-    //   key_secret: "jpQD4A2rfc08bX1CGO6Udq1v",
-    // });
+    const razorpay = new Razorpay({
+      key_id: integrationKeys.key_id,
+      key_secret: integrationKeys.key_secret,
+    });
 
     const txnRefId = generateTxnRefId();
     const merchantOrderId = generateMerchantOrderId();
@@ -2963,25 +2959,21 @@ export const checkTransactionStatus = async (req, res) => {
 
       let razorPayResponse;
 
+      const razorpay = new Razorpay({
+        key_id: keys.key_id,
+        key_secret: keys.key_secret,
+      });
       try {
         if (txn.transactionType === "Link") {
-          const razorpay = new Razorpay({
-            key_id: "rzp_live_hn0hFtLPIXAy4d",
-            key_secret: "jpQD4A2rfc08bX1CGO6Udq1v",
-          });
-
           razorPayResponse = await razorpay.paymentLink.fetch(txnRefId);
         } else if (txn.transactionType === "QR") {
-          const razorpay = new Razorpay({
-            key_id: keys.key_id,
-            key_secret: keys.key_secret,
-          });
           razorPayResponse = await razorpay.qrCode.fetchAllPayments(txnRefId);
         }
       } catch (err) {
+        // console.log(err);
         return res.json({
           success: false,
-          error: err,
+          error: err.error.description,
           connectorName: "Razorpay",
         });
       }
