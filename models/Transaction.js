@@ -148,10 +148,10 @@ const transactionSchema = new mongoose.Schema(
       default: "",
     },
 
-    gatewayTxnId: {
-      type: String,
-      default: "",
-    },
+    // gatewayTxnId: {
+    //   type: String,
+    //   default: "",
+    // },
 
     gatewayPaymentLink: {
       type: String,
