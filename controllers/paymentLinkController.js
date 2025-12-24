@@ -3210,6 +3210,9 @@ export const updateTransactions = async (req, res) => {
       const session = await mongoose.startSession();
       session.startTransaction();
 
+      let activeAccount;
+      let connectorName;
+
       try {
         // Fetch merchant
         const merchant = await Merchant.findOne({
@@ -3223,7 +3226,7 @@ export const updateTransactions = async (req, res) => {
         if (!user) throw new Error("User not found");
 
         // Fetch active connector account
-        const activeAccount = await MerchantConnectorAccount.findOne({
+        activeAccount = await MerchantConnectorAccount.findOne({
           merchantId: txn.merchantId,
           connectorAccountId: txn.connectorAccountId,
           status: "Active",
@@ -3238,6 +3241,8 @@ export const updateTransactions = async (req, res) => {
         // );
 
         if (!activeAccount) throw new Error("Connector account not found");
+
+        connectorName = activeAccount.connectorId?.name || "";
 
         const keys = extractIntegrationKeys(activeAccount);
         // console.log(keys);
@@ -3290,41 +3295,94 @@ export const updateTransactions = async (req, res) => {
           txn.utr = gatewayData.utr || txn.utr;
           txn.customerName = gatewayData.customerName || txn.customerName;
           txn.customerVpa = gatewayData.customerVpa || txn.customerVpa;
-        } /* ===================== RAZORPAY ===================== */
+          txn.enpayTransactionStatus = newStatus;
+        }
+        /* ===================== RAZORPAY ===================== */
         if (activeAccount.connectorId.name === "Razorpay") {
           if (!keys) {
             throw new Error("No keys found for Razorpay connector");
           }
 
+          const razorpay = new Razorpay({
+            key_id: keys.key_id,
+            key_secret: keys.key_secret,
+          });
+
           if (txn.transactionType === "Link") {
             gatewayData = await razorpay.paymentLink.fetch(txn.txnRefId);
-            newStatus =
-              gatewayData.status === "paid"
-                ? "SUCCESS"
-                : gatewayData.status === "cancelled" ||
-                  gatewayData.status === "expired"
-                ? "FAILED"
-                : "PENDING";
+
+            if (gatewayData.status === "paid") {
+              newStatus = "SUCCESS";
+            } else if (
+              gatewayData.status === "cancelled" ||
+              gatewayData.status === "expired"
+            ) {
+              newStatus = "FAILED";
+            } else {
+              newStatus = "PENDING";
+            }
 
             txn.transactionInitiatedAt = new Date(
-              gatewayData.payments?.created_at * 1000
+              gatewayData.created_at * 1000
             );
-            txn.transactionCompletedAt = gatewayData.captured_at
-              ? new Date(gatewayData.captured_at * 1000)
-              : "";
-            txn.utr = gatewayData.utr || txn.utr;
-            txn.customerName = gatewayData.customer.name || txn.customerName;
-            txn.customerEmail = gatewayData.customer.email || txn.customerVpa;
-            txn.customerVpa = gatewayData.customer.vpa || txn.customerVpa;
+
+            const payment = gatewayData.payments?.[0];
+            if (payment) {
+              txn.gatewayPaymentMethod = payment.method;
+            }
+            if (payment && payment.status === "captured") {
+              txn.razorPayPaymentId = payment.payment_id;
+              txn.transactionCompletedAt = new Date(payment.created_at * 1000);
+              txn.utr =
+                payment.acquirer_data?.rrn ||
+                payment.acquirer_data?.upi_transaction_id ||
+                txn.utr;
+            }
+
+            if (gatewayData.order_id) {
+              txn.gatewayOrderId = gatewayData.order_id;
+            }
+
+            txn.customerName = gatewayData.customer?.name || txn.customerName;
+            txn.customerEmail =
+              gatewayData.customer?.email || txn.customerEmail;
+            txn.customerContact =
+              gatewayData.customer?.contact || txn.customerContact;
+            txn.customerVpa = gatewayData.customer?.vpa || txn.customerVpa;
+            txn.razorPayTransactionStatus = newStatus;
           }
 
           if (txn.transactionType === "QR") {
-            const razorpay = new Razorpay({
-              key_id: keys.key_id,
-              key_secret: keys.key_secret,
-            });
             gatewayData = await razorpay.qrCode.fetchAllPayments(txn.txnRefId);
-            newStatus = gatewayData.items?.length ? "SUCCESS" : "PENDING";
+
+            if (!gatewayData.items.length) {
+              newStatus = "PENDING";
+            } else {
+              const payment = gatewayData.items[0];
+              newStatus =
+                payment.status === "captured"
+                  ? "SUCCESS"
+                  : payment.status === "failed"
+                  ? "FAILED"
+                  : "PENDING";
+
+              txn.razorPayTransactionStatus = newStatus;
+              txn.transactionInitiatedAt = new Date(payment.created_at * 1000);
+              txn.razorPayPaymentId = payment.id;
+              txn.gatewayPaymentMethod = payment.method;
+              txn.customerEmail = payment.email || txn.customerEmail;
+              txn.customerVpa = payment.vpa || txn.customerVpa;
+              txn.customerContact = payment.contact || txn.customerContact;
+              txn.transactionCompletedAt =
+                payment.status === "captured"
+                  ? new Date(payment.created_at * 1000)
+                  : null;
+              txn.utr = payment.acquirer_data?.rrn || txn.utr;
+
+              if (payment.order_id) {
+                txn.gatewayOrderId = payment.order_id;
+              }
+            }
           }
         }
 
@@ -3447,9 +3505,11 @@ export const updateTransactions = async (req, res) => {
         await merchant.save({ session });
         await user.save({ session });
 
-        // await session.commitTransaction();
+        await session.commitTransaction();
         session.endSession();
-        console.log(gatewayData);
+
+        // console.log(gatewayData);
+
         results.push({
           success: true,
           txnRefId: txn.txnRefId,
@@ -3459,13 +3519,37 @@ export const updateTransactions = async (req, res) => {
         await session.abortTransaction();
         session.endSession();
 
+        const errorUpdate = {
+          updatedAt: new Date(),
+        };
+
+        if (connectorName === "Enpay") {
+          errorUpdate.enpayError = err.message;
+        }
+
+        if (connectorName === "Razorpay") {
+          errorUpdate.razorPayError = err.error?.description;
+        }
+
+        await Transaction.updateOne(
+          { _id: txn._id },
+          {
+            $set: errorUpdate,
+          }
+        );
+
         results.push({
           txnRefId: txn.txnRefId,
           success: false,
           error: err.message,
         });
 
-        console.error(`❌ Failed txnRefId ${txn.txnRefId}:`, err.message);
+        console.error(
+          `❌ Failed txnRefId ${txn.txnRefId}:`,
+          err.message || err.error?.description,
+          " ",
+          connectorName
+        );
       }
     }
 

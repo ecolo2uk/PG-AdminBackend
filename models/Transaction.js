@@ -163,6 +163,11 @@ const transactionSchema = new mongoose.Schema(
       default: "",
     },
 
+    gatewayPaymentMethod: {
+      type: String,
+      default: "",
+    },
+
     cfOrderId: {
       type: String,
       default: "",
@@ -187,6 +192,11 @@ const transactionSchema = new mongoose.Schema(
     },
 
     razorPayTxnId: {
+      type: String,
+      default: "",
+    },
+
+    razorPayPaymentId: {
       type: String,
       default: "",
     },
