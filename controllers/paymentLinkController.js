@@ -334,7 +334,7 @@ export const generatePaymentLink = async (req, res) => {
     if (connectorName === "enpay") {
       transactionData.enpayTxnId = paymentResult.enpayTxnId;
       transactionData.enpayPaymentLink = paymentResult.paymentLink;
-      transactionData.enpayResponse = paymentResult.enpayResponse;
+      transactionData.enpayResponse = paymentResult.enpayResponse.data;
       transactionData.enpayTransactionStatus = "CREATED";
       transactionData.enpayInitiationStatus = "ENPAY_CREATED";
     } else if (connectorName === "razorpay") {
