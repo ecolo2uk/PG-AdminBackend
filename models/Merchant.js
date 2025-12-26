@@ -89,6 +89,10 @@ const merchantSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // pendingTransactions: {
+    //   type: Number,
+    //   default: 0,
+    // },
     failedTransactions: {
       type: Number,
       default: 0,

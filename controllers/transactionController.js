@@ -34,7 +34,10 @@ export const getAllUPITransactions = async (req, res) => {
             `${transaction.merchantId.firstname} ${transaction.merchantId.lastname}`
           : "N/A"),
       customerEmail: transaction.customerEmail || "N/A",
-      connectorName: "Enpay", // Default value
+      connectorName:
+        transaction.connectorName?.toUpperCase() ||
+        transaction.connectorUsed?.toUpperCase() ||
+        "N/A", // Default value
       provider: "SKYPAL", // Default value
       transactionStatus: transaction.status || "PENDING",
       amount: transaction.amount

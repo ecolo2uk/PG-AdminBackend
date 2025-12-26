@@ -334,7 +334,7 @@ export const generatePaymentLink = async (req, res) => {
     if (connectorName === "enpay") {
       transactionData.enpayTxnId = paymentResult.enpayTxnId;
       transactionData.enpayPaymentLink = paymentResult.paymentLink;
-      transactionData.enpayResponse = paymentResult.enpayResponse.data;
+      transactionData.enpayResponse = paymentResult.enpayResponse?.data;
       transactionData.enpayTransactionStatus = "CREATED";
       transactionData.enpayInitiationStatus = "ENPAY_CREATED";
     } else if (connectorName === "razorpay") {
@@ -3220,10 +3220,8 @@ export const updateTransactions = async (req, res) => {
         }).session(session);
         if (!merchant) throw new Error("Merchant not found");
 
-        const user = await User.findOne({
-          _id: txn.merchantId,
-        }).session(session);
-        if (!user) throw new Error("User not found");
+        const user = await User.findById(txn.merchantId).session(session);
+        if (!user) throw new Error("Merchant not found");
 
         // Fetch active connector account
         activeAccount = await MerchantConnectorAccount.findOne({
@@ -3235,6 +3233,7 @@ export const updateTransactions = async (req, res) => {
           .populate("connectorId")
           .populate("connectorAccountId")
           .session(session);
+
         // console.log(
         //   activeAccount.connectorAccountId,
         //   activeAccount.connectorId.name
@@ -3397,7 +3396,9 @@ export const updateTransactions = async (req, res) => {
         merchant.availableBalance = merchant.availableBalance || 0;
         merchant.totalTransactions = merchant.totalTransactions || 0;
         merchant.successfulTransactions = merchant.successfulTransactions || 0;
+        // merchant.pendingTransactions = merchant.pendingTransactions || 0;
         merchant.failedTransactions = merchant.failedTransactions || 0;
+        merchant.balance = merchant.balance || 0;
 
         // Always increment total transactions if this is a new transaction update
         if (!txn.totalApplied) {
@@ -3408,9 +3409,14 @@ export const updateTransactions = async (req, res) => {
 
         // Handle state transitions idempotently
         if (prevStatus !== newStatus) {
-          // INITIATED or PENDING → SUCCESS
+          // INITIATED → PENDING
+          // if (prevStatus === "INITIATED" && newStatus === "PENDING") {
+          //   merchant.pendingTransactions += 1;
+          // }
+
+          // INITIATED → SUCCESS
           if (
-            ["INITIATED", "PENDING"].includes(prevStatus) &&
+            prevStatus === "INITIATED" &&
             newStatus === "SUCCESS" &&
             !txn.payInApplied
           ) {
@@ -3431,12 +3437,68 @@ export const updateTransactions = async (req, res) => {
             }
           }
 
+          // INITIATED → FAILED
+          if (
+            prevStatus === "INITIATED" &&
+            newStatus === "FAILED" &&
+            !txn.wasFailed
+          ) {
+            merchant.failedTransactions += 1;
+            txn.wasFailed = true;
+          }
+
+          // PENDING → SUCCESS
+          if (
+            prevStatus === "PENDING" &&
+            newStatus === "SUCCESS" &&
+            !txn.payInApplied
+          ) {
+            // merchant.pendingTransactions = Math.max(
+            //   0,
+            //   merchant.pendingTransactions - 1
+            // );
+            merchant.successfulTransactions += 1;
+            merchant.availableBalance += txn.amount;
+            merchant.totalCredits += txn.amount;
+            merchant.totalLastNetPayIn += txn.amount;
+            user.balance += txn.amount;
+            txn.payInApplied = true;
+
+            if (txn.wasFailed) {
+              merchant.failedTransactions = Math.max(
+                0,
+                merchant.failedTransactions - 1
+              );
+              txn.wasFailed = false;
+            }
+          }
+
+          // PENDING → FAILED
+          if (
+            prevStatus === "PENDING" &&
+            newStatus === "FAILED" &&
+            !txn.wasFailed
+          ) {
+            // merchant.pendingTransactions = Math.max(
+            //   0,
+            //   merchant.pendingTransactions - 1
+            // );
+            merchant.failedTransactions += 1;
+            txn.wasFailed = true;
+          }
+
           // SUCCESS → FAILED (rollback)
           if (
             prevStatus === "SUCCESS" &&
             newStatus === "FAILED" &&
             txn.payInApplied
           ) {
+            merchant.successfulTransactions = Math.max(
+              0,
+              merchant.successfulTransactions - 1
+            );
+            merchant.failedTransactions += 1;
+
             merchant.availableBalance = Math.max(
               0,
               merchant.availableBalance - txn.amount
@@ -3449,43 +3511,37 @@ export const updateTransactions = async (req, res) => {
               0,
               merchant.totalLastNetPayIn - txn.amount
             );
-            merchant.successfulTransactions = Math.max(
-              0,
-              merchant.successfulTransactions - 1
-            );
-            merchant.failedTransactions += 1;
             user.balance = Math.max(0, user.balance - txn.amount);
-            txn.payInApplied = false;
-            txn.wasFailed = true; // track that this transaction became failed
-          }
 
-          // PENDING → FAILED
-          if (prevStatus === "PENDING" && newStatus === "FAILED") {
-            merchant.failedTransactions += 1;
+            txn.payInApplied = false;
             txn.wasFailed = true;
           }
 
-          // SUCCESS → PENDING → SUCCESS (idempotent)
+          // SUCCESS → PENDING (rare but safe)
           if (
             prevStatus === "SUCCESS" &&
             newStatus === "PENDING" &&
             txn.payInApplied
           ) {
+            merchant.successfulTransactions = Math.max(
+              0,
+              merchant.successfulTransactions - 1
+            );
+            // merchant.pendingTransactions += 1;
+            merchant.availableBalance = Math.max(
+              0,
+              merchant.availableBalance - txn.amount
+            );
+            merchant.totalCredits = Math.max(
+              0,
+              merchant.totalCredits - txn.amount
+            );
+            merchant.totalLastNetPayIn = Math.max(
+              0,
+              merchant.totalLastNetPayIn - txn.amount
+            );
+            user.balance = Math.max(0, user.balance - txn.amount);
             txn.payInApplied = false;
-          }
-
-          if (
-            prevStatus === "PENDING" &&
-            newStatus === "SUCCESS" &&
-            !txn.payInApplied
-          ) {
-            merchant.availableBalance += txn.amount;
-            merchant.totalCredits += txn.amount;
-            merchant.totalLastNetPayIn += txn.amount;
-            merchant.successfulTransactions += 1;
-            user.balance += txn.amount;
-            txn.payInApplied = true;
-
             if (txn.wasFailed) {
               merchant.failedTransactions = Math.max(
                 0,
@@ -3539,8 +3595,8 @@ export const updateTransactions = async (req, res) => {
         );
 
         results.push({
-          txnRefId: txn.txnRefId,
           success: false,
+          txnRefId: txn.txnRefId,
           error: err.message,
         });
 
