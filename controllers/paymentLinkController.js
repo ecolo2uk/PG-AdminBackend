@@ -745,6 +745,8 @@ export const generateRazorpayPayment = async ({
     const merchantOrderId = generateMerchantOrderId();
     const razorpayTxnId = `RAZ${Date.now()}`;
 
+    const expireBy = Math.floor(Date.now() / 1000) + 15 * 60; // 3 minutes from now
+
     const paymentLinkPayload = {
       upi_link: "true",
       amount: Math.round(amount * 100), // paise
@@ -754,7 +756,7 @@ export const generateRazorpayPayment = async ({
       description: `Payment for ${
         merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`
       }`,
-
+      expire_by: expireBy,
       customer: {
         name: `${merchant.firstname} ${merchant.lastname || ""}`,
         email: merchant.email || "",
