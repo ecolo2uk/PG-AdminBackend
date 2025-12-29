@@ -3,81 +3,175 @@ import Transaction from "../models/Transaction.js";
 import User from "../models/User.js"; // Assuming User model contains merchant info
 import mongoose from "mongoose";
 
-const parseCustomDate = (str) => {
-  const [day, month, year] = str.split("/");
-  return new Date(`${year}-${month}-${day}T00:00:00`);
+// const parseCustomDate = (str) => {
+//   const [day, month, year] = str.split("/");
+//   return new Date(`${year}-${month}-${day}T00:00:00`);
+// };
+
+// const getDateRange = (filter, startDate, endDate) => {
+//   const now = new Date();
+//   let start, end;
+
+//   switch (filter) {
+//     case "all_time": // For testing all data
+//       start = new Date(0); // Beginning of time
+//       end = new Date(); // Now
+//       break;
+//     case "today":
+//       start = new Date(now);
+//       start.setHours(0, 0, 0, 0);
+//       end = new Date(now);
+//       end.setHours(23, 59, 59, 999);
+//       break;
+//     case "yesterday":
+//       start = new Date(now);
+//       start.setDate(now.getDate() - 1);
+//       start.setHours(0, 0, 0, 0);
+//       end = new Date(now);
+//       end.setDate(now.getDate() - 1);
+//       end.setHours(23, 59, 59, 999);
+//       break;
+//     case "this_week":
+//       // Last 7 days (including today)
+//       start = new Date(now);
+//       start.setDate(now.getDate() - 6); // Last 6 days + today = 7 days
+//       start.setHours(0, 0, 0, 0);
+//       end = new Date(now);
+//       end.setHours(23, 59, 59, 999);
+//       break;
+//     case "this_month":
+//       start = new Date(now.getFullYear(), now.getMonth(), 1);
+//       start.setHours(0, 0, 0, 0);
+//       end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+//       end.setHours(23, 59, 59, 999);
+//       break;
+//     case "last_month":
+//       start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+//       start.setHours(0, 0, 0, 0);
+//       end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of previous month
+//       end.setHours(23, 59, 59, 999);
+//       break;
+//     // case "custom":
+//     //   if (startDate && endDate) {
+//     //     start = new Date(startDate);
+//     //     end = new Date(endDate);
+//     //     start.setHours(0, 0, 0, 0);
+//     //     end.setHours(23, 59, 59, 999);
+//     //   } else {
+//     case "custom":
+//       if (startDate && endDate) {
+//         start = parseCustomDate(startDate);
+//         end = parseCustomDate(endDate);
+//         start.setHours(0, 0, 0, 0);
+//         end.setHours(23, 59, 59, 999);
+//       } else {
+//         return {};
+//       }
+//       break;
+//     default:
+//       return {};
+//   }
+
+//   // console.log(`📅 Date Range for ${filter}:`, {
+//   //   start: start.toISOString(),
+//   //   end: end.toISOString(),
+//   // });
+
+//   // Use 'createdAt' for filtering since 'timestamps: true' adds it
+//   return {
+//     createdAt: {
+//       $gte: start,
+//       $lte: end,
+//     },
+//   };
+// };
+
+/**
+ * Parse custom date coming from frontend (DD/MM/YYYY)
+ * Returns a Date at IST 00:00
+ */
+const parseCustomDate = (dateStr) => {
+  if (!dateStr) return null;
+  const [day, month, year] = dateStr.split("/");
+  return new Date(Number(year), Number(month) - 1, Number(day));
 };
 
-const getDateRange = (filter, startDate, endDate) => {
+/**
+ * Start of day in IST
+ */
+const startOfISTDay = (date) => {
+  const d = new Date(date);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+};
+
+/**
+ * End of day in IST
+ */
+const endOfISTDay = (date) => {
+  const d = new Date(date);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+};
+
+/**
+ * Main Date Range Builder
+ */
+export const getDateRange = (filter, startDate, endDate) => {
   const now = new Date();
   let start, end;
 
   switch (filter) {
-    case "all_time": // For testing all data
-      start = new Date(0); // Beginning of time
-      end = new Date(); // Now
+    case "all_time":
+      start = new Date(0);
+      end = new Date();
       break;
+
     case "today":
-      start = new Date(now);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now);
-      end.setHours(23, 59, 59, 999);
+      start = startOfISTDay(now);
+      end = endOfISTDay(now);
       break;
-    case "yesterday":
-      start = new Date(now);
-      start.setDate(now.getDate() - 1);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now);
-      end.setDate(now.getDate() - 1);
-      end.setHours(23, 59, 59, 999);
+
+    case "yesterday": {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      start = startOfISTDay(y);
+      end = endOfISTDay(y);
       break;
-    case "this_week":
-      // Last 7 days (including today)
-      start = new Date(now);
-      start.setDate(now.getDate() - 6); // Last 6 days + today = 7 days
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now);
-      end.setHours(23, 59, 59, 999);
+    }
+
+    case "this_week": {
+      const s = new Date(now);
+      s.setDate(s.getDate() - 6); // last 7 days incl today
+      start = startOfISTDay(s);
+      end = endOfISTDay(now);
       break;
-    case "this_month":
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
-      end.setHours(23, 59, 59, 999);
+    }
+
+    case "this_month": {
+      const s = new Date(now.getFullYear(), now.getMonth(), 1);
+      const e = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      start = startOfISTDay(s);
+      end = endOfISTDay(e);
       break;
-    case "last_month":
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of previous month
-      end.setHours(23, 59, 59, 999);
+    }
+
+    case "last_month": {
+      const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const e = new Date(now.getFullYear(), now.getMonth(), 0);
+      start = startOfISTDay(s);
+      end = endOfISTDay(e);
       break;
-    // case "custom":
-    //   if (startDate && endDate) {
-    //     start = new Date(startDate);
-    //     end = new Date(endDate);
-    //     start.setHours(0, 0, 0, 0);
-    //     end.setHours(23, 59, 59, 999);
-    //   } else {
+    }
+
     case "custom":
-      if (startDate && endDate) {
-        start = parseCustomDate(startDate);
-        end = parseCustomDate(endDate);
-        start.setHours(0, 0, 0, 0);
-        end.setHours(23, 59, 59, 999);
-      } else {
-        return {};
-      }
+      if (!startDate || !endDate) return {};
+      start = startOfISTDay(parseCustomDate(startDate));
+      end = endOfISTDay(parseCustomDate(endDate));
       break;
+
     default:
       return {};
   }
 
-  // console.log(`📅 Date Range for ${filter}:`, {
-  //   start: start.toISOString(),
-  //   end: end.toISOString(),
-  // });
-
-  // Use 'createdAt' for filtering since 'timestamps: true' adds it
   return {
     createdAt: {
       $gte: start,
@@ -971,6 +1065,7 @@ export const getSalesReport = async (req, res) => {
               $dateToString: {
                 format: "%Y-%m-%d",
                 date: "$reportDate",
+                timezone: "Asia/Kolkata",
               },
             },
           },
