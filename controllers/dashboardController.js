@@ -1284,31 +1284,20 @@ export const getSalesReport = async (req, res) => {
 };
 
 // ✅ FIXED: Manual date filling function
-const fillMissingDatesManual = (existingData, timeFilter) => {
-  const now = new Date();
+const fillMissingDatesManual = (existingData) => {
+  if (!existingData.length) return [];
+
+  const start = new Date(existingData[0].date);
+  const end = new Date(existingData[existingData.length - 1].date);
+
   const result = [];
-  let daysToShow = 7; // Default for this_week
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().split("T")[0];
+    const existing = existingData.find((e) => e.date === dateStr);
 
-  if (timeFilter === "this_month") daysToShow = 30;
-  else if (timeFilter === "last_month") daysToShow = 30;
-  else if (timeFilter === "this_week") daysToShow = 7;
-
-  for (let i = daysToShow - 1; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(now.getDate() - i);
-    date.setHours(0, 0, 0, 0);
-
-    const dateString = date.toISOString().split("T")[0];
-    const existing = existingData.find((item) => {
-      const itemDate = new Date(item.date).toISOString().split("T")[0];
-      return itemDate === dateString;
-    });
-
-    if (existing) {
-      result.push(existing);
-    } else {
-      result.push({
-        date: date.toISOString(),
+    result.push(
+      existing || {
+        date: dateStr,
         totalIncome: 0,
         totalCostOfSales: 0,
         totalRefundAmount: 0,
@@ -1317,8 +1306,8 @@ const fillMissingDatesManual = (existingData, timeFilter) => {
         failedCount: 0,
         pendingCount: 0,
         refundCount: 0,
-      });
-    }
+      }
+    );
   }
 
   return result;
