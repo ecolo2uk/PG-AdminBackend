@@ -121,9 +121,9 @@ export const getDateRange = (filter, startDate, endDate) => {
 
   switch (filter) {
     case "all_time":
-      start = new Date(0);
-      end = new Date();
-      break;
+      return {
+        createdAt: { $lte: endOfISTDay(now) },
+      };
 
     case "today":
       start = startOfISTDay(now);
@@ -1012,11 +1012,15 @@ export const getSalesReport = async (req, res) => {
     //   JSON.stringify(matchQuery, null, 2)
     // );
 
+    // console.log({
+    //   ...merchantMatch,
+    //   ...(dateFilter.createdAt && {
+    //     reportDate: dateFilter.createdAt,
+    //   }),
+    // });
+
     // ✅ FIXED: Enhanced aggregation with better status handling
     const aggregationPipeline = [
-      {
-        $match: matchQuery,
-      },
       {
         $addFields: {
           unifiedAmount: {
@@ -1056,6 +1060,14 @@ export const getSalesReport = async (req, res) => {
               },
             },
           },
+        },
+      },
+      {
+        $match: {
+          ...merchantMatch,
+          ...(dateFilter.createdAt && {
+            reportDate: dateFilter.createdAt,
+          }),
         },
       },
       {
