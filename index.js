@@ -48,7 +48,20 @@ app.use(bodyParser.json());
 app.use(cors());
 
 // MongoDB connection
-connectDB();
+// connectDB();
+
+// const startServer = async () => {
+//   try {
+//     await connectDB();
+//     const PORT = process.env.PORT || 5000;
+//     app.listen(PORT, () => {
+//       console.log("🚀 Server running");
+//     });
+//   } catch (err) {
+//     process.exit(1);
+//   }
+// };
+// startServer();
 
 // Routes
 app.use("/api/admin/auth", adminauthRoutes);
@@ -84,10 +97,24 @@ app.use("/api/auto-settlement", autoSettlement);
 app.use("/api/settlement-calculator", settlementCalculatorRoutes);
 app.use("/api/bank-settlement", bankSettlementRoutes);
 app.use("/api/merchant-fee", merchantFeeRoutes);
+
+export default async function handler(req, res) {
+  try {
+    await connectDB(); // 🔥 THIS fixes Postman
+    return app(req, res); // hand over to Express
+  } catch (err) {
+    console.error("Vercel handler error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+}
+
 // Basic root route
 app.get("/", (req, res) => {
   res.send("Welcome to the PG Admin API!");
 });
 
-const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// const PORT = process.env.PORT || 5001;
+// app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
