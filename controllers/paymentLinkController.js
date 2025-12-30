@@ -3067,21 +3067,25 @@ export const checkTransactionStatus = async (req, res) => {
         throw new Error("Missing Enpay credentials");
       }
 
-      // Call Enpay API
-      const response = await axios.post(
-        "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
-        { txnRefId: txn.txnRefId, merchantHashId },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            "X-Merchant-Key": merchantKey,
-            "X-Merchant-Secret": merchantSecret,
-          },
-          timeout: 20000,
-        }
-      );
-
-      gatewayData = response.data.details;
+      try {
+        // Call Enpay API
+        const response = await axios.post(
+          "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+          { txnRefId: txn.txnRefId, merchantHashId },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-Merchant-Key": merchantKey,
+              "X-Merchant-Secret": merchantSecret,
+            },
+            timeout: 20000,
+          }
+        );
+        gatewayData = response.data.details;
+      } catch (error) {
+        console.log(error, "Enpay error");
+        throw error;
+      }
       // gatewayData.status = "SUCCESS";
       newStatus = gatewayData.status || "INITIATED";
       txn.transactionInitiatedAt = gatewayData.transactionInitiatedAt
@@ -3377,7 +3381,7 @@ export const checkTransactionStatus = async (req, res) => {
   } catch (error) {
     console.error(
       "❌ Transaction status update error:",
-      error.message || error.error?.description
+      error.message || error.error?.description || error
     );
 
     await session.abortTransaction();
@@ -3385,7 +3389,7 @@ export const checkTransactionStatus = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch transaction status",
-      error: error.message,
+      error: error.message || error.error?.description,
     });
   } finally {
     session.endSession();
