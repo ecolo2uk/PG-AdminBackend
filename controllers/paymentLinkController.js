@@ -9,6 +9,7 @@ import User from "../models/User.js";
 import Merchant from "../models/Merchant.js";
 const ObjectId = mongoose.Types.ObjectId;
 import Razorpay from "razorpay";
+import PayoutTransaction from "../models/PayoutTransaction.js";
 
 const FRONTEND_BASE_URL =
   process.env.FRONTEND_URL || "http://localhost:3000/admin";
@@ -152,14 +153,26 @@ export const generatePaymentLink = async (req, res) => {
     const dateFilter = todayFilter();
     // console.log(dateFilter, user._id, user.transactionLimit);
 
-    const transactionLimit = await Transaction.find({
-      merchantId,
+    let totalTransactionsCount = 0;
+
+    let PayinCount = await Transaction.find({
+      merchantId: user._id,
+      ...dateFilter,
+    }).session(session);
+    // console.log(PayinCount.length, "payin count");
+    totalTransactionsCount += PayinCount.length;
+    // console.log(totalTransactionsCount, "transaction Count");
+
+    let PayoutCount = await PayoutTransaction.find({
+      merchantId: user._id,
       ...dateFilter,
     }).session(session);
 
-    // console.log(transactionLimit.length, "transactionLimit");
+    // console.log(PayoutCount.length, "payout count");
+    totalTransactionsCount += PayoutCount.length;
+    // console.log(totalTransactionsCount, "transaction Count");
 
-    const used = Number(transactionLimit?.length || 0);
+    const used = Number(totalTransactionsCount);
     const limit = Number(user?.transactionLimit || 0);
 
     if (user.transactionLimit) {
@@ -205,6 +218,9 @@ export const generatePaymentLink = async (req, res) => {
         message: "Merchant not found",
       });
     }
+    const merchantName =
+      merchant.company ||
+      merchant?.firstname + " " + (merchant?.lastname || "");
 
     // Find Active Connector Account
     const activeAccount = await MerchantConnectorAccount.findOne(
@@ -297,8 +313,8 @@ export const generatePaymentLink = async (req, res) => {
       shortLinkId: generateShortId(),
 
       merchantId: merchant._id,
-      merchantName:
-        merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
+      merchantName,
+      // merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
       mid: merchant.mid,
 
       amount: amountNum,
@@ -3023,9 +3039,11 @@ export const checkTransactionStatus = async (req, res) => {
     const merchant = await Merchant.findOne({
       userId: txn.merchantId,
     }).session(session);
+
     if (!merchant) throw new Error("Merchant not found");
 
     const user = await User.findById(txn.merchantId).session(session);
+
     if (!user) throw new Error("Merchant not found");
 
     // Fetch active connector account
@@ -4078,6 +4096,212 @@ export const updateTransactions = async (req, res) => {
 //     });
 //   }
 // };
+
+export const paymentWebhook = async (req, res) => {
+  const { gateway } = req.params;
+  const payload = req.body;
+  const headers = req.headers;
+  // console.log(gateway, "PAYMENT WEBHOOK");
+  let session;
+
+  try {
+    let txnRefId;
+    let newStatus;
+    let gatewayData = payload;
+
+    /* ===================== RAZORPAY ===================== */
+    // if (gateway === "razorpay") {
+    //   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    //   const signature = headers["x-razorpay-signature"];
+
+    //   const expectedSignature = crypto
+    //     .createHmac("sha256", webhookSecret)
+    //     .update(JSON.stringify(payload))
+    //     .digest("hex");
+
+    //   if (expectedSignature !== signature) {
+    //     console.error("❌ Razorpay webhook signature mismatch");
+    //     return res.status(401).json({ success: false });
+    //   }
+
+    //   const event = payload.event;
+    //   const payment = payload.payload?.payment?.entity;
+
+    //   if (!payment) {
+    //     return res.status(200).json({ ignored: true });
+    //   }
+
+    //   txnRefId = payment.order_id || payment.notes?.txnRefId;
+
+    //   if (event === "payment.captured") newStatus = "SUCCESS";
+    //   else if (event === "payment.failed") newStatus = "FAILED";
+    //   else newStatus = "PENDING";
+    // }
+
+    /* ===================== ENPAY ===================== */
+    if (gateway === "enpay") {
+      txnRefId = payload.txnRefId;
+      newStatus = payload.status; // SUCCESS | FAILED | PENDING
+    }
+
+    if (!txnRefId || !newStatus) {
+      return res.status(200).json({ ignored: true });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const txn = await Transaction.findOne({ txnRefId }).session(session);
+    if (!txn) throw new Error("Transaction not found");
+
+    const merchant = await Merchant.findOne({
+      userId: txn.merchantId,
+    }).session(session);
+
+    if (!merchant) throw new Error("Merchant not found");
+
+    const user = await User.findById(txn.merchantId).session(session);
+
+    if (!user) throw new Error("Merchant not found");
+
+    const prevStatus = txn.status;
+    txn.previousStatus = prevStatus;
+
+    /* ===================== GATEWAY-SPECIFIC FIELDS ===================== */
+
+    if (gateway === "razorpay") {
+      const payment = payload.payload?.payment?.entity;
+
+      txn.razorPayTransactionStatus = newStatus;
+      txn.razorPayPaymentId = payment?.id || txn.razorPayPaymentId;
+      txn.gatewayOrderId = payment?.order_id || txn.gatewayOrderId;
+      txn.gatewayPaymentMethod = payment?.method || txn.gatewayPaymentMethod;
+      txn.customerEmail = payment?.email || txn.customerEmail;
+      txn.customerContact = payment?.contact || txn.customerContact;
+      txn.customerVpa = payment?.vpa || txn.customerVpa;
+      txn.utr =
+        payment?.acquirer_data?.rrn ||
+        payment?.acquirer_data?.upi_transaction_id ||
+        txn.utr;
+
+      if (payment?.created_at) {
+        txn.transactionInitiatedAt = new Date(payment.created_at * 1000);
+        if (payment.status === "captured") {
+          txn.transactionCompletedAt = new Date(payment.created_at * 1000);
+        }
+      }
+    }
+
+    if (gateway === "enpay") {
+      txn.enpayTransactionStatus = newStatus;
+      txn.transactionInitiatedAt = payload.transactionInitiatedAt
+        ? new Date(payload.transactionInitiatedAt)
+        : txn.transactionInitiatedAt;
+      txn.transactionCompletedAt = payload.transactionCompletedAt
+        ? new Date(payload.transactionCompletedAt)
+        : txn.transactionCompletedAt;
+      txn.utr = payload.utr || txn.utr;
+      txn.customerName = payload.customerName || txn.customerName;
+      txn.customerVpa = payload.customerVpa || txn.customerVpa;
+    }
+
+    /* ===================== COUNTERS INIT ===================== */
+    merchant.payinTransactions ||= 0;
+    merchant.totalLastNetPayIn ||= 0;
+    merchant.totalCredits ||= 0;
+    merchant.availableBalance ||= 0;
+    merchant.totalTransactions ||= 0;
+    merchant.successfulTransactions ||= 0;
+    merchant.failedTransactions ||= 0;
+    merchant.balance ||= 0;
+
+    if (!txn.totalApplied) {
+      merchant.totalTransactions += 1;
+      merchant.payinTransactions += 1;
+      txn.totalApplied = true;
+    }
+
+    /* ===================== STATE TRANSITIONS (YOUR LOGIC) ===================== */
+
+    if (prevStatus !== newStatus) {
+      if (
+        (prevStatus === "INITIATED" || prevStatus === "PENDING") &&
+        newStatus === "SUCCESS" &&
+        !txn.payInApplied
+      ) {
+        merchant.availableBalance += txn.amount;
+        merchant.totalCredits += txn.amount;
+        merchant.totalLastNetPayIn += txn.amount;
+        merchant.successfulTransactions += 1;
+        user.balance += txn.amount;
+        txn.payInApplied = true;
+
+        if (txn.wasFailed) {
+          merchant.failedTransactions = Math.max(
+            0,
+            merchant.failedTransactions - 1
+          );
+          txn.wasFailed = false;
+        }
+      }
+
+      if (
+        (prevStatus === "INITIATED" || prevStatus === "PENDING") &&
+        newStatus === "FAILED" &&
+        !txn.wasFailed
+      ) {
+        merchant.failedTransactions += 1;
+        txn.wasFailed = true;
+      }
+
+      if (
+        prevStatus === "SUCCESS" &&
+        newStatus !== "SUCCESS" &&
+        txn.payInApplied
+      ) {
+        merchant.successfulTransactions = Math.max(
+          0,
+          merchant.successfulTransactions - 1
+        );
+        merchant.failedTransactions += 1;
+
+        merchant.availableBalance = Math.max(
+          0,
+          merchant.availableBalance - txn.amount
+        );
+        merchant.totalCredits = Math.max(0, merchant.totalCredits - txn.amount);
+        merchant.totalLastNetPayIn = Math.max(
+          0,
+          merchant.totalLastNetPayIn - txn.amount
+        );
+        user.balance = Math.max(0, user.balance - txn.amount);
+
+        txn.payInApplied = false;
+        txn.wasFailed = true;
+      }
+    }
+
+    txn.status = newStatus;
+    txn.updatedAt = new Date();
+    console.log(txn.txnRefId);
+    await txn.save({ session });
+    await merchant.save({ session });
+    await user.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    if (session) {
+      await session.abortTransaction();
+      session.endSession();
+    }
+
+    console.error("❌ Payment Webhook Error:", err.message);
+    return res.status(500).json({ success: false });
+  }
+};
 
 export const enpayWebhook = async (req, res) => {
   try {

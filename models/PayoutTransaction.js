@@ -69,7 +69,6 @@ const payoutTransactionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
     recipientBankName: { type: String },
     recipientAccountNumber: { type: String },
     recipientIfscCode: { type: String },
@@ -246,4 +245,5 @@ const PayoutTransaction = mongoose.model(
   "PayoutTransaction",
   payoutTransactionSchema
 );
+
 export default PayoutTransaction;

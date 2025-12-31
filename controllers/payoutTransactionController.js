@@ -32,7 +32,7 @@ const executeWithRetry = async (
 };
 
 // Simple version without MongoDB transactions
-// controllers/payoutTransactionController.js - UPDATED createPayoutToMerchant
+// createPayoutToMerchant
 export const createPayoutToMerchant = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -52,7 +52,7 @@ export const createPayoutToMerchant = async (req, res) => {
       responseUrl,
     } = req.body;
 
-    console.log("📦 Creating payout to merchant with data:", req.body);
+    // console.log("📦 Creating payout to merchant with data:", req.body);
 
     // Validate required fields
     if (
@@ -230,6 +230,7 @@ export const createPayoutToMerchant = async (req, res) => {
     session.endSession();
   }
 };
+
 // Update your createPayoutTransaction function
 // controllers/payoutTransactionController.js मध्ये
 // export const createPayoutTransaction = async (req, res) => {

@@ -25,6 +25,7 @@ import {
   redirectAfterPayment,
   checkTransactionStatus,
   updateTransactions,
+  paymentWebhook,
   // generatePaymentLinkTransaction,
 } from "../controllers/paymentLinkController.js";
 
@@ -63,6 +64,8 @@ router.get("/success", handleSuccess);
 router.get("/return", handleReturn);
 router.post("/status", checkTransactionStatus);
 router.get("/updateTransactions", updateTransactions);
+router.post("/webhook/:gateway", paymentWebhook);
+
 router.get("/redirect", redirectAfterPayment);
 router.get("/enpay-webhook", enpayWebhook);
 export default router;
