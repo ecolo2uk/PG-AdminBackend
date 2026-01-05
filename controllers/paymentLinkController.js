@@ -2865,155 +2865,155 @@ export const getPaymentMethods = async (req, res) => {
   }
 };
 
-// export const checkTransactionStatus = async (req, res) => {
-//   try {
-//     // console.log(req.body, req.query, "checkTransactionS");
-//     const { txnRefId } = req.body;
-
-//     if (!txnRefId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "txnRefId is required",
-//       });
-//     }
-
-//     const txn = await Transaction.findOne({ txnRefId });
-
-//     if (!txn) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Transaction not found",
-//       });
-//     }
-
-//     const activeAccount = await MerchantConnectorAccount.findOne({
-//       merchantId: txn.merchantId,
-//       connectorAccountId: txn.connectorAccountId,
-//       status: "Active",
-//       // isPrimary: true,
-//     })
-//       .populate("connectorAccountId")
-//       .populate("connectorId");
-
-//     // console.log(activeAccount);
-
-//     if (!activeAccount) {
-//       return res.json({
-//         success: false,
-//         error: "Connector Account not found",
-//         connectorName: "Enpay",
-//       });
-//     }
-
-//     const keys = extractIntegrationKeys(activeAccount);
-
-//     // console.log(keys);
-//     if (activeAccount.connectorId.name === "Enpay") {
-//       if (!keys) {
-//         return res.json({
-//           success: false,
-//           error: "No keys found for Enpay connector",
-//           connectorName: "Enpay",
-//         });
-//       }
-//       const merchantKey = keys["X-Merchant-Key"];
-//       const merchantSecret = keys["X-Merchant-Secret"];
-//       const merchantHashId = keys["merchantHashId"];
-//       const merchantVpa = keys["merchantVpa"];
-
-//       if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
-//         console.error(
-//           "❌ Missing Enpay Credentials. Found:",
-//           Object.keys(keys)
-//         );
-//         throw new Error("Missing integration keys for Enpay connector");
-//       }
-//       try {
-//         const response = await axios.post(
-//           "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
-//           { txnRefId: txnRefId, merchantHashId: merchantHashId },
-//           {
-//             headers: {
-//               "Content-Type": "application/json",
-//               "X-Merchant-Key": merchantKey,
-//               "X-Merchant-Secret": merchantSecret,
-//               Accept: "application/json",
-//             },
-//             timeout: 20000,
-//           }
-//         );
-//         // console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
-
-//         return res.json({
-//           success: true,
-//           enpayResponse: response.data,
-//         });
-//       } catch (err) {
-//         return res.json({
-//           success: false,
-//           error: err.message,
-//           connectorName: "Enpay",
-//         });
-//       }
-//     } else if (activeAccount.connectorId.name === "Razorpay") {
-//       if (!keys) {
-//         return res.json({
-//           success: false,
-//           error: "No keys found for Razorpay connector",
-//           connectorName: "Enpay",
-//         });
-//       }
-//       const requiredKeys = ["key_id", "key_secret"];
-
-//       const missingKeys = requiredKeys.filter((key) => !keys[key]);
-
-//       if (missingKeys.length > 0) {
-//         console.error("Razorpay keys missing:", missingKeys);
-//         throw new Error(
-//           `Missing integration keys for Razorpay connector: ${missingKeys.join(
-//             ", "
-//           )}`
-//         );
-//       }
-
-//       let razorPayResponse;
-
-//       const razorpay = new Razorpay({
-//         key_id: keys.key_id,
-//         key_secret: keys.key_secret,
-//       });
-//       try {
-//         if (txn.transactionType === "Link") {
-//           razorPayResponse = await razorpay.paymentLink.fetch(txnRefId);
-//         } else if (txn.transactionType === "QR") {
-//           razorPayResponse = await razorpay.qrCode.fetchAllPayments(txnRefId);
-//         }
-//       } catch (err) {
-//         // console.log(err);
-//         return res.json({
-//           success: false,
-//           error: err.error.description,
-//           connectorName: "Razorpay",
-//         });
-//       }
-
-//       return res.json({
-//         success: true,
-//         razorPayResponse,
-//       });
-//     }
-//   } catch (error) {
-//     console.error("❌ Transaction Status API Error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch transaction status",
-//       error: error.response?.data || error.message,
-//     });
-//   }
-// };
-
 export const checkTransactionStatus = async (req, res) => {
+  try {
+    // console.log(req.body, req.query, "checkTransactionS");
+    const { txnRefId } = req.body;
+
+    if (!txnRefId) {
+      return res.status(400).json({
+        success: false,
+        message: "txnRefId is required",
+      });
+    }
+
+    const txn = await Transaction.findOne({ txnRefId });
+
+    if (!txn) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
+    }
+
+    const activeAccount = await MerchantConnectorAccount.findOne({
+      merchantId: txn.merchantId,
+      connectorAccountId: txn.connectorAccountId,
+      status: "Active",
+      // isPrimary: true,
+    })
+      .populate("connectorAccountId")
+      .populate("connectorId");
+
+    // console.log(activeAccount);
+
+    if (!activeAccount) {
+      return res.json({
+        success: false,
+        error: "Connector Account not found",
+        connectorName: "Enpay",
+      });
+    }
+
+    const keys = extractIntegrationKeys(activeAccount);
+
+    // console.log(keys);
+    if (activeAccount.connectorId.name === "Enpay") {
+      if (!keys) {
+        return res.json({
+          success: false,
+          error: "No keys found for Enpay connector",
+          connectorName: "Enpay",
+        });
+      }
+      const merchantKey = keys["X-Merchant-Key"];
+      const merchantSecret = keys["X-Merchant-Secret"];
+      const merchantHashId = keys["merchantHashId"];
+      const merchantVpa = keys["merchantVpa"];
+
+      if (!merchantKey || !merchantSecret || !merchantHashId || !merchantVpa) {
+        console.error(
+          "❌ Missing Enpay Credentials. Found:",
+          Object.keys(keys)
+        );
+        throw new Error("Missing integration keys for Enpay connector");
+      }
+      try {
+        const response = await axios.post(
+          "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+          { txnRefId: txnRefId, merchantHashId: merchantHashId },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-Merchant-Key": merchantKey,
+              "X-Merchant-Secret": merchantSecret,
+              Accept: "application/json",
+            },
+            timeout: 20000,
+          }
+        );
+        // console.log("🔍 RAW ENPAY STATUS RESPONSE:", response.data);
+
+        return res.json({
+          success: true,
+          enpayResponse: response.data,
+        });
+      } catch (err) {
+        return res.json({
+          success: false,
+          error: err.message,
+          connectorName: "Enpay",
+        });
+      }
+    } else if (activeAccount.connectorId.name === "Razorpay") {
+      if (!keys) {
+        return res.json({
+          success: false,
+          error: "No keys found for Razorpay connector",
+          connectorName: "Enpay",
+        });
+      }
+      const requiredKeys = ["key_id", "key_secret"];
+
+      const missingKeys = requiredKeys.filter((key) => !keys[key]);
+
+      if (missingKeys.length > 0) {
+        console.error("Razorpay keys missing:", missingKeys);
+        throw new Error(
+          `Missing integration keys for Razorpay connector: ${missingKeys.join(
+            ", "
+          )}`
+        );
+      }
+
+      let razorPayResponse;
+
+      const razorpay = new Razorpay({
+        key_id: keys.key_id,
+        key_secret: keys.key_secret,
+      });
+      try {
+        if (txn.transactionType === "Link") {
+          razorPayResponse = await razorpay.paymentLink.fetch(txnRefId);
+        } else if (txn.transactionType === "QR") {
+          razorPayResponse = await razorpay.qrCode.fetchAllPayments(txnRefId);
+        }
+      } catch (err) {
+        // console.log(err);
+        return res.json({
+          success: false,
+          error: err.error.description,
+          connectorName: "Razorpay",
+        });
+      }
+
+      return res.json({
+        success: true,
+        razorPayResponse,
+      });
+    }
+  } catch (error) {
+    console.error("❌ Transaction Status API Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch transaction status",
+      error: error.response?.data || error.message,
+    });
+  }
+};
+
+export const payinCallbackUrl = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -3392,9 +3392,10 @@ export const checkTransactionStatus = async (req, res) => {
     // console.log(gatewayData);
 
     return res.status(200).json({
-      success: true,
-      txnRefId: txn.txnRefId,
-      status: gatewayData,
+      // success: true,
+      // txnRefId: txn.txnRefId,
+      // status: gatewayData,
+      message: "Callback verified and successfull",
     });
   } catch (error) {
     console.error(

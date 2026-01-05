@@ -24,6 +24,7 @@ import {
   enpayWebhook,
   redirectAfterPayment,
   checkTransactionStatus,
+  payinCallbackUrl,
   updateTransactions,
   paymentWebhook,
   // generatePaymentLinkTransaction,
@@ -62,7 +63,8 @@ router.get("/debug/enpay-keys/:merchantId", debugEnpayIntegrationKeys);
 router.get("/process/:shortLinkId", processShortLink);
 router.get("/success", handleSuccess);
 router.get("/return", handleReturn);
-router.post("/status", checkTransactionStatus);
+router.post("/check-status", checkTransactionStatus);
+router.post("/callback-url", payinCallbackUrl);
 router.get("/updateTransactions", updateTransactions);
 router.post("/webhook/:gateway", paymentWebhook);
 
