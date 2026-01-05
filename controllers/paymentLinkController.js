@@ -3018,6 +3018,12 @@ export const payinCallbackUrl = async (req, res) => {
   session.startTransaction();
 
   try {
+    if (!req.body) {
+      return res.status(400).json({
+        success: false,
+        message: "txnRefId is required",
+      });
+    }
     const { txnRefId } = req.body;
 
     if (!txnRefId) {
