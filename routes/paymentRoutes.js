@@ -27,6 +27,7 @@ import {
   payinCallbackUrl,
   updateTransactions,
   paymentWebhook,
+  fetchAndUpdateTransactionStatus,
   // generatePaymentLinkTransaction,
 } from "../controllers/paymentLinkController.js";
 
@@ -64,6 +65,7 @@ router.get("/process/:shortLinkId", processShortLink);
 router.get("/success", handleSuccess);
 router.get("/return", handleReturn);
 router.post("/check-status", checkTransactionStatus);
+router.post("/status", fetchAndUpdateTransactionStatus);
 router.post("/callback-url", payinCallbackUrl);
 router.get("/updateTransactions", updateTransactions);
 router.post("/webhook/:gateway", paymentWebhook);
