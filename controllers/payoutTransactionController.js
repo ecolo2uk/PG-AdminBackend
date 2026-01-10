@@ -399,8 +399,7 @@ export const createPayoutToMerchant = async (req, res) => {
 
     payoutAmount = amount;
 
-    console.log("📦 Creating payout to merchant with data:", req.body);
-    // console.log("📦 Creating payout to merchant");
+    console.log("📦 Creating payout to merchant");
 
     const newPayout = {
       // Required unique identifiers
@@ -663,7 +662,7 @@ export const createPayoutToMerchant = async (req, res) => {
 
     const connectorName = activeAccount.connector?.name.toLowerCase();
 
-    console.log("🎯 Using Connector:", connectorName);
+    // console.log("🎯 Using Connector:", connectorName);
 
     // Extract keys using helper function
     const integrationKeys = extractIntegrationKeys(activeAccount);
@@ -679,14 +678,14 @@ export const createPayoutToMerchant = async (req, res) => {
       updatedAt: new Date(),
     };
 
-    console.log(connectorMeta, savedTransaction._id);
+    // console.log(connectorMeta, savedTransaction._id);
 
     const updatedPayout = await PayoutTransaction.findByIdAndUpdate(
       savedTransaction._id,
       connectorMeta,
       { session }
     );
-    console.log(updatedPayout, savedTransaction._id);
+    // console.log(updatedPayout, savedTransaction._id);
 
     const beneficiary_account_number = accountNumber;
     const beneficiary_bank_ifsc = ifscCode;
@@ -1332,7 +1331,7 @@ export const getPayoutTransactions = async (req, res) => {
     // Fetch transactions with only the fields needed for your table
     const payouts = await PayoutTransaction.find(query)
       .select(
-        "utr status merchantName accountNumber connector amount paymentMode transactionType webhook createdAt"
+        "payoutId requestId transactionId utr merchantName accountNumber connector status amount paymentMode transactionType webhook createdAt"
       )
       .populate("merchantId", "firstname lastname")
       .sort({ createdAt: -1 });
