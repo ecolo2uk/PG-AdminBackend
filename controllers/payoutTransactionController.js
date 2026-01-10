@@ -3,6 +3,10 @@ import User from "../models/User.js";
 import Connector from "../models/Connector.js";
 import Merchant from "../models/Merchant.js";
 import mongoose from "mongoose";
+import MerchantPayoutConnectorAccount from "../models/MerchantPayoutConnectorAccount.js";
+import Transaction from "../models/Transaction.js";
+import axios from "axios";
+import { updatePaymentMethod } from "./paymentMethodController.js";
 
 // Utility for generating UTR
 const generateUtr = () => `UTR${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -31,11 +35,300 @@ const executeWithRetry = async (
   }
 };
 
+const todayFilter = () => {
+  const now = new Date();
+
+  let start, end;
+  start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    createdAt: {
+      $gte: start,
+      $lte: end,
+    },
+  };
+};
+
+const encryptData = async (reqBody, connectorAccount) => {
+  try {
+    const keys = connectorAccount.extractedKeys || {};
+
+    const encrypt_key = keys["encryption_key"];
+
+    if (!encrypt_key) {
+      throw new Error("Encryption key not found.");
+    }
+    // console.log("🔐 Req data:", reqBody);
+
+    const response = await axios.post(
+      "https://pg-rest-api.jodetx.com/v1/api/aes/generateEnc",
+      reqBody,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          apiKey: encrypt_key,
+        },
+      }
+    );
+
+    return {
+      success: true,
+      data: response.data,
+    };
+  } catch (err) {
+    console.error(
+      "❌ Encryption API Error:",
+      err.response?.data || err.message
+    );
+
+    throw err || "Encryption error";
+  }
+};
+
+const decryptData = async (encData, connectorAccount) => {
+  try {
+    const keys = connectorAccount.extractedKeys || {};
+
+    const encrypt_key = keys["encryption_key"];
+
+    if (!encrypt_key) {
+      throw new Error("Decryption key not found.");
+    }
+
+    // console.log("🔐 Enc data:", encData);
+
+    if (!encData || typeof encData !== "string") {
+      throw new Error("decData must be a string");
+    }
+
+    const payload = {
+      encryptedData: encData,
+    };
+
+    // console.log("🔐 Decrypt payload:", payload);
+
+    const response = await axios.post(
+      "https://pg-rest-api.jodetx.com/v1/api/aes/decryptData",
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          apiKey: encrypt_key,
+        },
+      }
+    );
+
+    return {
+      success: true,
+      data: response.data,
+    };
+  } catch (err) {
+    console.error(
+      "❌ Decryption API Error:",
+      err.response?.data || err.message
+    );
+    throw err || "Decryption error";
+  }
+};
+
+export const payoutInitiate = async (encryptedData, connectorAccount) => {
+  try {
+    const keys = connectorAccount.extractedKeys || {};
+
+    const header_key = keys["header_key"];
+
+    if (!header_key) {
+      throw new Error("Header key not found");
+    }
+
+    if (!encryptedData) {
+      throw new Error("encryptedData is required");
+    }
+    // console.log("Data:", encryptedData);
+    const requestParams = encryptedData;
+
+    const response = await axios.post(
+      "https://pg-rest-api.jodetx.com/v1/api/payout/initiate-transaction",
+      {
+        request: requestParams,
+      },
+      {
+        headers: {
+          token: header_key,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    // console.log("Payout Initiated:", response.data);
+
+    return {
+      success: true,
+      data: response.data,
+    };
+  } catch (err) {
+    console.error("❌ Payout Initiation Error:", err.message);
+    // return {
+    //   success: false,
+    //   error: err.message,
+    // };
+    throw err || "Payout Initiation Error";
+    // throw new Error(err.message || "Payout Initiation Error");
+  }
+};
+
+export const payoutTransactionStatus = async (
+  encryptedData,
+  connectorAccount
+) => {
+  try {
+    const keys = connectorAccount.extractedKeys || {};
+
+    const header_key = keys["header_key"];
+
+    if (!header_key) {
+      throw new Error("Header key not found");
+    }
+
+    if (!encryptedData) {
+      throw new Error("encryptedData is required");
+    }
+    // console.log("Data:", encryptedData);
+    const requestParams = encryptedData;
+
+    const response = await axios.post(
+      "https://pg-rest-api.jodetx.com/v1/api/payout/transaction-status",
+      {
+        request: requestParams,
+      },
+      {
+        headers: {
+          token: header_key,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    // console.log("Payout Status:", response.data);
+
+    return {
+      success: true,
+      data: response.data,
+    };
+  } catch (err) {
+    console.error("❌ Payout Status Error:", err.message);
+    // return {
+    //   success: false,
+    //   error: err.message,
+    // };
+    throw err || "Payout Status Update Error";
+  }
+};
+
+const failTransaction = async (
+  payoutId,
+  merchantId,
+  error,
+  balanceBlocked,
+  amount,
+  session
+) => {
+  const update = {
+    status: "FAILED",
+    error: error?.message || String(error),
+    updatedAt: new Date(),
+  };
+
+  await PayoutTransaction.findByIdAndUpdate(payoutId, update, { session });
+
+  if (balanceBlocked && typeof amount == "number") {
+    await Merchant.findOneAndUpdate(
+      { userId: merchantId },
+      {
+        $inc: {
+          availableBalance: amount,
+          blockedBalance: -amount,
+          totalTransactions: 1,
+          payoutTransactions: 1,
+          failedTransactions: 1,
+        },
+        $set: { lastPayoutTransactions: payoutId },
+      },
+      { session }
+    );
+  } else {
+    await Merchant.findOneAndUpdate(
+      { userId: merchantId },
+      {
+        $inc: {
+          totalTransactions: 1,
+          payoutTransactions: 1,
+          failedTransactions: 1,
+        },
+        $set: { lastPayoutTransactions: payoutId },
+      },
+      { session }
+    );
+  }
+};
+
+function extractIntegrationKeys(connectorAccount) {
+  // console.log("🔍 Extracting integration keys from:", {
+  //   hasIntegrationKeys: !!connectorAccount?.integrationKeys,
+  //   hasConnectorAccountId:
+  //     !!connectorAccount?.connectorAccount?.integrationKeys,
+  //   connectorAccount: connectorAccount?.connectorAccount?._id,
+  // });
+
+  let integrationKeys = {};
+
+  // ✅ Check multiple possible locations for integration keys
+  if (
+    connectorAccount?.integrationKeys &&
+    Object.keys(connectorAccount.integrationKeys).length > 0
+  ) {
+    // console.log("🎯 Found keys in connectorAccount.integrationKeys");
+    integrationKeys = connectorAccount.integrationKeys;
+  } else if (
+    connectorAccount?.connectorAccount?.integrationKeys &&
+    Object.keys(connectorAccount.connectorAccount.integrationKeys).length > 0
+  ) {
+    // console.log(
+    //   "🎯 Found keys in connectorAccount.connectorAccount.integrationKeys"
+    // );
+    integrationKeys = connectorAccount.connectorAccount.integrationKeys;
+  } else {
+    console.log("⚠️ No integration keys found in standard locations");
+  }
+
+  // ✅ Convert if it's a Map or special object
+  if (integrationKeys instanceof Map) {
+    integrationKeys = Object.fromEntries(integrationKeys);
+    // console.log("🔍 Converted Map to Object");
+  } else if (typeof integrationKeys === "string") {
+    try {
+      integrationKeys = JSON.parse(integrationKeys);
+      // console.log("🔍 Parsed JSON string to Object");
+    } catch (e) {
+      console.error("❌ Failed to parse integrationKeys string:", e);
+    }
+  }
+
+  // console.log("🎯 Extracted Keys:", Object.keys(integrationKeys));
+  return integrationKeys;
+}
+
 // Simple version without MongoDB transactions
 // createPayoutToMerchant
 export const createPayoutToMerchant = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  let savedTransaction = null;
+  let balanceBlocked = false;
+  let payoutAmount = 0;
   try {
     const {
       merchantId,
@@ -52,113 +345,73 @@ export const createPayoutToMerchant = async (req, res) => {
       responseUrl,
     } = req.body;
 
-    // console.log("📦 Creating payout to merchant with data:", req.body);
-
-    // Validate required fields
-    if (
-      !merchantId ||
-      !amount ||
-      !bankName ||
-      !accountNumber ||
-      !ifscCode ||
-      !accountHolderName
-    ) {
+    if (!merchantId) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message:
-          "Missing required fields: Merchant, Amount, Bank Name, Account Number, IFSC Code, Account Holder Name",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Merchant ID not found" });
     }
 
-    // Update merchant balance with atomic operation
-    const payoutAmount = parseFloat(amount);
-    if (payoutAmount <= 0) {
-      throw new Error("Invalid payout amount");
-    }
+    const [user, merchant] = await Promise.all([
+      User.findById(merchantId).lean(),
+      Merchant.findOne({ userId: merchantId }).lean(),
+    ]);
 
-    // Get merchant details first
-    const user = await User.findById(merchantId).session(session);
-    if (!user || user.role !== "merchant") {
+    if (!user || !merchant) {
       await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Merchant not found" });
     }
 
-    const merchant = await Merchant.findOne({ userId: merchantId }).session(
-      session
-    );
+    if (user.transactionLimit) {
+      const dateFilter = todayFilter();
+      // console.log(dateFilter, user._id, user.transactionLimit);
+      const [payinCount, payoutCount] = await Promise.all([
+        Transaction.countDocuments({ merchantId: user._id, ...dateFilter }),
+        PayoutTransaction.countDocuments({
+          merchantId: user._id,
+          ...dateFilter,
+        }),
+      ]);
 
-    if (!merchant) {
-      throw new Error("Merchant not found");
+      const totalTransactionsCount = payinCount + payoutCount;
+
+      // console.log(totalTransactionsCount, "transaction Count");
+
+      const used = Number(totalTransactionsCount);
+      const limit = Number(user.transactionLimit || 0);
+
+      if (used >= limit) {
+        await session.abortTransaction();
+        return res.status(403).json({
+          success: false,
+          message: "Transaction limit has been exceeded for today!",
+        });
+      }
     }
 
-    merchant.payoutTransactions = merchant.payoutTransactions || 0;
-    merchant.totalLastNetPayOut = merchant.totalLastNetPayOut || 0;
-    merchant.totalCredits = merchant.totalCredits || 0;
-    merchant.availableBalance = merchant.availableBalance || 0;
-    merchant.totalTransactions = merchant.totalTransactions || 0;
-    merchant.successfulTransactions = merchant.successfulTransactions || 0;
-    merchant.failedTransactions = merchant.failedTransactions || 0;
-
-    if (merchant.availableBalance < payoutAmount) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: `Insufficient balance. Available: ₹${merchant.availableBalance}, Required: ₹${payoutAmount}`,
-      });
-    }
-
-    merchant.totalTransactions += 1;
-    merchant.payoutTransactions += 1;
-    merchant.availableBalance -= payoutAmount;
-    merchant.totalDebits += payoutAmount;
-    merchant.totalLastNetPayOut += payoutAmount;
-    merchant.successfulTransactions += 1;
-
-    await User.findByIdAndUpdate(merchantId, {
-      $inc: { balance: -payoutAmount },
-    }).session(session);
-    // const updatedMerchant = await User.findOneAndUpdate(
-    //   {
-    //     _id: merchantId,
-    //     role: "merchant",
-    //     balance: { $gte: payoutAmount }, // Check balance atomically
-    //   },
-    //   {
-    //     $inc: { balance: -payoutAmount },
-    //   },
-    //   { new: true }
-    // );
-
-    // if (!updatedMerchant) {
-    //   await session.abortTransaction();
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Insufficient balance or merchant not found",
-    //   });
-    // }
-
-    // Generate unique IDs
+    const merchantName =
+      user.company || user?.firstname + " " + (user?.lastname || "");
 
     const payoutId = `P${Date.now()}${Math.floor(Math.random() * 1000)}`;
-    const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
-    const utr = `UTR${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const requestId = `REQ${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-    // Create Payout Transaction with ALL required fields
-    const newPayout = new PayoutTransaction({
+    payoutAmount = amount;
+
+    console.log("📦 Creating payout to merchant with data:", req.body);
+    // console.log("📦 Creating payout to merchant");
+
+    const newPayout = {
       // Required unique identifiers
       payoutId,
-      transactionId,
-      utr,
+      requestId,
 
       // Merchant information
       merchantId,
-      merchantName: merchant.company || `${merchant.merchantName}`,
-      merchantEmail: merchant.email || customerEmail,
-      mid: merchant.mid || `MID${merchantId.toString().slice(-6)}`,
+      merchantName,
+      merchantEmail: merchant.email || "",
+      mid: merchant.mid || "",
 
       // Settlement information
       settlementAmount: payoutAmount,
@@ -173,9 +426,9 @@ export const createPayoutToMerchant = async (req, res) => {
       // Transaction details
       amount: payoutAmount,
       currency: "INR",
-      paymentMode: paymentMode || "IMPS",
+      paymentMode: paymentMode || "",
       transactionType: "Debit",
-      status: "Success",
+      status: "INITIATED",
 
       // Customer information
       customerEmail,
@@ -184,47 +437,582 @@ export const createPayoutToMerchant = async (req, res) => {
       // Additional fields
       remark: remark || "",
       responseUrl,
+    };
 
-      // Default fields for UI
-      accountNumber: "N/A",
-      connector: "Manual",
-      webhook: "N/A",
-      feeApplied: false,
+    // savedTransaction = await PayoutTransaction.create(newPayout);
+    [savedTransaction] = await PayoutTransaction.create([newPayout], {
+      session,
     });
 
-    const savedPayout = await newPayout.save({ session });
-
-    merchant.lastPayoutTransactions = savedPayout._id;
-    await merchant.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    // console.log("✅ Payout created successfully:", savedPayout._id);
-
-    res.status(201).json({
-      success: true,
-      message: "Payout initiated successfully",
-      payoutTransaction: savedPayout,
-      newBalance: user.balance,
-    });
-  } catch (error) {
-    console.error("❌ Error creating payout to merchant:", error);
-    await session.abortTransaction();
-
-    if (error.code === 11000) {
+    // Validate required fields
+    if (!amount) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Amount cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
       return res.status(400).json({
         success: false,
-        message: "Duplicate transaction detected",
+        message: "Amount cannot be blank",
       });
     }
 
-    // More detailed error information
-    res.status(500).json({
+    payoutAmount = Number(amount);
+
+    if (isNaN(payoutAmount) || payoutAmount < 1000) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Amount must be greater than or equal to 1000",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be greater than or equal to 1000",
+      });
+    }
+
+    const blockResult = await Merchant.updateOne(
+      {
+        userId: merchantId,
+        availableBalance: { $gte: payoutAmount },
+      },
+      {
+        $inc: {
+          availableBalance: -payoutAmount,
+          blockedBalance: payoutAmount,
+        },
+      },
+      { session }
+    );
+
+    if (blockResult.modifiedCount === 0) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Insufficient balance",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient balance",
+      });
+    }
+    balanceBlocked = true;
+    if (!accountNumber) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Account Number cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Account Number cannot be blank",
+      });
+    }
+    if (!ifscCode) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "IFSC Code cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "IFSC Code cannot be blank",
+      });
+    }
+    const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+    if (!ifscRegex.test(ifscCode)) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Invalid IFSC Code format",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid IFSC Code format",
+      });
+    }
+    if (!bankName) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Bank Name cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Bank Name cannot be blank",
+      });
+    }
+    if (!accountHolderName) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Account Holder Name cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Account Holder Name cannot be blank",
+      });
+    }
+    if (!paymentMode) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Payment Mode cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Payment Mode cannot be blank",
+      });
+    }
+    if (!accountType) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Account Type cannot be blank",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Account Type cannot be blank",
+      });
+    }
+
+    // Find Active Connector Account
+    const [activeAccount] = await MerchantPayoutConnectorAccount.aggregate([
+      {
+        $match: {
+          merchantId: new mongoose.Types.ObjectId(merchantId),
+          isPrimary: true,
+          status: "Active",
+        },
+      },
+      {
+        $lookup: {
+          from: "connectors",
+          localField: "connectorId",
+          foreignField: "_id",
+          as: "connector",
+        },
+      },
+      {
+        $lookup: {
+          from: "connectoraccounts",
+          localField: "connectorAccountId",
+          foreignField: "_id",
+          as: "connectorAccount",
+        },
+      },
+      { $unwind: "$connector" },
+      { $unwind: "$connectorAccount" },
+    ]);
+
+    // console.log(activeAccount);
+
+    if (!activeAccount) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "No payment connector configured. Please contact admin."
+      );
+      // console.log("❌ No connector account found for merchant");
+      return res.status(400).json({
+        success: false,
+        message: "No payment connector configured. Please contact admin.",
+        needsSetup: true,
+      });
+    }
+
+    const connectorName = activeAccount.connector?.name.toLowerCase();
+
+    console.log("🎯 Using Connector:", connectorName);
+
+    // Extract keys using helper function
+    const integrationKeys = extractIntegrationKeys(activeAccount);
+    // console.log("🎯 Keys:", integrationKeys);
+
+    activeAccount.extractedKeys = integrationKeys;
+
+    const connectorMeta = {
+      connectorAccountId: activeAccount.connectorAccount?._id,
+      connectorId: activeAccount.connector?._id,
+      terminalId: activeAccount.terminalId || "N/A",
+      connector: connectorName,
+      updatedAt: new Date(),
+    };
+
+    console.log(connectorMeta, savedTransaction._id);
+
+    const updatedPayout = await PayoutTransaction.findByIdAndUpdate(
+      savedTransaction._id,
+      connectorMeta,
+      { session }
+    );
+    console.log(updatedPayout, savedTransaction._id);
+
+    const beneficiary_account_number = accountNumber;
+    const beneficiary_bank_ifsc = ifscCode;
+    const beneficiary_bank_name = bankName;
+    const beneficiary_name = accountHolderName;
+    const payment_mode = paymentMode;
+    const txn_note = remark;
+
+    const encryptedResponse = await encryptData(
+      {
+        requestId,
+        beneficiary_account_number,
+        beneficiary_bank_ifsc,
+        beneficiary_bank_name,
+        beneficiary_name,
+        payment_mode,
+        txn_note,
+        amount: payoutAmount,
+      },
+      activeAccount
+    );
+    // console.log(encryptedResponse.data, "Enc res");
+
+    const encryptedPayload = encryptedResponse.data;
+    // console.log("Enc err:", encryptedResponse.data.description);
+
+    if (
+      !encryptedResponse.success ||
+      encryptedResponse.data.responseCode !== "0"
+    ) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        encryptedPayload?.data?.description || "Encryption failed",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: encryptedPayload?.data?.description || "Encryption failed",
+      });
+    }
+
+    const encData = encryptedPayload.data.encData;
+
+    const payoutResponse = await payoutInitiate(encData, activeAccount);
+    // console.log(payoutResponse, "Payout res");
+
+    if (!payoutResponse.success || payoutResponse.data.responseCode !== "0") {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        payoutResponse?.data?.description || "Payout Initiation error",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: payoutResponse?.data?.description || "Payout Initiation error",
+      });
+    }
+
+    const payoutData = payoutResponse.data;
+    // console.log("✅ Payout data:", payoutData);
+
+    const decryptedResponse = await decryptData(payoutData.data, activeAccount);
+    // console.log(decryptedResponse.data, "Dec res");
+
+    if (
+      !decryptedResponse.success ||
+      decryptedResponse.data.responseCode !== "0"
+    ) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        decryptedResponse?.data?.description || "Decryption failed",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: decryptedResponse?.data?.description || "Decryption failed",
+      });
+    }
+
+    const decData = decryptedResponse.data;
+    // console.log("✅ Decrypted data:", decData);
+
+    if (!decData.data) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Invalid response",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(500).json({
+        success: false,
+        message: "Invalid response",
+      });
+    }
+
+    const data = decData.data;
+
+    const encryptedStatusResponse = await encryptData(
+      {
+        requestId,
+        txnId: data.txnId,
+        enquiryId: "",
+      },
+      activeAccount
+    );
+    // console.log(encryptedStatusResponse.data, "Enc res");
+
+    const encryptedStatusPayload = encryptedStatusResponse.data;
+
+    if (
+      !encryptedStatusResponse.success ||
+      encryptedStatusPayload.responseCode !== "0"
+    ) {
+      // console.log("Enc err:", encryptedStatusResponse.data.description);
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        encryptedStatusPayload.data.description || "Encryption failed",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: encryptedStatusPayload.data.description || "Encryption failed",
+      });
+    }
+
+    const encStatusData = encryptedStatusPayload.data.encData;
+
+    const checkStatusRes = await payoutTransactionStatus(
+      encStatusData,
+      activeAccount
+    );
+    // console.log(checkStatusRes.data, "Payout res");
+
+    if (checkStatusRes.data.responseCode !== "0") {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        checkStatusRes.data.description || "Check status failed",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message: checkStatusRes.data.description || "Check status failed",
+      });
+    }
+
+    // console.log("✅ Check Status data:", checkStatusRes.data);
+
+    const statusData = checkStatusRes.data;
+
+    const decryptedStatusResponse = await decryptData(
+      statusData.data,
+      activeAccount
+    );
+    // console.log(decryptedResponse.data, "Dec res");
+
+    if (
+      !decryptedStatusResponse.success ||
+      decryptedStatusResponse.data.responseCode !== "0"
+    ) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        decryptedStatusResponse.data.description || "Decryption failed",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+      return res.status(400).json({
+        success: false,
+        message:
+          decryptedStatusResponse.data.description || "Decryption failed",
+      });
+    }
+
+    const decStatusData = decryptedStatusResponse.data.data;
+
+    if (decStatusData.txnStatus === "SUCCESS") {
+      await Promise.all([
+        PayoutTransaction.updateOne(
+          { _id: savedTransaction._id },
+          {
+            transactionId: decStatusData.txnId,
+            payoutEnquiryId: decStatusData.enquiryId,
+            utr: decStatusData.utrNo,
+            status: decStatusData.txnStatus,
+            completedAt: decStatusData.txnDate,
+          },
+          { session }
+        ),
+        Merchant.updateOne(
+          { userId: merchantId },
+          {
+            $inc: {
+              totalTransactions: 1,
+              payoutTransactions: 1,
+              blockedBalance: -payoutAmount,
+              totalDebits: payoutAmount,
+              totalLastNetPayOut: payoutAmount,
+              successfulTransactions: 1,
+            },
+            $set: {
+              lastPayoutTransactions: savedTransaction._id,
+            },
+          },
+          { session }
+        ),
+        User.updateOne(
+          {
+            _id: merchantId,
+          },
+          {
+            $inc: {
+              balance: -payoutAmount,
+            },
+          },
+          { session }
+        ),
+      ]);
+    } else if (["FAILED", "REVERSED"].includes(decStatusData.txnStatus)) {
+      await Promise.all([
+        PayoutTransaction.updateOne(
+          { _id: savedTransaction._id },
+          {
+            transactionId: decStatusData.txnId,
+            payoutEnquiryId: decStatusData.enquiryId,
+            utr: decStatusData.utrNo,
+            status: decStatusData.txnStatus,
+            completedAt: decStatusData.txnDate,
+          },
+          { session }
+        ),
+        Merchant.updateOne(
+          { userId: merchantId },
+          {
+            $inc: {
+              availableBalance: payoutAmount,
+              blockedBalance: -payoutAmount,
+              totalTransactions: 1,
+              payoutTransactions: 1,
+              failedTransactions: 1,
+            },
+            $set: { lastPayoutTransactions: savedTransaction._id },
+          },
+          { session }
+        ),
+      ]);
+    } else {
+      await Promise.all([
+        PayoutTransaction.updateOne(
+          { _id: savedTransaction._id },
+          {
+            transactionId: decStatusData.txnId,
+            status: decStatusData.txnStatus,
+          },
+          { session }
+        ),
+        Merchant.updateOne(
+          { userId: merchantId },
+          {
+            $inc: {
+              availableBalance: payoutAmount,
+              blockedBalance: -payoutAmount,
+              totalTransactions: 1,
+              payoutTransactions: 1,
+            },
+            $set: { lastPayoutTransactions: savedTransaction._id },
+          },
+          { session }
+        ),
+      ]);
+    }
+    await session.commitTransaction();
+    return res.status(201).json({
+      success: true,
+      message: "Payout initiated successfully",
+      payoutTransaction: {
+        requestId,
+        status: decStatusData.txnStatus,
+        utr: decStatusData.utrNo,
+        transactionId: decStatusData.txnId,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Payout error:", error);
+    if (!savedTransaction?._id) {
+      await session.abortTransaction(); // nothing to save
+    } else {
+      await failTransaction(
+        savedTransaction._id,
+        savedTransaction.merchantId,
+        error.message || "Payout transaction failed",
+        balanceBlocked,
+        payoutAmount,
+        session
+      );
+      await session.commitTransaction();
+    }
+
+    return res.status(500).json({
       success: false,
-      message: "Server error during payout creation",
+      message: "Payout transaction failed",
       error: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   } finally {
     session.endSession();
@@ -575,6 +1363,88 @@ export const getPayoutTransactions = async (req, res) => {
   }
 };
 
+export const getMerchantPayoutConnectors = async (req, res) => {
+  try {
+    const { merchantId } = req.params;
+
+    // console.log("🔍 Fetching connector accounts for merchant:", merchantId);
+
+    if (!merchantId || !mongoose.Types.ObjectId.isValid(merchantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid merchant ID",
+      });
+    }
+
+    const merchant = await User.findById(merchantId);
+    if (!merchant) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found",
+      });
+    }
+
+    // console.log("🔄 Fetching connector accounts from database...");
+
+    const connectorAccounts = await MerchantPayoutConnectorAccount.find({
+      merchantId: merchantId,
+      status: "Active",
+    })
+      .populate("connectorId", "name connectorType description")
+      .populate(
+        "connectorAccountId",
+        "name currency integrationKeys terminalId"
+      )
+      .select("terminalId industry percentage isPrimary status createdAt")
+      .sort({ isPrimary: -1, createdAt: -1 });
+
+    // console.log(
+    //   `✅ Found ${connectorAccounts.length} connector accounts for merchant: ${merchant.firstname} ${merchant.lastname}`
+    // );
+
+    const formattedAccounts = connectorAccounts.map((account) => {
+      const connector = account.connectorId || {};
+      const connectorAcc = account.connectorAccountId || {};
+
+      return {
+        _id: account._id,
+        terminalId: account.terminalId || connectorAcc.terminalId || "N/A",
+        connector: connector.name || "Unknown",
+        connectorName: connector.name || "Unknown",
+        connectorType: connector.connectorType || "Payment",
+        assignedAccount: connectorAcc.name || "Unknown",
+        accountName: connectorAcc.name || "Unknown",
+        currency: connectorAcc.currency || "INR",
+        industry: account.industry || "General",
+        percentage: account.percentage || 100,
+        isPrimary: account.isPrimary || false,
+        status: account.status || "Active",
+        integrationKeys: connectorAcc.integrationKeys || {},
+        createdAt: account.createdAt,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: formattedAccounts,
+      merchantInfo: {
+        name: `${merchant.firstname} ${merchant.lastname || ""}`,
+        mid: merchant.mid,
+        email: merchant.email,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "❌ Error fetching merchant connectors from database:",
+      error
+    );
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching connector accounts from database",
+      error: error.message,
+    });
+  }
+};
 // --- Create Internal Payout Transaction ---
 export const createInternalPayoutTransaction = async (req, res) => {
   const session = await mongoose.startSession();
@@ -732,9 +1602,9 @@ export const getAllMerchantsForPayout = async (req, res) => {
     // console.log("🏪 Database name:", mongoose.connection.name);
 
     // First, let's see ALL users in database
-    const allUsers = await User.find({})
-      .select("_id firstname lastname role status email balance")
-      .lean();
+    // const allUsers = await User.find({})
+    //   .select("_id firstname lastname role status email balance")
+    //   .lean();
     // console.log("👥 TOTAL USERS IN DATABASE:", allUsers.length);
     // console.log(
     //   "📋 All users with balances:",

@@ -36,6 +36,10 @@ const merchantSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    blockedBalance: {
+      type: Number,
+      default: 0,
+    },
     unsettledBalance: {
       type: Number,
       default: 0,

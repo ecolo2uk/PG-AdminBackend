@@ -60,8 +60,8 @@ function extractIntegrationKeys(connectorAccount) {
   // console.log("🔍 Extracting integration keys from:", {
   //   hasIntegrationKeys: !!connectorAccount?.integrationKeys,
   //   hasConnectorAccountId:
-  //     !!connectorAccount?.connectorAccountId?.integrationKeys,
-  //   connectorAccountId: connectorAccount?.connectorAccountId?._id,
+  //     !!connectorAccount?.connectorAccount?.integrationKeys,
+  //   connectorAccount: connectorAccount?.connectorAccount?._id,
   // });
 
   let integrationKeys = {};
@@ -74,13 +74,13 @@ function extractIntegrationKeys(connectorAccount) {
     // console.log("🎯 Found keys in connectorAccount.integrationKeys");
     integrationKeys = connectorAccount.integrationKeys;
   } else if (
-    connectorAccount?.connectorAccountId?.integrationKeys &&
-    Object.keys(connectorAccount.connectorAccountId.integrationKeys).length > 0
+    connectorAccount?.connectorAccount?.integrationKeys &&
+    Object.keys(connectorAccount.connectorAccount.integrationKeys).length > 0
   ) {
     // console.log(
-    //   "🎯 Found keys in connectorAccount.connectorAccountId.integrationKeys"
+    //   "🎯 Found keys in connectorAccount.connectorAccount.integrationKeys"
     // );
-    integrationKeys = connectorAccount.connectorAccountId.integrationKeys;
+    integrationKeys = connectorAccount.connectorAccount.integrationKeys;
   } else {
     console.log("⚠️ No integration keys found in standard locations");
   }
@@ -102,14 +102,53 @@ function extractIntegrationKeys(connectorAccount) {
   return integrationKeys;
 }
 
+const failTransaction = async (
+  transactionId,
+  merchantId,
+  error,
+  options = {}
+) => {
+  const update = {
+    status: "FAILED",
+    wasFailed: true,
+    totalApplied: true,
+    updatedAt: new Date(),
+  };
+
+  /* ✅ Gateway Error (optional) */
+  if (options.connector) {
+    if (options.transactionStatusField) {
+      update[options.transactionStatusField] = "FAILED";
+    }
+    if (options.initiationStatusField) {
+      update[options.initiationStatusField] = "ATTEMPTED_FAILED";
+    }
+    update.error = error?.response?.data || error?.message || error;
+  } else {
+    update.error = error?.response?.data || error?.message || error;
+  }
+
+  await Transaction.findByIdAndUpdate(transactionId, update);
+
+  await Merchant.findOneAndUpdate(
+    { userId: merchantId },
+    {
+      $inc: {
+        totalTransactions: 1,
+        payinTransactions: 1,
+        failedTransactions: 1,
+      },
+      $set: { lastPayinTransactions: transactionId },
+    }
+  );
+};
+
 export const generatePaymentLink = async (req, res) => {
-  const startTime = Date.now();
+  // const startTime = Date.now();
   // console.log("🚀 generatePaymentLink STARTED");
-  const session = await mongoose.startSession();
+  let savedTransaction = null;
 
   try {
-    session.startTransaction();
-
     const {
       merchantId,
       amount,
@@ -118,66 +157,44 @@ export const generatePaymentLink = async (req, res) => {
       paymentOption,
     } = req.body;
 
-    // Validation
-    if (!merchantId || !amount) {
-      await session.abortTransaction();
+    if (!merchantId) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: merchantId, amount",
+        message: "Merchant ID not found",
       });
     }
+    // console.log(merchantId);
 
-    let user;
-    if (merchantId)
-      user = await User.findOne({ _id: merchantId }).session(session);
+    const [user, merchant] = await Promise.all([
+      User.findById(merchantId).lean(),
+      Merchant.findOne({ userId: merchantId }).lean(),
+    ]);
 
-    if (!user) {
-      await session.abortTransaction();
+    if (!user || !merchant) {
       return res
-        .status(400)
-        .json({ success: false, message: "Merchnat not found" });
+        .status(404)
+        .json({ success: false, message: "Merchant not found" });
     }
-
-    const merchantUpdate = await Merchant.findOne({ userId: user._id }).session(
-      session
-    );
-    // console.log(merchantUpdate);
-    if (!merchantUpdate) {
-      await session.abortTransaction();
-      return res.status(500).json({
-        success: false,
-        message: "Merchant not found",
-      });
-    }
-
-    const dateFilter = todayFilter();
-    // console.log(dateFilter, user._id, user.transactionLimit);
-
-    let totalTransactionsCount = 0;
-
-    let PayinCount = await Transaction.find({
-      merchantId: user._id,
-      ...dateFilter,
-    }).session(session);
-    // console.log(PayinCount.length, "payin count");
-    totalTransactionsCount += PayinCount.length;
-    // console.log(totalTransactionsCount, "transaction Count");
-
-    let PayoutCount = await PayoutTransaction.find({
-      merchantId: user._id,
-      ...dateFilter,
-    }).session(session);
-
-    // console.log(PayoutCount.length, "payout count");
-    totalTransactionsCount += PayoutCount.length;
-    // console.log(totalTransactionsCount, "transaction Count");
-
-    const used = Number(totalTransactionsCount);
-    const limit = Number(user?.transactionLimit || 0);
 
     if (user.transactionLimit) {
+      const dateFilter = todayFilter();
+      // console.log(dateFilter, user._id, user.transactionLimit);
+      const [payinCount, payoutCount] = await Promise.all([
+        Transaction.countDocuments({ merchantId: user._id, ...dateFilter }),
+        PayoutTransaction.countDocuments({
+          merchantId: user._id,
+          ...dateFilter,
+        }),
+      ]);
+
+      const totalTransactionsCount = payinCount + payoutCount;
+
+      // console.log(totalTransactionsCount, "transaction Count");
+
+      const used = Number(totalTransactionsCount);
+      const limit = Number(user?.transactionLimit || 0);
+
       if (used >= limit) {
-        await session.abortTransaction();
         return res.status(403).json({
           success: false,
           message: "Transaction limit has been exceeded for today!",
@@ -185,79 +202,144 @@ export const generatePaymentLink = async (req, res) => {
       }
     }
 
+    const merchantName =
+      user.company || user?.firstname + " " + (user?.lastname || "");
+    const txnRefId = generateTxnRefId();
+
+    const transactionData = {
+      transactionId: generateTransactionId(),
+      txnRefId,
+      shortLinkId: generateShortId(),
+
+      merchantId: user._id,
+      merchantName: merchantName,
+      mid: user.mid,
+
+      amount: amount,
+      netAmount: amount,
+      currency: currency,
+
+      status: "INITIATED",
+      previousStatus: "INITIATED",
+      payInApplied: false,
+      paymentMethod: paymentMethod,
+      paymentOption: paymentOption,
+
+      transactionType: "Link",
+      customerName: `${user.firstname} ${user.lastname || ""}`,
+      customerVpa: ``,
+      customerContact: user.contact || "",
+      customerEmail: user.email || "",
+
+      txnNote: `Payment for ${user.company || user.firstname}`,
+    };
+
+    savedTransaction = await Transaction.create(transactionData);
+
+    /* ===================== VALIDATION ===================== */
+
     if (!amount) {
-      await session.abortTransaction();
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Amount cannot be blank"
+      );
       return res.status(400).json({
         success: false,
         message: "Amount cannot be blank",
       });
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum)) {
-      await session.abortTransaction();
+    const amountNum = Number(amount);
+
+    if (isNaN(amountNum) || amountNum < 500) {
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Amount must be greater than or equal to 500"
+      );
       return res.status(400).json({
         success: false,
-        message: "Invalid amount",
+        message: "Amount must be greater than or equal to 500",
       });
     }
-
-    if (amountNum < 500) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Amount should be greater than 500",
-      });
-    }
-
-    // Find merchant
-    const merchant = await User.findById(merchantId).session(session);
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        message: "Merchant not found",
-      });
-    }
-    const merchantName =
-      merchant.company ||
-      merchant?.firstname + " " + (merchant?.lastname || "");
+    // console.log(merchantId);
 
     // Find Active Connector Account
-    const activeAccount = await MerchantConnectorAccount.findOne(
-      {
-        merchantId: new mongoose.Types.ObjectId(merchantId),
-        isPrimary: true,
-        status: "Active",
-      },
-      null,
-      { session }
-    )
-      .populate("connectorId")
-      .populate("connectorAccountId"); // Populating the reference to get global details if needed
+    const [activeAccount] = await mongoose.connection.db
+      .collection("merchantconnectoraccounts")
+      .aggregate([
+        {
+          $match: {
+            merchantId: new mongoose.Types.ObjectId(merchantId),
+            isPrimary: true,
+            status: "Active",
+          },
+        },
+        {
+          $lookup: {
+            from: "connectors",
+            localField: "connectorId",
+            foreignField: "_id",
+            as: "connector",
+          },
+        },
+        {
+          $lookup: {
+            from: "connectoraccounts",
+            localField: "connectorAccountId",
+            foreignField: "_id",
+            as: "connectorAccount",
+          },
+        },
+        { $unwind: "$connector" },
+        { $unwind: "$connectorAccount" },
+      ])
+      .toArray();
+
+    // console.log(activeAccount);
 
     if (!activeAccount) {
-      await session.abortTransaction();
-      return res.status(404).json({
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "No payment connector configured. Please contact admin."
+      );
+      // console.log("❌ No connector account found for merchant");
+      return res.status(400).json({
         success: false,
-        message: "No active payment connector found",
+        message: "No payment connector configured. Please contact admin.",
+        needsSetup: true,
       });
     }
 
-    const connectorName = activeAccount.connectorId?.name.toLowerCase();
+    const connectorName = activeAccount.connector?.name.toLowerCase();
+
     // console.log("🎯 Using Connector:", connectorName);
 
     // Extract keys using helper function
     const integrationKeys = extractIntegrationKeys(activeAccount);
-    // console.log("🔑 Integration Keys Extracted:", {
-    //   keysCount: Object.keys(integrationKeys).length,
-    //   availableKeys: Object.keys(integrationKeys),
-    // });
-    const accountWithKeys = {
-      ...activeAccount.toObject(), // Convert mongoose document to plain object
-      extractedKeys: integrationKeys,
-    };
-    // Attach extracted keys to the account object for the generator functions
+
     activeAccount.extractedKeys = integrationKeys;
+
+    const connectorMeta = {
+      merchantHashId: integrationKeys.merchantHashId,
+      merchantVpa: integrationKeys.merchantVpa,
+
+      connectorName: connectorName,
+      connectorUsed: connectorName,
+      connectorAccountId: activeAccount.connectorAccount?._id,
+      connectorId: activeAccount.connector?._id,
+      terminalId: activeAccount.terminalId || "N/A",
+
+      paymentGateway: connectorName,
+      source: connectorName.toLowerCase(),
+      updatedAt: new Date(),
+    };
+
+    // console.log(savedTransaction._id);
+
+    await Transaction.findByIdAndUpdate(savedTransaction._id, connectorMeta);
 
     let paymentResult;
 
@@ -267,114 +349,116 @@ export const generatePaymentLink = async (req, res) => {
         amount: amountNum,
         paymentMethod,
         paymentOption,
-        connectorAccount: accountWithKeys,
+        connectorAccount: activeAccount,
       });
     } else if (connectorName === "enpay") {
-      paymentResult = await generateEnpayPayment({
-        merchant,
-        amount: amountNum,
-        paymentMethod,
-        paymentOption,
-        connectorAccount: accountWithKeys,
-      });
+      try {
+        paymentResult = await generateEnpayPayment({
+          txnRefId,
+          amount: amountNum,
+          paymentMethod,
+          paymentOption,
+          connectorAccount: activeAccount,
+        });
+      } catch (error) {
+        console.error(`❌ Enpay failed:`, error);
+
+        await failTransaction(savedTransaction._id, merchantId, error, {
+          connector: connectorName,
+          transactionStatusField: "enpayTransactionStatus",
+          initiationStatusField: "enpayInitiationStatus",
+        });
+        if (error.message === "Duplicate transaction reference Id.") {
+          return res.status(400).json({
+            success: false,
+            message: "txnRefId already exists.",
+          });
+        }
+        return res.status(502).json({
+          success: false,
+          message: error.message || "Enpay QR generation failed",
+        });
+      }
     } else if (connectorName === "razorpay") {
-      paymentResult = await generateRazorpayPayment({
-        merchant,
-        amount: amountNum,
-        paymentMethod,
-        paymentOption,
-        connectorAccount: accountWithKeys,
-      });
+      try {
+        paymentResult = await generateRazorpayPayment({
+          txnRefId,
+          merchant,
+          amount: amountNum,
+          paymentMethod,
+          paymentOption,
+          connectorAccount: activeAccount,
+        });
+      } catch (error) {
+        console.error(error, "Razorpay error");
+        await failTransaction(savedTransaction._id, merchantId, error, {
+          connector: connectorName,
+          transactionStatusField: "razorPayTransactionStatus",
+          initiationStatusField: "razorPayInitiationStatus",
+        });
+        return res.status(502).json({
+          success: false,
+          message: error.message || "Razorpay QR generation failed",
+        });
+      }
     } else {
-      await session.abortTransaction();
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        `Unsupported connector: ${connectorName}`
+      );
       return res.status(400).json({
         success: false,
-        message: "Unsupported connector: " + connectorName,
+        message: `Unsupported connector: ${connectorName}`,
       });
     }
 
     if (!paymentResult) {
-      await session.abortTransaction();
+      await failTransaction(
+        savedTransaction._id,
+        merchantId,
+        "Payment gateway did not return a valid response"
+      );
       return res.status(500).json({
         success: false,
         message: "Payment gateway did not return a valid response",
       });
     }
 
-    // Create transaction record
-    const transactionData = {
-      transactionId: generateTransactionId(),
+    const updateTransaction = {
       merchantOrderId: paymentResult.merchantOrderId,
-      merchantHashId: integrationKeys.merchantHashId,
-      // merchantHashId: merchant.mid,
-      // merchantVpa: `${merchant.mid?.toLowerCase()}@skypal`,
-      merchantVpa: integrationKeys.merchantVpa,
-      txnRefId: paymentResult.txnRefId,
-      shortLinkId: generateShortId(),
-
-      merchantId: merchant._id,
-      merchantName,
-      // merchant.company || `${merchant.firstname} ${merchant.lastname || ""}`,
-      mid: merchant.mid,
-
-      amount: amountNum,
-      currency: currency,
-
-      status: "INITIATED",
-      previousStatus: "INITIATED",
-      payInApplied: false,
-
-      paymentMethod: paymentMethod,
-      paymentOption: paymentOption,
       paymentUrl: paymentResult.paymentLink,
-
-      connectorId: activeAccount.connectorId?._id,
-      connectorAccountId: activeAccount.connectorAccountId?._id,
-      connectorName: connectorName,
-      terminalId: activeAccount.terminalId || "N/A",
-
       gatewayTransactionId: paymentResult.gatewayTransactionId,
       gatewayPaymentLink: paymentResult.paymentLink,
       gatewayOrderId: paymentResult.gatewayOrderId,
-      transactionType: "Link",
-
-      customerName: `${merchant.firstname} ${merchant.lastname || ""}`,
-      customerVpa: "",
-      customerContact: merchant.contact || "",
-      customerEmail: merchant.email || "",
-
-      txnNote: `Payment for ${merchant.company || merchant.firstname}`,
-      source: connectorName.toLowerCase(),
+      updatedAt: new Date(),
     };
 
     if (connectorName === "enpay") {
-      transactionData.enpayTxnId = paymentResult.enpayTxnId;
-      transactionData.enpayPaymentLink = paymentResult.paymentLink;
-      transactionData.enpayResponse = paymentResult.enpayResponse?.data;
-      transactionData.enpayTransactionStatus = "CREATED";
-      transactionData.enpayInitiationStatus = "ENPAY_CREATED";
+      updateTransaction.enpayTxnId = paymentResult.enpayTxnId;
+      updateTransaction.enpayPaymentLink = paymentResult.paymentLink;
+      updateTransaction.enpayResponse = paymentResult.enpayResponse?.data;
+      updateTransaction.enpayTransactionStatus = "CREATED";
+      updateTransaction.enpayInitiationStatus = "ENPAY_CREATED";
     } else if (connectorName === "razorpay") {
-      transactionData.txnRefId = paymentResult.razorPayTxnId; //It is used to check the payment status
-      transactionData.razorPayTxnId = paymentResult.txnRefId; //this is the Reference Id which is passed to generate Payment Link
-      transactionData.razorPayPaymentLink = paymentResult.paymentLink;
-      transactionData.razorPayResponse = paymentResult.razorPayResponse;
-      transactionData.razorPayTransactionStatus = "CREATED";
-      transactionData.razorPayInitiationStatus = "RAZORPAY_CREATED";
+      updateTransaction.txnRefId = paymentResult.razorPayTxnId; //It is used to check the payment status
+      updateTransaction.razorPayTxnId = paymentResult.txnRefId; //this is the Reference Id which is passed to generate Payment Link
+      updateTransaction.razorPayPaymentLink = paymentResult.paymentLink;
+      updateTransaction.razorPayResponse = paymentResult.razorPayResponse;
+      updateTransaction.razorPayTransactionStatus = "CREATED";
+      updateTransaction.razorPayInitiationStatus = "RAZORPAY_CREATED";
     }
 
-    // Save transaction
-    const newTransaction = new Transaction(transactionData);
-    await newTransaction.save({ session });
-
-    await Merchant.findOneAndUpdate(
-      { userId: user._id },
-      {
-        lastPayinTransactions: newTransaction._id,
-      },
-      { new: true, session }
-    );
-
-    await session.commitTransaction();
+    const [updatedTransac, updatedMerchant] = await Promise.all([
+      Transaction.findByIdAndUpdate(savedTransaction._id, updateTransaction, {
+        new: true,
+        lean: true,
+      }),
+      Merchant.findOneAndUpdate(
+        { userId: user._id },
+        { lastPayinTransactions: savedTransaction._id }
+      ),
+    ]);
 
     // console.log(
     //   `✅ ${connectorName} payment link generated in ${
@@ -382,24 +466,28 @@ export const generatePaymentLink = async (req, res) => {
     //   }ms`
     // );
 
-    res.json({
+    return res.json({
       success: true,
       paymentLink: paymentResult.paymentLink,
-      transactionRefId: transactionData.transactionId,
-      txnRefId: transactionData.txnRefId,
+      transactionRefId: updatedTransac.transactionId,
+      txnRefId: updatedTransac.txnRefId,
       connectorName,
-      message: `${connectorName} payment link generated successfully`,
+      message: `Payment link generated successfully`,
     });
   } catch (error) {
     console.error(`❌ Payment link generation failed:`, error);
-    await session.abortTransaction();
-    res.status(500).json({
+    if (savedTransaction?._id) {
+      await failTransaction(
+        savedTransaction._id,
+        savedTransaction.merchantId,
+        error || "Internal Server Error."
+      );
+    }
+    return res.status(500).json({
       success: false,
       message: error.message,
       errorType: "GENERATION_ERROR",
     });
-  } finally {
-    session.endSession();
   }
 };
 
@@ -639,7 +727,7 @@ export const debugEnpayIntegrationKeys = async (req, res) => {
 };
 
 const generateEnpayPayment = async ({
-  merchant,
+  txnRefId,
   amount,
   paymentMethod,
   paymentOption,
@@ -663,7 +751,7 @@ const generateEnpayPayment = async ({
     }
 
     // 3. Prepare IDs
-    const txnRefId = generateTxnRefId();
+    // const txnRefId = generateTxnRefId();
     const merchantOrderId = generateMerchantOrderId();
     const enpayTxnId = `ENP${Date.now()}`;
 
@@ -732,6 +820,7 @@ const generateEnpayPayment = async ({
 };
 
 export const generateRazorpayPayment = async ({
+  txnRefId,
   merchant,
   amount,
   paymentMethod,
@@ -739,6 +828,8 @@ export const generateRazorpayPayment = async ({
   connectorAccount,
 }) => {
   try {
+    // console.log("🔹 Generating Razorpay Payment", merchant);
+
     const integrationKeys = connectorAccount.extractedKeys || {};
 
     const requiredKeys = ["key_id", "key_secret"];
@@ -757,7 +848,7 @@ export const generateRazorpayPayment = async ({
       key_secret: integrationKeys.key_secret,
     });
 
-    const txnRefId = generateTxnRefId();
+    // const txnRefId = generateTxnRefId();
     const merchantOrderId = generateMerchantOrderId();
     const razorpayTxnId = `RAZ${Date.now()}`;
 
@@ -1195,11 +1286,11 @@ const generateCashfreePayment = async ({
   connectorAccount,
 }) => {
   try {
-    console.log(
-      "🔗 Generating Cashfree Payment...",
-      FRONTEND_BASE_URL,
-      API_BASE_URL
-    );
+    // console.log(
+    //   "🔗 Generating Cashfree Payment...",
+    //   FRONTEND_BASE_URL,
+    //   API_BASE_URL
+    // );
     // 1. Extract keys
     const integrationKeys = connectorAccount.extractedKeys || {};
     const clientId = integrationKeys["x-client-id"];
@@ -1254,7 +1345,7 @@ const generateCashfreePayment = async ({
       // optionally set expiry, partial payments, notes etc.
     };
 
-    console.log("📤 Cashfree Link Request:", body);
+    // console.log("📤 Cashfree Link Request:", body);
 
     // 5. Call Cashfree Link API
     const response = await axios.post(`${cashfreeBaseUrl}/links`, body, {
@@ -1270,7 +1361,7 @@ const generateCashfreePayment = async ({
       timeout: 30000,
     });
 
-    console.log(response, "CASHFREE");
+    // console.log(response, "CASHFREE");
 
     const data = response.data;
     // 6. Validate response
@@ -3107,7 +3198,7 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
         );
         gatewayData = response.data.details;
       } catch (error) {
-        console.log(error, "Enpay error");
+        console.error(error, "Enpay error");
         throw error;
       }
       // gatewayData.status = "SUCCESS";
@@ -3515,7 +3606,7 @@ export const payinCallbackUrl = async (req, res) => {
         );
         gatewayData = response.data.details;
       } catch (error) {
-        console.log(error, "Enpay error");
+        console.error(error, "Enpay error");
         throw error;
       }
       // gatewayData.status = "SUCCESS";
@@ -4698,7 +4789,7 @@ export const paymentWebhook = async (req, res) => {
 
     txn.status = newStatus;
     txn.updatedAt = new Date();
-    console.log(txn.txnRefId);
+    // console.log(txn.txnRefId);
     await txn.save({ session });
     await merchant.save({ session });
     await user.save({ session });
