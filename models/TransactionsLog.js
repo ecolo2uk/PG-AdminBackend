@@ -63,6 +63,32 @@ const TransactionsLogSchema = new mongoose.Schema({
       "REVERSED",
     ],
     default: "INITIATED",
+    index: true,
+  },
+
+  /* ===== CONNECTOR INFO ===== */
+  connector: {
+    name: String,
+    connectorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Connector",
+    },
+    connectorAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ConnectorAccount",
+    },
+    gatewayTransactionId: String,
+    gatewayOrderId: String,
+    gatewayRefId: String,
+  },
+
+  /* ===== PAYOUT BANK INFO ===== */
+  payoutAccount: {
+    beneficiaryName: String,
+    bankName: String,
+    accountNumber: String,
+    ifsc: String,
+    payoutMethod: String,
   },
 
   // Meta
@@ -77,6 +103,11 @@ const TransactionsLogSchema = new mongoose.Schema({
     default: Date.now,
     index: true,
   },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+
   txnInitiatedDate: Date,
   txnCompletedDate: Date,
 });

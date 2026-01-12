@@ -294,6 +294,39 @@ export const createPayoutToMerchant = async (req, res) => {
       session,
     });
 
+    const merchantWallet = await Merchant.findOne(
+      { userId: merchantId },
+      { availableBalance: 1 },
+      { session }
+    );
+
+    await TransactionsLog.create(
+      [
+        {
+          merchantId,
+          referenceType: "PAYOUT",
+          referenceId: savedTransaction._id,
+          referenceNo: payoutId,
+          referenceTxnId: requestId,
+          description: "Payout amount blocked",
+          debit: payoutAmount,
+          credit: 0,
+          balance: merchantWallet.availableBalance,
+          status: "INITIATED",
+          source: "API",
+          payoutAccount: {
+            beneficiaryName: accountHolderName,
+            bankName,
+            accountNumber: accountNumber,
+            ifsc: ifscCode,
+            payoutMethod: paymentMode,
+          },
+          txnInitiatedDate: new Date(),
+        },
+      ],
+      { session }
+    );
+
     // Validate required fields
     if (!amount) {
       await failTransaction(
@@ -359,32 +392,6 @@ export const createPayoutToMerchant = async (req, res) => {
       });
     }
     balanceBlocked = true;
-
-    const merchantWallet = await Merchant.findOne(
-      { userId: merchantId },
-      { availableBalance: 1 },
-      { session }
-    );
-
-    await TransactionsLog.create(
-      [
-        {
-          merchantId,
-          referenceType: "PAYOUT",
-          referenceId: savedTransaction._id,
-          referenceNo: payoutId,
-          referenceTxnId: requestId,
-          description: "Payout amount blocked",
-          debit: payoutAmount,
-          credit: 0,
-          balance: merchantWallet.availableBalance,
-          status: "INITIATED",
-          source: "API",
-          txnInitiatedDate: new Date(),
-        },
-      ],
-      { session }
-    );
 
     if (!accountNumber) {
       await failTransaction(
@@ -563,6 +570,25 @@ export const createPayoutToMerchant = async (req, res) => {
       connectorMeta,
       { session }
     );
+
+    await TransactionsLog.updateOne(
+      {
+        referenceType: "PAYOUT",
+        referenceId: savedTransaction._id,
+      },
+      {
+        $set: {
+          connector: {
+            name: connectorName,
+            connectorId: activeAccount.connector?._id,
+            connectorAccountId: activeAccount.connectorAccount?._id,
+            gatewayRefId: requestId,
+          },
+        },
+      },
+      { session }
+    );
+
     // console.log(updatedPayout, savedTransaction._id);
 
     const beneficiary_account_number = accountNumber;
@@ -675,6 +701,16 @@ export const createPayoutToMerchant = async (req, res) => {
     }
 
     const data = decData.data;
+
+    await TransactionsLog.updateOne(
+      { referenceId: savedTransaction._id },
+      {
+        $set: {
+          "connector.gatewayTransactionId": data.txnId,
+        },
+      },
+      { session }
+    );
 
     const encryptedStatusResponse = await encryptData(
       {
@@ -822,6 +858,8 @@ export const createPayoutToMerchant = async (req, res) => {
             balance: updatedMerchant.availableBalance,
             status: "SUCCESS",
             description: "Payout completed successfully",
+            "connector.gatewayTransactionId": decStatusData.txnId,
+            "connector.gatewayOrderId": decStatusData.enquiryId,
             source: "API",
             txnCompletedDate: new Date(),
           },
@@ -872,6 +910,8 @@ export const createPayoutToMerchant = async (req, res) => {
             balance: updatedMerchant.availableBalance,
             status: decStatusData.txnStatus,
             description: "Payout failed - amount released",
+            "connector.gatewayTransactionId": decStatusData.txnId,
+            "connector.gatewayOrderId": decStatusData.enquiryId,
             source: "API",
             txnCompletedDate: new Date(),
           },

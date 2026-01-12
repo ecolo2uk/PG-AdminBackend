@@ -327,6 +327,23 @@ export const generatePaymentLink = async (req, res) => {
 
     await Transaction.findByIdAndUpdate(savedTransaction._id, connectorMeta);
 
+    await TransactionsLog.findOneAndUpdate(
+      {
+        referenceType: "PAYIN",
+        referenceId: savedTransaction._id,
+      },
+      {
+        $set: {
+          connector: {
+            name: connectorName,
+            connectorId: activeAccount.connector?._id,
+            connectorAccountId: activeAccount.connectorAccount?._id,
+            gatewayRefId: txnRefId,
+          },
+        },
+      }
+    );
+
     let paymentResult;
 
     if (connectorName === "cashfree") {
@@ -435,16 +452,30 @@ export const generatePaymentLink = async (req, res) => {
       updateTransaction.razorPayInitiationStatus = "RAZORPAY_CREATED";
     }
 
-    const [updatedTransac, updatedMerchant] = await Promise.all([
-      Transaction.findByIdAndUpdate(savedTransaction._id, updateTransaction, {
-        new: true,
-        lean: true,
-      }),
-      Merchant.findOneAndUpdate(
-        { userId: user._id },
-        { lastPayinTransactions: savedTransaction._id }
-      ),
-    ]);
+    const [updatedTransac, updatedMerchant, updatedTransacLog] =
+      await Promise.all([
+        Transaction.findByIdAndUpdate(savedTransaction._id, updateTransaction, {
+          new: true,
+          lean: true,
+        }),
+        Merchant.findOneAndUpdate(
+          { userId: user._id },
+          { lastPayinTransactions: savedTransaction._id }
+        ),
+        TransactionsLog.findOneAndUpdate(
+          {
+            referenceType: "PAYIN",
+            referenceId: savedTransaction._id,
+          },
+          {
+            $set: {
+              "connector.gatewayTransactionId":
+                paymentResult.gatewayTransactionId,
+              "connector.gatewayOrderId": paymentResult.gatewayOrderId,
+            },
+          }
+        ),
+      ]);
 
     // console.log(
     //   `✅ ${connectorName} payment link generated in ${
