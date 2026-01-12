@@ -5011,7 +5011,7 @@ export const updateTransactions = async (req, res) => {
           connectorName = connector;
 
           activeAccount.extractedKeys = keys;
-          console.log(connector, keys);
+          // console.log(connector, keys);
 
           let decStatusData;
 
@@ -5027,7 +5027,7 @@ export const updateTransactions = async (req, res) => {
               },
               activeAccount
             );
-            console.log(encryptedStatusResponse.data, "Enc res");
+            // console.log(encryptedStatusResponse.data, "Enc res");
             if (
               !encryptedStatusResponse.success ||
               !encryptedStatusResponse.data?.data?.encData
@@ -5043,7 +5043,7 @@ export const updateTransactions = async (req, res) => {
               encStatusData,
               activeAccount
             );
-            console.log(checkStatusRes.data, "Payout res");
+            // console.log(checkStatusRes.data, "Payout res");
             if (
               !checkStatusRes.success ||
               checkStatusRes.data.responseCode !== "0"
@@ -5059,7 +5059,7 @@ export const updateTransactions = async (req, res) => {
               statusData.data,
               activeAccount
             );
-            console.log(decryptedStatusResponse.data, "Dec res");
+            // console.log(decryptedStatusResponse.data, "Dec res");
             if (
               !decryptedStatusResponse.success ||
               decryptedStatusResponse.data.responseCode !== "0"
@@ -5070,7 +5070,7 @@ export const updateTransactions = async (req, res) => {
             }
 
             decStatusData = decryptedStatusResponse.data.data;
-            console.log(decStatusData);
+            // console.log(decStatusData);
             const txnAmt = txn.amount;
 
             if (decStatusData.txnStatus === "SUCCESS") {

@@ -1,12 +1,12 @@
 import axios from "axios";
 
 export const extractIntegrationKeys = (connectorAccount) => {
-  console.log("🔍 Extracting integration keys from:", {
-    hasIntegrationKeys: !!connectorAccount?.integrationKeys,
-    hasConnectorAccountId:
-      !!connectorAccount?.connectorAccount?.integrationKeys,
-    connectorAccount: connectorAccount?.connectorAccount?._id,
-  });
+  // console.log("🔍 Extracting integration keys from:", {
+  //   hasIntegrationKeys: !!connectorAccount?.integrationKeys,
+  //   hasConnectorAccountId:
+  //     !!connectorAccount?.connectorAccount?.integrationKeys,
+  //   connectorAccount: connectorAccount?.connectorAccount?._id,
+  // });
 
   let integrationKeys = {};
 
