@@ -3197,6 +3197,7 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
 
     let gatewayData;
     let newStatus;
+    const previousBalance = merchant.availableBalance;
 
     /* ===================== ENPAY ===================== */
     if (connectorName === "enpay") {
@@ -3393,6 +3394,22 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
           );
           txn.wasFailed = false;
         }
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              credit: txn.amount,
+              debit: 0,
+              balance: previousBalance + txn.amount,
+              status: "SUCCESS",
+              description: "Payment received",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // INITIATED → FAILED
@@ -3403,6 +3420,19 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
       ) {
         merchant.failedTransactions += 1;
         txn.wasFailed = true;
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              status: "FAILED",
+              description: "Payment failed",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // PENDING → SUCCESS
@@ -3429,6 +3459,22 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
           );
           txn.wasFailed = false;
         }
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              credit: txn.amount,
+              debit: 0,
+              balance: previousBalance + txn.amount,
+              status: "SUCCESS",
+              description: "Payment received",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // PENDING → FAILED
@@ -3443,6 +3489,19 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
         // );
         merchant.failedTransactions += 1;
         txn.wasFailed = true;
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              status: "FAILED",
+              description: "Payment failed",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // SUCCESS → FAILED (rollback)
@@ -3470,6 +3529,22 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
 
         txn.payInApplied = false;
         txn.wasFailed = true;
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              credit: 0,
+              debit: txn.amount,
+              balance: previousBalance - txn.amount,
+              status: "REVERSED",
+              description: "Payment reversed",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // SUCCESS → PENDING (rare but safe)
@@ -3804,6 +3879,22 @@ export const payinCallbackUrl = async (req, res) => {
           );
           txn.wasFailed = false;
         }
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              credit: txn.amount,
+              debit: 0,
+              balance: previousBalance + txn.amount,
+              status: "SUCCESS",
+              description: "Payment received",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // INITIATED → FAILED
@@ -3814,6 +3905,19 @@ export const payinCallbackUrl = async (req, res) => {
       ) {
         merchant.failedTransactions += 1;
         txn.wasFailed = true;
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              status: "FAILED",
+              description: "Payment failed",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // PENDING → SUCCESS
@@ -3840,6 +3944,22 @@ export const payinCallbackUrl = async (req, res) => {
           );
           txn.wasFailed = false;
         }
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              credit: txn.amount,
+              debit: 0,
+              balance: previousBalance + txn.amount,
+              status: "SUCCESS",
+              description: "Payment received",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // PENDING → FAILED
@@ -3854,6 +3974,19 @@ export const payinCallbackUrl = async (req, res) => {
         // );
         merchant.failedTransactions += 1;
         txn.wasFailed = true;
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              status: "FAILED",
+              description: "Payment failed",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // SUCCESS → FAILED (rollback)
@@ -3881,6 +4014,22 @@ export const payinCallbackUrl = async (req, res) => {
 
         txn.payInApplied = false;
         txn.wasFailed = true;
+
+        await TransactionsLog.updateOne(
+          { referenceId: txn._id },
+          {
+            $set: {
+              credit: 0,
+              debit: txn.amount,
+              balance: previousBalance - txn.amount,
+              status: "REVERSED",
+              description: "Payment reversed",
+              source: "CRON",
+              txnCompletedDate: new Date(),
+            },
+          },
+          { session }
+        );
       }
 
       // SUCCESS → PENDING (rare but safe)
