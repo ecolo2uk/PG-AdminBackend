@@ -7,9 +7,16 @@ import MerchantConnectorAccount from "../models/MerchantConnectorAccount.js";
 import ConnectorAccount from "../models/ConnectorAccount.js";
 import User from "../models/User.js";
 import Merchant from "../models/Merchant.js";
-const ObjectId = mongoose.Types.ObjectId;
 import Razorpay from "razorpay";
 import PayoutTransaction from "../models/PayoutTransaction.js";
+import {
+  decryptData,
+  encryptData,
+  extractIntegrationKeys,
+  payoutTransactionStatus,
+} from "../utils/jodetx.js";
+import MerchantPayoutConnectorAccount from "../models/MerchantPayoutConnectorAccount.js";
+import TransactionsLog from "../models/TransactionsLog.js";
 
 const FRONTEND_BASE_URL =
   process.env.FRONTEND_URL || "http://localhost:3000/admin";
@@ -55,53 +62,6 @@ function generateMerchantOrderId() {
   return `ORDER${Date.now()}${Math.floor(Math.random() * 1000)}`;
 }
 
-// ✅ ADD THIS FUNCTION - Extract integration keys from connector account
-function extractIntegrationKeys(connectorAccount) {
-  // console.log("🔍 Extracting integration keys from:", {
-  //   hasIntegrationKeys: !!connectorAccount?.integrationKeys,
-  //   hasConnectorAccountId:
-  //     !!connectorAccount?.connectorAccount?.integrationKeys,
-  //   connectorAccount: connectorAccount?.connectorAccount?._id,
-  // });
-
-  let integrationKeys = {};
-
-  // ✅ Check multiple possible locations for integration keys
-  if (
-    connectorAccount?.integrationKeys &&
-    Object.keys(connectorAccount.integrationKeys).length > 0
-  ) {
-    // console.log("🎯 Found keys in connectorAccount.integrationKeys");
-    integrationKeys = connectorAccount.integrationKeys;
-  } else if (
-    connectorAccount?.connectorAccount?.integrationKeys &&
-    Object.keys(connectorAccount.connectorAccount.integrationKeys).length > 0
-  ) {
-    // console.log(
-    //   "🎯 Found keys in connectorAccount.connectorAccount.integrationKeys"
-    // );
-    integrationKeys = connectorAccount.connectorAccount.integrationKeys;
-  } else {
-    console.log("⚠️ No integration keys found in standard locations");
-  }
-
-  // ✅ Convert if it's a Map or special object
-  if (integrationKeys instanceof Map) {
-    integrationKeys = Object.fromEntries(integrationKeys);
-    // console.log("🔍 Converted Map to Object");
-  } else if (typeof integrationKeys === "string") {
-    try {
-      integrationKeys = JSON.parse(integrationKeys);
-      // console.log("🔍 Parsed JSON string to Object");
-    } catch (e) {
-      console.error("❌ Failed to parse integrationKeys string:", e);
-    }
-  }
-
-  // console.log("🎯 Extracted Keys:", Object.keys(integrationKeys));
-  return integrationKeys;
-}
-
 const failTransaction = async (
   transactionId,
   merchantId,
@@ -139,6 +99,19 @@ const failTransaction = async (
         failedTransactions: 1,
       },
       $set: { lastPayinTransactions: transactionId },
+    }
+  );
+
+  await TransactionsLog.findOneAndUpdate(
+    {
+      referenceId: transactionId,
+    },
+    {
+      $set: {
+        status: "FAILED",
+        description: "Payment failed",
+        txnCompletedDate: new Date(),
+      },
     }
   );
 };
@@ -236,6 +209,22 @@ export const generatePaymentLink = async (req, res) => {
 
     savedTransaction = await Transaction.create(transactionData);
 
+    await TransactionsLog.create({
+      merchantId: user._id,
+      referenceType: "PAYIN",
+      referenceId: savedTransaction._id,
+      referenceNo: savedTransaction.transactionId,
+      referenceTxnId: txnRefId,
+      description: "Payment link generated",
+      debit: 0,
+      credit: 0, // no money yet
+      balance: merchant.availableBalance,
+      currency,
+      status: "INITIATED",
+      source: "API",
+      txnInitiatedDate: new Date(),
+    });
+
     /* ===================== VALIDATION ===================== */
 
     if (!amount) {
@@ -266,36 +255,33 @@ export const generatePaymentLink = async (req, res) => {
     // console.log(merchantId);
 
     // Find Active Connector Account
-    const [activeAccount] = await mongoose.connection.db
-      .collection("merchantconnectoraccounts")
-      .aggregate([
-        {
-          $match: {
-            merchantId: new mongoose.Types.ObjectId(merchantId),
-            isPrimary: true,
-            status: "Active",
-          },
+    const [activeAccount] = await MerchantConnectorAccount.aggregate([
+      {
+        $match: {
+          merchantId: new mongoose.Types.ObjectId(merchantId),
+          isPrimary: true,
+          status: "Active",
         },
-        {
-          $lookup: {
-            from: "connectors",
-            localField: "connectorId",
-            foreignField: "_id",
-            as: "connector",
-          },
+      },
+      {
+        $lookup: {
+          from: "connectors",
+          localField: "connectorId",
+          foreignField: "_id",
+          as: "connector",
         },
-        {
-          $lookup: {
-            from: "connectoraccounts",
-            localField: "connectorAccountId",
-            foreignField: "_id",
-            as: "connectorAccount",
-          },
+      },
+      {
+        $lookup: {
+          from: "connectoraccounts",
+          localField: "connectorAccountId",
+          foreignField: "_id",
+          as: "connectorAccount",
         },
-        { $unwind: "$connector" },
-        { $unwind: "$connectorAccount" },
-      ])
-      .toArray();
+      },
+      { $unwind: "$connector" },
+      { $unwind: "$connectorAccount" },
+    ]);
 
     // console.log(activeAccount);
 
@@ -2956,6 +2942,52 @@ export const getPaymentMethods = async (req, res) => {
   }
 };
 
+function extractCheckIntegrationKeys(connectorAccount) {
+  // console.log("🔍 Extracting integration keys from:", {
+  //   hasIntegrationKeys: !!connectorAccount?.integrationKeys,
+  //   hasConnectorAccountId:
+  //     !!connectorAccount?.connectorAccountId?.integrationKeys,
+  //   connectorAccountId: connectorAccount?.connectorAccountId?._id,
+  // });
+
+  let integrationKeys = {};
+
+  // ✅ Check multiple possible locations for integration keys
+  if (
+    connectorAccount?.integrationKeys &&
+    Object.keys(connectorAccount.integrationKeys).length > 0
+  ) {
+    // console.log("🎯 Found keys in connectorAccount.integrationKeys");
+    integrationKeys = connectorAccount.integrationKeys;
+  } else if (
+    connectorAccount?.connectorAccountId?.integrationKeys &&
+    Object.keys(connectorAccount.connectorAccountId.integrationKeys).length > 0
+  ) {
+    // console.log(
+    //   "🎯 Found keys in connectorAccount.connectorAccountId.integrationKeys"
+    // );
+    integrationKeys = connectorAccount.connectorAccountId.integrationKeys;
+  } else {
+    console.log("⚠️ No integration keys found in standard locations");
+  }
+
+  // ✅ Convert if it's a Map or special object
+  if (integrationKeys instanceof Map) {
+    integrationKeys = Object.fromEntries(integrationKeys);
+    // console.log("🔍 Converted Map to Object");
+  } else if (typeof integrationKeys === "string") {
+    try {
+      integrationKeys = JSON.parse(integrationKeys);
+      // console.log("🔍 Parsed JSON string to Object");
+    } catch (e) {
+      console.error("❌ Failed to parse integrationKeys string:", e);
+    }
+  }
+
+  // console.log("🎯 Extracted Keys:", Object.keys(integrationKeys));
+  return integrationKeys;
+}
+
 export const checkTransactionStatus = async (req, res) => {
   try {
     // console.log(req.body, req.query, "checkTransactionS");
@@ -2989,22 +3021,22 @@ export const checkTransactionStatus = async (req, res) => {
     // console.log(activeAccount);
 
     if (!activeAccount) {
-      return res.json({
+      return res.status(404).json({
         success: false,
-        error: "Connector Account not found",
-        connectorName: "Enpay",
+        message: "Connector Account not found",
       });
     }
 
-    const keys = extractIntegrationKeys(activeAccount);
+    const connectorName = activeAccount.connectorId?.name.toLowerCase();
+
+    const keys = extractCheckIntegrationKeys(activeAccount);
 
     // console.log(keys);
-    if (activeAccount.connectorId.name === "Enpay") {
+    if (connectorName === "enpay") {
       if (!keys) {
-        return res.json({
+        return res.status(404).json({
           success: false,
-          error: "No keys found for Enpay connector",
-          connectorName: "Enpay",
+          message: "No keys found for Enpay connector",
         });
       }
       const merchantKey = keys["X-Merchant-Key"];
@@ -3040,18 +3072,17 @@ export const checkTransactionStatus = async (req, res) => {
           enpayResponse: response.data,
         });
       } catch (err) {
+        console.error("🔍 RAW ENPAY STATUS ERROR:", err);
         return res.json({
           success: false,
-          error: err.message,
-          connectorName: "Enpay",
+          message: err.response.data.message || err.message || "Enpay error",
         });
       }
-    } else if (activeAccount.connectorId.name === "Razorpay") {
+    } else if (connectorName === "razorpay") {
       if (!keys) {
         return res.json({
           success: false,
-          error: "No keys found for Razorpay connector",
-          connectorName: "Enpay",
+          message: "No keys found for Razorpay connector",
         });
       }
       const requiredKeys = ["key_id", "key_secret"];
@@ -3083,8 +3114,7 @@ export const checkTransactionStatus = async (req, res) => {
         // console.log(err);
         return res.json({
           success: false,
-          error: err.error.description,
-          connectorName: "Razorpay",
+          message: err.error.description || err.message || "Razorpay error",
         });
       }
 
@@ -3158,18 +3188,18 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
     //   activeAccount.connectorId.name
     // );
 
-    if (!activeAccount) throw new Error("Connector account not found");
+    if (!activeAccount) throw new Error("Connector Account not found");
 
-    const connectorName = activeAccount.connectorId?.name || "";
+    const connectorName = activeAccount.connectorId?.name.toLowerCase();
 
-    const keys = extractIntegrationKeys(activeAccount);
+    const keys = extractCheckIntegrationKeys(activeAccount);
     // console.log(keys);
 
     let gatewayData;
     let newStatus;
 
     /* ===================== ENPAY ===================== */
-    if (activeAccount.connectorId.name === "Enpay") {
+    if (connectorName === "enpay") {
       if (!keys) {
         throw new Error("No keys found for Enpay connector");
       }
@@ -3215,7 +3245,7 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
       txn.enpayTransactionStatus = newStatus;
     }
     /* ===================== RAZORPAY ===================== */
-    if (activeAccount.connectorId.name === "Razorpay") {
+    if (connectorName === "razorpay") {
       if (!keys) {
         throw new Error("No keys found for Razorpay connector");
       }
@@ -3505,7 +3535,10 @@ export const fetchAndUpdateTransactionStatus = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch transaction status",
-      error: error.message || error.error?.description,
+      error:
+        error.response.data.message ||
+        error.error?.description ||
+        error.message,
     });
   } finally {
     session.endSession();
@@ -3568,16 +3601,16 @@ export const payinCallbackUrl = async (req, res) => {
 
     if (!activeAccount) throw new Error("Connector account not found");
 
-    const connectorName = activeAccount.connectorId?.name || "";
+    const connectorName = activeAccount.connectorId?.name.toLowerCase();
 
-    const keys = extractIntegrationKeys(activeAccount);
+    const keys = extractCheckIntegrationKeys(activeAccount);
     // console.log(keys);
 
     let gatewayData;
     let newStatus;
 
     /* ===================== ENPAY ===================== */
-    if (activeAccount.connectorId.name === "Enpay") {
+    if (connectorName === "enpay") {
       if (!keys) {
         throw new Error("No keys found for Enpay connector");
       }
@@ -3623,7 +3656,7 @@ export const payinCallbackUrl = async (req, res) => {
       txn.enpayTransactionStatus = newStatus;
     }
     /* ===================== RAZORPAY ===================== */
-    if (activeAccount.connectorId.name === "Razorpay") {
+    if (connectorName === "razorpay") {
       if (!keys) {
         throw new Error("No keys found for Razorpay connector");
       }
@@ -3913,459 +3946,16 @@ export const payinCallbackUrl = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch transaction status",
-      error: error.message || error.error?.description,
+      error:
+        error.response.data.message ||
+        error.error?.description ||
+        error.message,
     });
   } finally {
     session.endSession();
   }
 };
 
-export const updateTransactions = async (req, res) => {
-  try {
-    // Fetch transactions in non-final states
-    const transactions = await Transaction.find({
-      status: { $in: ["INITIATED", "PENDING"] },
-    }).limit(100); // limit for cron safety
-
-    if (!transactions.length) {
-      return res.json({
-        success: true,
-        message: "No initiated or pending transactions found",
-      });
-    }
-
-    const results = [];
-
-    for (const txn of transactions) {
-      const session = await mongoose.startSession();
-      session.startTransaction();
-
-      let activeAccount;
-      let connectorName;
-
-      try {
-        // Fetch merchant
-        const merchant = await Merchant.findOne({
-          userId: txn.merchantId,
-        }).session(session);
-        if (!merchant) throw new Error("Merchant not found");
-
-        const user = await User.findById(txn.merchantId).session(session);
-        if (!user) throw new Error("Merchant not found");
-
-        // Fetch active connector account
-        activeAccount = await MerchantConnectorAccount.findOne({
-          merchantId: txn.merchantId,
-          connectorAccountId: txn.connectorAccountId,
-          status: "Active",
-          // isPrimary: true,
-        })
-          .populate("connectorId")
-          .populate("connectorAccountId")
-          .session(session);
-
-        // console.log(
-        //   activeAccount.connectorAccountId,
-        //   activeAccount.connectorId.name
-        // );
-
-        if (!activeAccount) throw new Error("Connector account not found");
-
-        connectorName = activeAccount.connectorId?.name || "";
-
-        const keys = extractIntegrationKeys(activeAccount);
-        // console.log(keys);
-
-        let gatewayData;
-        let newStatus;
-
-        /* ===================== ENPAY ===================== */
-        if (activeAccount.connectorId.name === "Enpay") {
-          if (!keys) {
-            throw new Error("No keys found for Enpay connector");
-          }
-          const merchantKey = keys["X-Merchant-Key"];
-          const merchantSecret = keys["X-Merchant-Secret"];
-          const merchantHashId = keys["merchantHashId"];
-          const merchantVpa = keys["merchantVpa"];
-
-          if (
-            !merchantKey ||
-            !merchantSecret ||
-            !merchantHashId ||
-            !merchantVpa
-          ) {
-            throw new Error("Missing Enpay credentials");
-          }
-
-          // Call Enpay API
-          const response = await axios.post(
-            "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
-            { txnRefId: txn.txnRefId, merchantHashId },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "X-Merchant-Key": merchantKey,
-                "X-Merchant-Secret": merchantSecret,
-              },
-              timeout: 20000,
-            }
-          );
-
-          gatewayData = response.data.details;
-          // gatewayData.status = "SUCCESS";
-          newStatus = gatewayData.status || "INITIATED";
-          txn.transactionInitiatedAt = gatewayData.transactionInitiatedAt
-            ? new Date(gatewayData.transactionInitiatedAt)
-            : txn.transactionInitiatedAt;
-          txn.transactionCompletedAt = gatewayData.transactionCompletedAt
-            ? new Date(gatewayData.transactionCompletedAt)
-            : txn.transactionCompletedAt;
-          txn.utr = gatewayData.utr || txn.utr;
-          txn.customerName = gatewayData.customerName || txn.customerName;
-          txn.customerVpa = gatewayData.customerVpa || txn.customerVpa;
-          txn.enpayTransactionStatus = newStatus;
-        }
-        /* ===================== RAZORPAY ===================== */
-        if (activeAccount.connectorId.name === "Razorpay") {
-          if (!keys) {
-            throw new Error("No keys found for Razorpay connector");
-          }
-
-          const requiredKeys = ["key_id", "key_secret"];
-
-          const missingKeys = requiredKeys.filter((key) => !keys[key]);
-
-          if (missingKeys.length > 0) {
-            console.error("Razorpay keys missing:", missingKeys);
-            throw new Error(
-              `Missing integration keys for Razorpay connector: ${missingKeys.join(
-                ", "
-              )}`
-            );
-          }
-
-          const razorpay = new Razorpay({
-            key_id: keys.key_id,
-            key_secret: keys.key_secret,
-          });
-
-          if (txn.transactionType === "Link") {
-            gatewayData = await razorpay.paymentLink.fetch(txn.txnRefId);
-
-            if (gatewayData.status === "paid") {
-              newStatus = "SUCCESS";
-            } else if (
-              gatewayData.status === "cancelled" ||
-              gatewayData.status === "expired"
-            ) {
-              newStatus = "FAILED";
-            } else {
-              newStatus = "PENDING";
-            }
-
-            txn.transactionInitiatedAt = new Date(
-              gatewayData.created_at * 1000
-            );
-
-            const payment = gatewayData.payments?.[0];
-            if (payment) {
-              txn.gatewayPaymentMethod = payment.method;
-            }
-            if (payment && payment.status === "captured") {
-              txn.razorPayPaymentId = payment.payment_id;
-              txn.transactionCompletedAt = new Date(payment.created_at * 1000);
-              txn.utr =
-                payment.acquirer_data?.rrn ||
-                payment.acquirer_data?.upi_transaction_id ||
-                txn.utr;
-            }
-
-            if (gatewayData.order_id) {
-              txn.gatewayOrderId = gatewayData.order_id;
-            }
-
-            txn.customerName = gatewayData.customer?.name || txn.customerName;
-            txn.customerEmail =
-              gatewayData.customer?.email || txn.customerEmail;
-            txn.customerContact =
-              gatewayData.customer?.contact || txn.customerContact;
-            txn.customerVpa = gatewayData.customer?.vpa || txn.customerVpa;
-            txn.razorPayTransactionStatus = newStatus;
-          }
-
-          if (txn.transactionType === "QR") {
-            gatewayData = await razorpay.qrCode.fetchAllPayments(txn.txnRefId);
-
-            if (!gatewayData.items.length) {
-              newStatus = "PENDING";
-            } else {
-              const payment = gatewayData.items[0];
-              newStatus =
-                payment.status === "captured"
-                  ? "SUCCESS"
-                  : payment.status === "failed"
-                  ? "FAILED"
-                  : "PENDING";
-
-              txn.razorPayTransactionStatus = newStatus;
-              txn.transactionInitiatedAt = new Date(payment.created_at * 1000);
-              txn.razorPayPaymentId = payment.id;
-              txn.gatewayPaymentMethod = payment.method;
-              txn.customerEmail = payment.email || txn.customerEmail;
-              txn.customerVpa = payment.vpa || txn.customerVpa;
-              txn.customerContact = payment.contact || txn.customerContact;
-              txn.transactionCompletedAt =
-                payment.status === "captured"
-                  ? new Date(payment.created_at * 1000)
-                  : null;
-              txn.utr = payment.acquirer_data?.rrn || txn.utr;
-
-              if (payment.order_id) {
-                txn.gatewayOrderId = payment.order_id;
-              }
-            }
-          }
-        }
-
-        // Save previous status
-        const prevStatus = txn.status;
-        txn.previousStatus = prevStatus;
-
-        // Initialize counters if undefined
-        merchant.payinTransactions = merchant.payinTransactions || 0;
-        merchant.totalLastNetPayIn = merchant.totalLastNetPayIn || 0;
-        merchant.totalCredits = merchant.totalCredits || 0;
-        merchant.availableBalance = merchant.availableBalance || 0;
-        merchant.totalTransactions = merchant.totalTransactions || 0;
-        merchant.successfulTransactions = merchant.successfulTransactions || 0;
-        // merchant.pendingTransactions = merchant.pendingTransactions || 0;
-        merchant.failedTransactions = merchant.failedTransactions || 0;
-        merchant.balance = merchant.balance || 0;
-
-        // Always increment total transactions if this is a new transaction update
-        if (!txn.totalApplied) {
-          merchant.totalTransactions += 1;
-          merchant.payinTransactions += 1;
-          txn.totalApplied = true;
-        }
-
-        // Handle state transitions idempotently
-        if (prevStatus !== newStatus) {
-          // INITIATED → PENDING
-          // if (prevStatus === "INITIATED" && newStatus === "PENDING") {
-          //   merchant.pendingTransactions += 1;
-          // }
-
-          // INITIATED → SUCCESS
-          if (
-            prevStatus === "INITIATED" &&
-            newStatus === "SUCCESS" &&
-            !txn.payInApplied
-          ) {
-            merchant.availableBalance += txn.amount;
-            merchant.totalCredits += txn.amount;
-            merchant.totalLastNetPayIn += txn.amount;
-            merchant.successfulTransactions += 1;
-            user.balance += txn.amount;
-            txn.payInApplied = true;
-
-            // Reduce failed count if previously marked failed
-            if (txn.wasFailed) {
-              merchant.failedTransactions = Math.max(
-                0,
-                merchant.failedTransactions - 1
-              );
-              txn.wasFailed = false;
-            }
-          }
-
-          // INITIATED → FAILED
-          if (
-            prevStatus === "INITIATED" &&
-            newStatus === "FAILED" &&
-            !txn.wasFailed
-          ) {
-            merchant.failedTransactions += 1;
-            txn.wasFailed = true;
-          }
-
-          // PENDING → SUCCESS
-          if (
-            prevStatus === "PENDING" &&
-            newStatus === "SUCCESS" &&
-            !txn.payInApplied
-          ) {
-            // merchant.pendingTransactions = Math.max(
-            //   0,
-            //   merchant.pendingTransactions - 1
-            // );
-            merchant.successfulTransactions += 1;
-            merchant.availableBalance += txn.amount;
-            merchant.totalCredits += txn.amount;
-            merchant.totalLastNetPayIn += txn.amount;
-            user.balance += txn.amount;
-            txn.payInApplied = true;
-
-            if (txn.wasFailed) {
-              merchant.failedTransactions = Math.max(
-                0,
-                merchant.failedTransactions - 1
-              );
-              txn.wasFailed = false;
-            }
-          }
-
-          // PENDING → FAILED
-          if (
-            prevStatus === "PENDING" &&
-            newStatus === "FAILED" &&
-            !txn.wasFailed
-          ) {
-            // merchant.pendingTransactions = Math.max(
-            //   0,
-            //   merchant.pendingTransactions - 1
-            // );
-            merchant.failedTransactions += 1;
-            txn.wasFailed = true;
-          }
-
-          // SUCCESS → FAILED (rollback)
-          if (
-            prevStatus === "SUCCESS" &&
-            newStatus === "FAILED" &&
-            txn.payInApplied
-          ) {
-            merchant.successfulTransactions = Math.max(
-              0,
-              merchant.successfulTransactions - 1
-            );
-            merchant.failedTransactions += 1;
-
-            merchant.availableBalance = Math.max(
-              0,
-              merchant.availableBalance - txn.amount
-            );
-            merchant.totalCredits = Math.max(
-              0,
-              merchant.totalCredits - txn.amount
-            );
-            merchant.totalLastNetPayIn = Math.max(
-              0,
-              merchant.totalLastNetPayIn - txn.amount
-            );
-            user.balance = Math.max(0, user.balance - txn.amount);
-
-            txn.payInApplied = false;
-            txn.wasFailed = true;
-          }
-
-          // SUCCESS → PENDING (rare but safe)
-          if (
-            prevStatus === "SUCCESS" &&
-            newStatus === "PENDING" &&
-            txn.payInApplied
-          ) {
-            merchant.successfulTransactions = Math.max(
-              0,
-              merchant.successfulTransactions - 1
-            );
-            // merchant.pendingTransactions += 1;
-            merchant.availableBalance = Math.max(
-              0,
-              merchant.availableBalance - txn.amount
-            );
-            merchant.totalCredits = Math.max(
-              0,
-              merchant.totalCredits - txn.amount
-            );
-            merchant.totalLastNetPayIn = Math.max(
-              0,
-              merchant.totalLastNetPayIn - txn.amount
-            );
-            user.balance = Math.max(0, user.balance - txn.amount);
-            txn.payInApplied = false;
-            if (txn.wasFailed) {
-              merchant.failedTransactions = Math.max(
-                0,
-                merchant.failedTransactions - 1
-              );
-              txn.wasFailed = false;
-            }
-          }
-        }
-
-        // Update transaction fields
-        txn.status = newStatus;
-        txn.updatedAt = new Date();
-
-        // Save both transaction and merchant
-        await txn.save({ session });
-        await merchant.save({ session });
-        await user.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-        // console.log(gatewayData);
-
-        results.push({
-          success: true,
-          txnRefId: txn.txnRefId,
-          status: gatewayData,
-        });
-      } catch (err) {
-        await session.abortTransaction();
-        session.endSession();
-
-        const errorUpdate = {
-          updatedAt: new Date(),
-        };
-
-        if (connectorName === "Enpay") {
-          errorUpdate.enpayError = err.message;
-        }
-
-        if (connectorName === "Razorpay") {
-          errorUpdate.razorPayError = err.error?.description;
-        }
-
-        await Transaction.updateOne(
-          { _id: txn._id },
-          {
-            $set: errorUpdate,
-          }
-        );
-
-        results.push({
-          success: false,
-          txnRefId: txn.txnRefId,
-          error: err.message,
-        });
-
-        console.error(
-          `❌ Failed txnRefId ${txn.txnRefId}:`,
-          err.message || err.error?.description,
-          " ",
-          connectorName
-        );
-      }
-    }
-
-    return res.json({
-      success: true,
-      message: "Transactions processed successfully",
-      results,
-    });
-  } catch (error) {
-    console.error("❌ Update Transaction status error:", error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update transactions",
-      error: error.message,
-    });
-  }
-};
 // export const updateTransactions = async (req, res) => {
 //   try {
 //     // Fetch transactions in non-final states
@@ -4386,6 +3976,9 @@ export const updateTransactions = async (req, res) => {
 //       const session = await mongoose.startSession();
 //       session.startTransaction();
 
+//       let activeAccount;
+//       let connectorName;
+
 //       try {
 //         // Fetch merchant
 //         const merchant = await Merchant.findOne({
@@ -4393,50 +3986,183 @@ export const updateTransactions = async (req, res) => {
 //         }).session(session);
 //         if (!merchant) throw new Error("Merchant not found");
 
-//         const user = await User.findOne({
-//           _id: txn.merchantId,
-//         }).session(session);
-//         if (!user) throw new Error("User not found");
+//         const user = await User.findById(txn.merchantId).session(session);
+//         if (!user) throw new Error("Merchant not found");
 
 //         // Fetch active connector account
-//         const activeAccount = await MerchantConnectorAccount.findOne({
+//         activeAccount = await MerchantConnectorAccount.findOne({
 //           merchantId: txn.merchantId,
 //           connectorAccountId: txn.connectorAccountId,
 //           status: "Active",
 //           // isPrimary: true,
 //         })
+//           .populate("connectorId")
 //           .populate("connectorAccountId")
 //           .session(session);
 
-//         if (!activeAccount)
-//           throw new Error("Active connector account not found");
+//         // console.log(
+//         //   activeAccount.connectorAccountId,
+//         //   activeAccount.connectorId.name
+//         // );
+
+//         if (!activeAccount) throw new Error("Connector account not found");
+
+//         connectorName = activeAccount.connectorId?.name || "";
 
 //         const keys = extractIntegrationKeys(activeAccount);
-//         const merchantKey = keys["X-Merchant-Key"];
-//         const merchantSecret = keys["X-Merchant-Secret"];
-//         const merchantHashId = keys["merchantHashId"];
+//         // console.log(keys);
 
-//         if (!merchantKey || !merchantSecret || !merchantHashId) {
-//           throw new Error("Missing Enpay credentials");
-//         }
+//         let gatewayData;
+//         let newStatus;
 
-//         // Call Enpay API
-//         const response = await axios.post(
-//           "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
-//           { txnRefId: txn.txnRefId, merchantHashId },
-//           {
-//             headers: {
-//               "Content-Type": "application/json",
-//               "X-Merchant-Key": merchantKey,
-//               "X-Merchant-Secret": merchantSecret,
-//             },
-//             timeout: 20000,
+//         /* ===================== ENPAY ===================== */
+//         if (activeAccount.connectorId.name === "Enpay") {
+//           if (!keys) {
+//             throw new Error("No keys found for Enpay connector");
 //           }
-//         );
+//           const merchantKey = keys["X-Merchant-Key"];
+//           const merchantSecret = keys["X-Merchant-Secret"];
+//           const merchantHashId = keys["merchantHashId"];
+//           const merchantVpa = keys["merchantVpa"];
 
-//         const enpayData = response.data.details;
-//         // enpayData.status = "SUCCESS";
-//         const newStatus = enpayData.status;
+//           if (
+//             !merchantKey ||
+//             !merchantSecret ||
+//             !merchantHashId ||
+//             !merchantVpa
+//           ) {
+//             throw new Error("Missing Enpay credentials");
+//           }
+
+//           // Call Enpay API
+//           const response = await axios.post(
+//             "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+//             { txnRefId: txn.txnRefId, merchantHashId },
+//             {
+//               headers: {
+//                 "Content-Type": "application/json",
+//                 "X-Merchant-Key": merchantKey,
+//                 "X-Merchant-Secret": merchantSecret,
+//               },
+//               timeout: 20000,
+//             }
+//           );
+
+//           gatewayData = response.data.details;
+//           // gatewayData.status = "SUCCESS";
+//           newStatus = gatewayData.status || "INITIATED";
+//           txn.transactionInitiatedAt = gatewayData.transactionInitiatedAt
+//             ? new Date(gatewayData.transactionInitiatedAt)
+//             : txn.transactionInitiatedAt;
+//           txn.transactionCompletedAt = gatewayData.transactionCompletedAt
+//             ? new Date(gatewayData.transactionCompletedAt)
+//             : txn.transactionCompletedAt;
+//           txn.utr = gatewayData.utr || txn.utr;
+//           txn.customerName = gatewayData.customerName || txn.customerName;
+//           txn.customerVpa = gatewayData.customerVpa || txn.customerVpa;
+//           txn.enpayTransactionStatus = newStatus;
+//         }
+//         /* ===================== RAZORPAY ===================== */
+//         if (activeAccount.connectorId.name === "Razorpay") {
+//           if (!keys) {
+//             throw new Error("No keys found for Razorpay connector");
+//           }
+
+//           const requiredKeys = ["key_id", "key_secret"];
+
+//           const missingKeys = requiredKeys.filter((key) => !keys[key]);
+
+//           if (missingKeys.length > 0) {
+//             console.error("Razorpay keys missing:", missingKeys);
+//             throw new Error(
+//               `Missing integration keys for Razorpay connector: ${missingKeys.join(
+//                 ", "
+//               )}`
+//             );
+//           }
+
+//           const razorpay = new Razorpay({
+//             key_id: keys.key_id,
+//             key_secret: keys.key_secret,
+//           });
+
+//           if (txn.transactionType === "Link") {
+//             gatewayData = await razorpay.paymentLink.fetch(txn.txnRefId);
+
+//             if (gatewayData.status === "paid") {
+//               newStatus = "SUCCESS";
+//             } else if (
+//               gatewayData.status === "cancelled" ||
+//               gatewayData.status === "expired"
+//             ) {
+//               newStatus = "FAILED";
+//             } else {
+//               newStatus = "PENDING";
+//             }
+
+//             txn.transactionInitiatedAt = new Date(
+//               gatewayData.created_at * 1000
+//             );
+
+//             const payment = gatewayData.payments?.[0];
+//             if (payment) {
+//               txn.gatewayPaymentMethod = payment.method;
+//             }
+//             if (payment && payment.status === "captured") {
+//               txn.razorPayPaymentId = payment.payment_id;
+//               txn.transactionCompletedAt = new Date(payment.created_at * 1000);
+//               txn.utr =
+//                 payment.acquirer_data?.rrn ||
+//                 payment.acquirer_data?.upi_transaction_id ||
+//                 txn.utr;
+//             }
+
+//             if (gatewayData.order_id) {
+//               txn.gatewayOrderId = gatewayData.order_id;
+//             }
+
+//             txn.customerName = gatewayData.customer?.name || txn.customerName;
+//             txn.customerEmail =
+//               gatewayData.customer?.email || txn.customerEmail;
+//             txn.customerContact =
+//               gatewayData.customer?.contact || txn.customerContact;
+//             txn.customerVpa = gatewayData.customer?.vpa || txn.customerVpa;
+//             txn.razorPayTransactionStatus = newStatus;
+//           }
+
+//           if (txn.transactionType === "QR") {
+//             gatewayData = await razorpay.qrCode.fetchAllPayments(txn.txnRefId);
+
+//             if (!gatewayData.items.length) {
+//               newStatus = "PENDING";
+//             } else {
+//               const payment = gatewayData.items[0];
+//               newStatus =
+//                 payment.status === "captured"
+//                   ? "SUCCESS"
+//                   : payment.status === "failed"
+//                   ? "FAILED"
+//                   : "PENDING";
+
+//               txn.razorPayTransactionStatus = newStatus;
+//               txn.transactionInitiatedAt = new Date(payment.created_at * 1000);
+//               txn.razorPayPaymentId = payment.id;
+//               txn.gatewayPaymentMethod = payment.method;
+//               txn.customerEmail = payment.email || txn.customerEmail;
+//               txn.customerVpa = payment.vpa || txn.customerVpa;
+//               txn.customerContact = payment.contact || txn.customerContact;
+//               txn.transactionCompletedAt =
+//                 payment.status === "captured"
+//                   ? new Date(payment.created_at * 1000)
+//                   : null;
+//               txn.utr = payment.acquirer_data?.rrn || txn.utr;
+
+//               if (payment.order_id) {
+//                 txn.gatewayOrderId = payment.order_id;
+//               }
+//             }
+//           }
+//         }
 
 //         // Save previous status
 //         const prevStatus = txn.status;
@@ -4449,7 +4175,9 @@ export const updateTransactions = async (req, res) => {
 //         merchant.availableBalance = merchant.availableBalance || 0;
 //         merchant.totalTransactions = merchant.totalTransactions || 0;
 //         merchant.successfulTransactions = merchant.successfulTransactions || 0;
+//         // merchant.pendingTransactions = merchant.pendingTransactions || 0;
 //         merchant.failedTransactions = merchant.failedTransactions || 0;
+//         merchant.balance = merchant.balance || 0;
 
 //         // Always increment total transactions if this is a new transaction update
 //         if (!txn.totalApplied) {
@@ -4460,9 +4188,14 @@ export const updateTransactions = async (req, res) => {
 
 //         // Handle state transitions idempotently
 //         if (prevStatus !== newStatus) {
-//           // INITIATED or PENDING → SUCCESS
+//           // INITIATED → PENDING
+//           // if (prevStatus === "INITIATED" && newStatus === "PENDING") {
+//           //   merchant.pendingTransactions += 1;
+//           // }
+
+//           // INITIATED → SUCCESS
 //           if (
-//             ["INITIATED", "PENDING"].includes(prevStatus) &&
+//             prevStatus === "INITIATED" &&
 //             newStatus === "SUCCESS" &&
 //             !txn.payInApplied
 //           ) {
@@ -4483,12 +4216,68 @@ export const updateTransactions = async (req, res) => {
 //             }
 //           }
 
+//           // INITIATED → FAILED
+//           if (
+//             prevStatus === "INITIATED" &&
+//             newStatus === "FAILED" &&
+//             !txn.wasFailed
+//           ) {
+//             merchant.failedTransactions += 1;
+//             txn.wasFailed = true;
+//           }
+
+//           // PENDING → SUCCESS
+//           if (
+//             prevStatus === "PENDING" &&
+//             newStatus === "SUCCESS" &&
+//             !txn.payInApplied
+//           ) {
+//             // merchant.pendingTransactions = Math.max(
+//             //   0,
+//             //   merchant.pendingTransactions - 1
+//             // );
+//             merchant.successfulTransactions += 1;
+//             merchant.availableBalance += txn.amount;
+//             merchant.totalCredits += txn.amount;
+//             merchant.totalLastNetPayIn += txn.amount;
+//             user.balance += txn.amount;
+//             txn.payInApplied = true;
+
+//             if (txn.wasFailed) {
+//               merchant.failedTransactions = Math.max(
+//                 0,
+//                 merchant.failedTransactions - 1
+//               );
+//               txn.wasFailed = false;
+//             }
+//           }
+
+//           // PENDING → FAILED
+//           if (
+//             prevStatus === "PENDING" &&
+//             newStatus === "FAILED" &&
+//             !txn.wasFailed
+//           ) {
+//             // merchant.pendingTransactions = Math.max(
+//             //   0,
+//             //   merchant.pendingTransactions - 1
+//             // );
+//             merchant.failedTransactions += 1;
+//             txn.wasFailed = true;
+//           }
+
 //           // SUCCESS → FAILED (rollback)
 //           if (
 //             prevStatus === "SUCCESS" &&
 //             newStatus === "FAILED" &&
 //             txn.payInApplied
 //           ) {
+//             merchant.successfulTransactions = Math.max(
+//               0,
+//               merchant.successfulTransactions - 1
+//             );
+//             merchant.failedTransactions += 1;
+
 //             merchant.availableBalance = Math.max(
 //               0,
 //               merchant.availableBalance - txn.amount
@@ -4501,43 +4290,37 @@ export const updateTransactions = async (req, res) => {
 //               0,
 //               merchant.totalLastNetPayIn - txn.amount
 //             );
-//             merchant.successfulTransactions = Math.max(
-//               0,
-//               merchant.successfulTransactions - 1
-//             );
-//             merchant.failedTransactions += 1;
 //             user.balance = Math.max(0, user.balance - txn.amount);
-//             txn.payInApplied = false;
-//             txn.wasFailed = true; // track that this transaction became failed
-//           }
 
-//           // PENDING → FAILED
-//           if (prevStatus === "PENDING" && newStatus === "FAILED") {
-//             merchant.failedTransactions += 1;
+//             txn.payInApplied = false;
 //             txn.wasFailed = true;
 //           }
 
-//           // SUCCESS → PENDING → SUCCESS (idempotent)
+//           // SUCCESS → PENDING (rare but safe)
 //           if (
 //             prevStatus === "SUCCESS" &&
 //             newStatus === "PENDING" &&
 //             txn.payInApplied
 //           ) {
+//             merchant.successfulTransactions = Math.max(
+//               0,
+//               merchant.successfulTransactions - 1
+//             );
+//             // merchant.pendingTransactions += 1;
+//             merchant.availableBalance = Math.max(
+//               0,
+//               merchant.availableBalance - txn.amount
+//             );
+//             merchant.totalCredits = Math.max(
+//               0,
+//               merchant.totalCredits - txn.amount
+//             );
+//             merchant.totalLastNetPayIn = Math.max(
+//               0,
+//               merchant.totalLastNetPayIn - txn.amount
+//             );
+//             user.balance = Math.max(0, user.balance - txn.amount);
 //             txn.payInApplied = false;
-//           }
-
-//           if (
-//             prevStatus === "PENDING" &&
-//             newStatus === "SUCCESS" &&
-//             !txn.payInApplied
-//           ) {
-//             merchant.availableBalance += txn.amount;
-//             merchant.totalCredits += txn.amount;
-//             merchant.totalLastNetPayIn += txn.amount;
-//             merchant.successfulTransactions += 1;
-//             user.balance += txn.amount;
-//             txn.payInApplied = true;
-
 //             if (txn.wasFailed) {
 //               merchant.failedTransactions = Math.max(
 //                 0,
@@ -4550,15 +4333,6 @@ export const updateTransactions = async (req, res) => {
 
 //         // Update transaction fields
 //         txn.status = newStatus;
-//         txn.transactionInitiatedAt = enpayData.transactionInitiatedAt
-//           ? new Date(enpayData.transactionInitiatedAt)
-//           : txn.transactionInitiatedAt;
-//         txn.transactionCompletedAt = enpayData.transactionCompletedAt
-//           ? new Date(enpayData.transactionCompletedAt)
-//           : txn.transactionCompletedAt;
-//         txn.utr = enpayData.utr || txn.utr;
-//         txn.customerName = enpayData.customerName || txn.customerName;
-//         txn.customerVpa = enpayData.customerVpa || txn.customerVpa;
 //         txn.updatedAt = new Date();
 
 //         // Save both transaction and merchant
@@ -4569,22 +4343,48 @@ export const updateTransactions = async (req, res) => {
 //         await session.commitTransaction();
 //         session.endSession();
 
+//         // console.log(gatewayData);
+
 //         results.push({
-//           txnRefId: txn.txnRefId,
 //           success: true,
-//           status: enpayData,
+//           txnRefId: txn.txnRefId,
+//           status: gatewayData,
 //         });
 //       } catch (err) {
 //         await session.abortTransaction();
 //         session.endSession();
 
+//         const errorUpdate = {
+//           updatedAt: new Date(),
+//         };
+
+//         if (connectorName === "Enpay") {
+//           errorUpdate.enpayError = err.message;
+//         }
+
+//         if (connectorName === "Razorpay") {
+//           errorUpdate.razorPayError = err.error?.description;
+//         }
+
+//         await Transaction.updateOne(
+//           { _id: txn._id },
+//           {
+//             $set: errorUpdate,
+//           }
+//         );
+
 //         results.push({
-//           txnRefId: txn.txnRefId,
 //           success: false,
+//           txnRefId: txn.txnRefId,
 //           error: err.message,
 //         });
 
-//         console.error(`❌ Failed txnRefId ${txn.txnRefId}:`, err.message);
+//         console.error(
+//           `❌ Failed txnRefId ${txn.txnRefId}:`,
+//           err.message || err.error?.description,
+//           " ",
+//           connectorName
+//         );
 //       }
 //     }
 
@@ -4602,6 +4402,851 @@ export const updateTransactions = async (req, res) => {
 //     });
 //   }
 // };
+
+const getPayinActiveConnectorAccount = async (
+  merchantId,
+  connectorAccountId,
+  session
+) => {
+  const account = await MerchantConnectorAccount.findOne({
+    merchantId,
+    connectorAccountId,
+    status: "Active",
+  })
+    .populate("connectorId")
+    .populate("connectorAccountId")
+    .session(session);
+
+  // console.log(account);
+
+  if (!account) throw new Error("Connector account not found");
+
+  return {
+    account,
+    connector: account.connectorId.name.toLowerCase(),
+    keys: extractCheckIntegrationKeys(account),
+  };
+};
+
+const getPayoutActiveConnectorAccount = async (
+  merchantId,
+  connectorAccountId,
+  session
+) => {
+  const account = await MerchantPayoutConnectorAccount.findOne({
+    merchantId,
+    // connectorAccountId,
+    status: "Active",
+  })
+    .populate("connectorId")
+    .populate("connectorAccountId")
+    .session(session);
+
+  // console.log(account);
+
+  if (!account) throw new Error("Connector account not found");
+
+  return {
+    account,
+    connector: account.connectorId.name.toLowerCase(),
+    keys: extractCheckIntegrationKeys(account),
+  };
+};
+
+export const updateTransactions = async (req, res) => {
+  try {
+    // Fetch transactions in non-final states
+    const results = [];
+
+    console.log("Updated Transactions Started ");
+    const payinTransactions = await Transaction.find({
+      status: { $in: ["INITIATED", "PENDING"] },
+    }).limit(50); // limit for cron safety
+
+    if (!payinTransactions.length) {
+      // return res.status(404).json({
+      //   success: true,
+      //   message: "No initiated or pending payin transactions found",
+      // });
+      results.push({
+        success: false,
+        error: "No initiated or pending payin transactions found",
+      });
+    } else {
+      for (const txn of payinTransactions) {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        let activeAccount;
+        let connectorName;
+
+        try {
+          // Fetch merchant
+          const merchant = await Merchant.findOne({
+            userId: txn.merchantId,
+          }).session(session);
+          if (!merchant) throw new Error("Merchant not found");
+
+          const user = await User.findById(txn.merchantId).session(session);
+          if (!user) throw new Error("Merchant not found");
+
+          const { account, connector, keys } =
+            await getPayinActiveConnectorAccount(
+              txn.merchantId,
+              txn.connectorAccountId,
+              session
+            );
+
+          connectorName = connector;
+          activeAccount = account;
+          // console.log(connectorName, keys);
+
+          let gatewayData;
+          let newStatus;
+          const previousBalance = merchant.availableBalance;
+
+          /* ===================== ENPAY ===================== */
+          if (connectorName === "enpay") {
+            if (!keys) {
+              throw new Error("No keys found for Enpay connector");
+            }
+            const merchantKey = keys["X-Merchant-Key"];
+            const merchantSecret = keys["X-Merchant-Secret"];
+            const merchantHashId = keys["merchantHashId"];
+            const merchantVpa = keys["merchantVpa"];
+
+            if (
+              !merchantKey ||
+              !merchantSecret ||
+              !merchantHashId ||
+              !merchantVpa
+            ) {
+              throw new Error("Missing Enpay credentials");
+            }
+
+            // Call Enpay API
+            const response = await axios.post(
+              "https://api.enpay.in/enpay-product-service/api/v1/merchant-gateway/transactionStatus",
+              { txnRefId: txn.txnRefId, merchantHashId },
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Merchant-Key": merchantKey,
+                  "X-Merchant-Secret": merchantSecret,
+                },
+                timeout: 20000,
+              }
+            );
+
+            gatewayData = response.data.details;
+            // gatewayData.status = "SUCCESS";
+            newStatus = gatewayData.status || "INITIATED";
+            txn.transactionInitiatedAt = gatewayData.transactionInitiatedAt
+              ? new Date(gatewayData.transactionInitiatedAt)
+              : txn.transactionInitiatedAt;
+            txn.transactionCompletedAt = gatewayData.transactionCompletedAt
+              ? new Date(gatewayData.transactionCompletedAt)
+              : txn.transactionCompletedAt;
+            txn.utr = gatewayData.utr || txn.utr;
+            txn.customerName = gatewayData.customerName || txn.customerName;
+            txn.customerVpa = gatewayData.customerVpa || txn.customerVpa;
+            txn.enpayTransactionStatus = newStatus;
+          }
+          /* ===================== RAZORPAY ===================== */
+          if (connectorName === "razorpay") {
+            if (!keys) {
+              throw new Error("No keys found for Razorpay connector");
+            }
+
+            const requiredKeys = ["key_id", "key_secret"];
+
+            const missingKeys = requiredKeys.filter((key) => !keys[key]);
+
+            if (missingKeys.length > 0) {
+              console.error("Razorpay keys missing:", missingKeys);
+              throw new Error(
+                `Missing integration keys for Razorpay connector: ${missingKeys.join(
+                  ", "
+                )}`
+              );
+            }
+
+            const razorpay = new Razorpay({
+              key_id: keys.key_id,
+              key_secret: keys.key_secret,
+            });
+
+            if (txn.transactionType === "Link") {
+              gatewayData = await razorpay.paymentLink.fetch(txn.txnRefId);
+
+              if (gatewayData.status === "paid") {
+                newStatus = "SUCCESS";
+              } else if (
+                gatewayData.status === "cancelled" ||
+                gatewayData.status === "expired"
+              ) {
+                newStatus = "FAILED";
+              } else {
+                newStatus = "PENDING";
+              }
+
+              txn.transactionInitiatedAt = new Date(
+                gatewayData.created_at * 1000
+              );
+
+              const payment = gatewayData.payments?.[0];
+              if (payment) {
+                txn.gatewayPaymentMethod = payment.method;
+              }
+              if (payment && payment.status === "captured") {
+                txn.razorPayPaymentId = payment.payment_id;
+                txn.transactionCompletedAt = new Date(
+                  payment.created_at * 1000
+                );
+                txn.utr =
+                  payment.acquirer_data?.rrn ||
+                  payment.acquirer_data?.upi_transaction_id ||
+                  txn.utr;
+              }
+
+              if (gatewayData.order_id) {
+                txn.gatewayOrderId = gatewayData.order_id;
+              }
+
+              txn.customerName = gatewayData.customer?.name || txn.customerName;
+              txn.customerEmail =
+                gatewayData.customer?.email || txn.customerEmail;
+              txn.customerContact =
+                gatewayData.customer?.contact || txn.customerContact;
+              txn.customerVpa = gatewayData.customer?.vpa || txn.customerVpa;
+              txn.razorPayTransactionStatus = newStatus;
+            }
+
+            if (txn.transactionType === "QR") {
+              gatewayData = await razorpay.qrCode.fetchAllPayments(
+                txn.txnRefId
+              );
+
+              if (!gatewayData.items.length) {
+                newStatus = "PENDING";
+              } else {
+                const payment = gatewayData.items[0];
+                newStatus =
+                  payment.status === "captured"
+                    ? "SUCCESS"
+                    : payment.status === "failed"
+                    ? "FAILED"
+                    : "PENDING";
+
+                txn.razorPayTransactionStatus = newStatus;
+                txn.transactionInitiatedAt = new Date(
+                  payment.created_at * 1000
+                );
+                txn.razorPayPaymentId = payment.id;
+                txn.gatewayPaymentMethod = payment.method;
+                txn.customerEmail = payment.email || txn.customerEmail;
+                txn.customerVpa = payment.vpa || txn.customerVpa;
+                txn.customerContact = payment.contact || txn.customerContact;
+                txn.transactionCompletedAt =
+                  payment.status === "captured"
+                    ? new Date(payment.created_at * 1000)
+                    : null;
+                txn.utr = payment.acquirer_data?.rrn || txn.utr;
+
+                if (payment.order_id) {
+                  txn.gatewayOrderId = payment.order_id;
+                }
+              }
+            }
+          }
+
+          // Save previous status
+          const prevStatus = txn.status;
+          txn.previousStatus = prevStatus;
+
+          // Initialize counters if undefined
+          merchant.payinTransactions = merchant.payinTransactions || 0;
+          merchant.totalLastNetPayIn = merchant.totalLastNetPayIn || 0;
+          merchant.totalCredits = merchant.totalCredits || 0;
+          merchant.availableBalance = merchant.availableBalance || 0;
+          merchant.totalTransactions = merchant.totalTransactions || 0;
+          merchant.successfulTransactions =
+            merchant.successfulTransactions || 0;
+          // merchant.pendingTransactions = merchant.pendingTransactions || 0;
+          merchant.failedTransactions = merchant.failedTransactions || 0;
+          merchant.balance = merchant.balance || 0;
+
+          // Always increment total transactions if this is a new transaction update
+          if (!txn.totalApplied) {
+            merchant.totalTransactions += 1;
+            merchant.payinTransactions += 1;
+            txn.totalApplied = true;
+          }
+
+          // Handle state transitions idempotently
+          if (prevStatus !== newStatus) {
+            // INITIATED → PENDING
+            // if (prevStatus === "INITIATED" && newStatus === "PENDING") {
+            //   merchant.pendingTransactions += 1;
+            // }
+
+            // INITIATED → SUCCESS
+            if (
+              prevStatus === "INITIATED" &&
+              newStatus === "SUCCESS" &&
+              !txn.payInApplied
+            ) {
+              merchant.availableBalance += txn.amount;
+              merchant.totalCredits += txn.amount;
+              merchant.totalLastNetPayIn += txn.amount;
+              merchant.successfulTransactions += 1;
+              user.balance += txn.amount;
+              txn.payInApplied = true;
+
+              // Reduce failed count if previously marked failed
+              if (txn.wasFailed) {
+                merchant.failedTransactions = Math.max(
+                  0,
+                  merchant.failedTransactions - 1
+                );
+                txn.wasFailed = false;
+              }
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    credit: txn.amount,
+                    debit: 0,
+                    balance: previousBalance + txn.amount,
+                    status: "SUCCESS",
+                    description: "Payment received",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            }
+
+            // INITIATED → FAILED
+            if (
+              prevStatus === "INITIATED" &&
+              newStatus === "FAILED" &&
+              !txn.wasFailed
+            ) {
+              merchant.failedTransactions += 1;
+              txn.wasFailed = true;
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    status: "FAILED",
+                    description: "Payment failed",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            }
+
+            // PENDING → SUCCESS
+            if (
+              prevStatus === "PENDING" &&
+              newStatus === "SUCCESS" &&
+              !txn.payInApplied
+            ) {
+              // merchant.pendingTransactions = Math.max(
+              //   0,
+              //   merchant.pendingTransactions - 1
+              // );
+              merchant.successfulTransactions += 1;
+              merchant.availableBalance += txn.amount;
+              merchant.totalCredits += txn.amount;
+              merchant.totalLastNetPayIn += txn.amount;
+              user.balance += txn.amount;
+              txn.payInApplied = true;
+
+              if (txn.wasFailed) {
+                merchant.failedTransactions = Math.max(
+                  0,
+                  merchant.failedTransactions - 1
+                );
+                txn.wasFailed = false;
+              }
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    credit: txn.amount,
+                    debit: 0,
+                    balance: previousBalance + txn.amount,
+                    status: "SUCCESS",
+                    description: "Payment received",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            }
+
+            // PENDING → FAILED
+            if (
+              prevStatus === "PENDING" &&
+              newStatus === "FAILED" &&
+              !txn.wasFailed
+            ) {
+              // merchant.pendingTransactions = Math.max(
+              //   0,
+              //   merchant.pendingTransactions - 1
+              // );
+              merchant.failedTransactions += 1;
+              txn.wasFailed = true;
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    status: "FAILED",
+                    description: "Payment failed",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            }
+
+            // SUCCESS → FAILED (rollback)
+            if (
+              prevStatus === "SUCCESS" &&
+              newStatus === "FAILED" &&
+              txn.payInApplied
+            ) {
+              merchant.successfulTransactions = Math.max(
+                0,
+                merchant.successfulTransactions - 1
+              );
+              merchant.failedTransactions += 1;
+
+              merchant.availableBalance = Math.max(
+                0,
+                merchant.availableBalance - txn.amount
+              );
+              merchant.totalCredits = Math.max(
+                0,
+                merchant.totalCredits - txn.amount
+              );
+              merchant.totalLastNetPayIn = Math.max(
+                0,
+                merchant.totalLastNetPayIn - txn.amount
+              );
+              user.balance = Math.max(0, user.balance - txn.amount);
+
+              txn.payInApplied = false;
+              txn.wasFailed = true;
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    credit: 0,
+                    debit: txn.amount,
+                    balance: previousBalance - txn.amount,
+                    status: "REVERSED",
+                    description: "Payment reversed",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            }
+
+            // SUCCESS → PENDING (rare but safe)
+            if (
+              prevStatus === "SUCCESS" &&
+              newStatus === "PENDING" &&
+              txn.payInApplied
+            ) {
+              merchant.successfulTransactions = Math.max(
+                0,
+                merchant.successfulTransactions - 1
+              );
+              // merchant.pendingTransactions += 1;
+              merchant.availableBalance = Math.max(
+                0,
+                merchant.availableBalance - txn.amount
+              );
+              merchant.totalCredits = Math.max(
+                0,
+                merchant.totalCredits - txn.amount
+              );
+              merchant.totalLastNetPayIn = Math.max(
+                0,
+                merchant.totalLastNetPayIn - txn.amount
+              );
+              user.balance = Math.max(0, user.balance - txn.amount);
+              txn.payInApplied = false;
+              if (txn.wasFailed) {
+                merchant.failedTransactions = Math.max(
+                  0,
+                  merchant.failedTransactions - 1
+                );
+                txn.wasFailed = false;
+              }
+            }
+          }
+
+          // Update transaction fields
+          txn.status = newStatus;
+          txn.updatedAt = new Date();
+
+          // Save both transaction and merchant
+          await txn.save({ session });
+          await merchant.save({ session });
+          await user.save({ session });
+
+          await session.commitTransaction();
+          session.endSession();
+
+          // console.log(gatewayData);
+
+          results.push({
+            success: true,
+            txnRefId: txn.txnRefId,
+            status: gatewayData,
+          });
+        } catch (err) {
+          await session.abortTransaction();
+          session.endSession();
+          console.error(
+            `❌ Failed txnRefId ${txn.txnRefId}:`,
+            connectorName,
+            connectorName === "enpay"
+              ? err.response.data.message || err.message
+              : connectorName === "razorpay"
+              ? err.error?.description || err.message
+              : err.message,
+            " "
+          );
+
+          const errorUpdate = {
+            updatedAt: new Date(),
+          };
+
+          if (connectorName === "enpay") {
+            errorUpdate.enpayError = err.response.data.message || err.message;
+          }
+
+          if (connectorName === "razorpay") {
+            errorUpdate.razorPayError = err.error?.description || err.message;
+          }
+
+          await Transaction.updateOne(
+            { _id: txn._id },
+            {
+              $set: errorUpdate,
+            }
+          );
+
+          results.push({
+            success: false,
+            txnRefId: txn.txnRefId,
+            error:
+              connectorName === "enpay"
+                ? err.response.data.message || err.message
+                : connectorName === "razorpay"
+                ? err.error?.description || err.message
+                : err.message,
+          });
+        }
+      }
+    }
+
+    const payoutTransactions = await PayoutTransaction.find({
+      status: { $nin: ["SUCCESS", "FAILED", "REVERSED"] },
+      // status: { $in: ["Processed"] },
+    }).limit(50); // limit for cron safety
+
+    if (!payoutTransactions.length) {
+      // return res.status(404).json({
+      //   success: true,
+      //   message: "No initiated or pending payout transactions found",
+      // });
+      results.push({
+        success: false,
+        error: "No initiated or pending payout transactions found",
+      });
+    } else {
+      for (const txn of payoutTransactions) {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        let activeAccount;
+        let connectorName;
+
+        try {
+          // Fetch merchant
+          const merchant = await Merchant.findOne({
+            userId: txn.merchantId,
+          });
+
+          const user = await User.findById(txn.merchantId);
+
+          if (!merchant || !user) throw new Error("Merchant not found");
+
+          const { account, connector, keys } =
+            await getPayoutActiveConnectorAccount(
+              txn.merchantId,
+              txn.connectorAccountId,
+              session
+            );
+
+          activeAccount = account;
+          connectorName = connector;
+
+          activeAccount.extractedKeys = keys;
+          console.log(connector, keys);
+
+          let decStatusData;
+
+          /* ===================== ENPAY ===================== */
+          if (connectorName === "jodetx") {
+            if (!keys) {
+              throw new Error("No keys found for Jodetx connector");
+            }
+            const encryptedStatusResponse = await encryptData(
+              {
+                requestId: txn.requestId,
+                txnId: txn.transactionId,
+              },
+              activeAccount
+            );
+            console.log(encryptedStatusResponse.data, "Enc res");
+            if (
+              !encryptedStatusResponse.success ||
+              !encryptedStatusResponse.data?.data?.encData
+            ) {
+              throw new Error("Encryption failed for status check");
+            }
+
+            const encryptedStatusPayload = encryptedStatusResponse.data;
+
+            const encStatusData = encryptedStatusPayload.data.encData;
+
+            const checkStatusRes = await payoutTransactionStatus(
+              encStatusData,
+              activeAccount
+            );
+            console.log(checkStatusRes.data, "Payout res");
+            if (
+              !checkStatusRes.success ||
+              checkStatusRes.data.responseCode !== "0"
+            ) {
+              throw new Error(
+                checkStatusRes.data.description || "Check status failed"
+              );
+            }
+
+            const statusData = checkStatusRes.data;
+
+            const decryptedStatusResponse = await decryptData(
+              statusData.data,
+              activeAccount
+            );
+            console.log(decryptedStatusResponse.data, "Dec res");
+            if (
+              !decryptedStatusResponse.success ||
+              decryptedStatusResponse.data.responseCode !== "0"
+            ) {
+              throw new Error(
+                decryptedStatusResponse.data.description || "Decryption failed"
+              );
+            }
+
+            decStatusData = decryptedStatusResponse.data.data;
+            console.log(decStatusData);
+            const txnAmt = txn.amount;
+
+            if (decStatusData.txnStatus === "SUCCESS") {
+              await Promise.all([
+                PayoutTransaction.updateOne(
+                  { _id: txn._id },
+                  {
+                    transactionId: decStatusData.txnId,
+                    payoutEnquiryId: decStatusData.enquiryId,
+                    utr: decStatusData.utrNo,
+                    status: decStatusData.txnStatus,
+                    completedAt: decStatusData.txnDate,
+                  },
+                  { session }
+                ),
+                Merchant.updateOne(
+                  { userId: txn.merchantId },
+                  {
+                    $inc: {
+                      blockedBalance: -txnAmt,
+                      totalDebits: txnAmt,
+                      totalLastNetPayOut: txnAmt,
+                      successfulTransactions: 1,
+                    },
+                  },
+                  { session }
+                ),
+                User.updateOne(
+                  { _id: txn.merchantId },
+                  { $inc: { balance: -txnAmt } },
+                  { session }
+                ),
+              ]);
+
+              const updatedMerchant = await Merchant.findOne(
+                { userId: txn.merchantId },
+                { availableBalance: 1 },
+                { session }
+              );
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    debit: txnAmt,
+                    credit: 0,
+                    balance: updatedMerchant.availableBalance,
+                    status: "SUCCESS",
+                    description: "Payout completed successfully",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            } else if (
+              ["FAILED", "REVERSED"].includes(decStatusData.txnStatus)
+            ) {
+              await Promise.all([
+                PayoutTransaction.updateOne(
+                  { _id: txn._id },
+                  {
+                    transactionId: decStatusData.txnId,
+                    payoutEnquiryId: decStatusData.enquiryId,
+                    utr: decStatusData.utrNo,
+                    status: decStatusData.txnStatus,
+                    completedAt: decStatusData.txnDate,
+                  },
+                  { session }
+                ),
+                Merchant.updateOne(
+                  { userId: txn.merchantId },
+                  {
+                    $inc: {
+                      availableBalance: txnAmt,
+                      blockedBalance: -txnAmt,
+                      failedTransactions: 1,
+                    },
+                  },
+                  { session }
+                ),
+              ]);
+
+              const updatedMerchant = await Merchant.findOne(
+                { userId: txn.merchantId },
+                { availableBalance: 1 },
+                { session }
+              );
+
+              await TransactionsLog.updateOne(
+                { referenceId: txn._id },
+                {
+                  $set: {
+                    debit: 0,
+                    credit: txnAmt,
+                    balance: updatedMerchant.availableBalance,
+                    status: decStatusData.txnStatus,
+                    description: "Payout failed - amount released",
+                    source: "CRON",
+                    txnCompletedDate: new Date(),
+                  },
+                },
+                { session }
+              );
+            } else {
+              await Promise.all([
+                PayoutTransaction.updateOne(
+                  { _id: txn._id },
+                  {
+                    transactionId: decStatusData.txnId,
+                    payoutEnquiryId: decStatusData.enquiryId,
+                    utr: decStatusData.utrNo,
+                    status: decStatusData.txnStatus,
+                    completedAt: decStatusData.txnDate,
+                  },
+                  { session }
+                ),
+              ]);
+            }
+          }
+
+          await session.commitTransaction();
+          session.endSession();
+
+          results.push({
+            success: true,
+            requestId: txn.payoutId,
+            status: decStatusData,
+          });
+        } catch (err) {
+          await session.abortTransaction();
+          session.endSession();
+
+          console.error(
+            `❌ Failed requestId ${txn.requestId}:`,
+            err.error?.description || err.message,
+            " ",
+            connectorName
+          );
+
+          const errorUpdate = {
+            updatedAt: new Date(),
+          };
+
+          errorUpdate.error = err.message || err;
+
+          await PayoutTransaction.updateOne(
+            { _id: txn._id },
+            {
+              $set: errorUpdate,
+            }
+          );
+
+          results.push({
+            success: false,
+            requestId: txn.payoutId,
+            error: err.error?.description || err.message,
+          });
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Transactions processed successfully",
+      results,
+    });
+  } catch (error) {
+    console.error("❌ Update Transaction status error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update transactions",
+      error: error.message,
+    });
+  }
+};
 
 export const paymentWebhook = async (req, res) => {
   const { gateway } = req.params;

@@ -174,7 +174,7 @@ const payoutTransactionSchema = new mongoose.Schema(
       default: Date.now,
     },
     processedAt: Date,
-    completedAt: Date,
+    completedAt: String,
   },
   {
     timestamps: true,
