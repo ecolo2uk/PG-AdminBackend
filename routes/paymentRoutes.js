@@ -28,12 +28,16 @@ import {
   updateTransactions,
   paymentWebhook,
   fetchAndUpdateTransactionStatus,
+  // generateStaticQRHash,
+  // generateDynamicQRHash,
   // generatePaymentLinkTransaction,
 } from "../controllers/paymentLinkController.js";
 
 const router = express.Router();
 
 router.post("/generate-link", generatePaymentLink);
+// router.post("/generate-static-hash", generateStaticQRHash);
+// router.post("/generate-dynamic-hash", generateDynamicQRHash);
 // router.post("/generate-payment-link", generatePaymentLinkTransaction);
 
 router.get("/merchants", getMerchants);

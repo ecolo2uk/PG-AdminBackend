@@ -1256,13 +1256,15 @@ export const getPayoutTransactions = async (req, res) => {
       utr,
       accountNumber,
       transactionId,
+      payoutId,
+      requestId,
       startDate,
       endDate,
       // page = 1,
       // limit = 10
     } = req.query;
 
-    // console.log("📥 Fetching payout transactions with query:", req.query);
+    console.log("📥 Fetching payout transactions with query:", req.query);
 
     let query = {};
 
@@ -1271,10 +1273,18 @@ export const getPayoutTransactions = async (req, res) => {
       query.merchantId = merchant;
     }
     if (status && status !== "undefined") query.status = status;
-    if (connector && connector !== "undefined") query.connector = connector;
+    // if (connector && connector !== "undefined") query.connector = connector;
+    if (connector && connector !== "undefined") {
+      query.connector = { $regex: `^${connector}$`, $options: "i" };
+    }
+
     if (utr && utr !== "undefined") query.utr = { $regex: utr, $options: "i" };
     if (accountNumber && accountNumber !== "undefined")
       query.accountNumber = { $regex: accountNumber, $options: "i" };
+    if (payoutId && payoutId !== "undefined")
+      query.payoutId = { $regex: payoutId, $options: "i" };
+    if (requestId && requestId !== "undefined")
+      query.requestId = { $regex: requestId, $options: "i" };
     if (transactionId && transactionId !== "undefined")
       query.transactionId = { $regex: transactionId, $options: "i" };
 
@@ -1286,6 +1296,8 @@ export const getPayoutTransactions = async (req, res) => {
     }
 
     // const skip = (page - 1) * limit;
+
+    console.log(query);
 
     // Fetch transactions with only the fields needed for your table
     const payouts = await PayoutTransaction.find(query)
